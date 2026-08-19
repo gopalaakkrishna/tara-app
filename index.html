@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0A0A0A" />
+    <meta name="theme-color" content="#08080B" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -12,37 +12,44 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      // V13.4.29 design pass — STRICT black/white/gray + red/green/gold.
-      // Complete rewrite of the palette override on explicit direction: the
-      // app should read as a black-and-white theme with exactly three signal
-      // colors — green (win/positive), red (loss/negative), gold (signature
-      // accent/brand). Every OTHER Tailwind color family actually used in the
-      // app is collapsed into one of those three (or grayscale) here, so no
-      // stray hue can appear anywhere without a corresponding code change.
-      // This replaces the V13.4.18/28 muted-multi-hue approach entirely —
-      // that iteration tried to preserve categorical color variety (sage,
-      // oxblood, indigo, etc.); this one deliberately removes it in favor of
-      // stark simplicity, per direct feedback that the multi-hue version
-      // read as inconsistent rather than considered.
+      // ══════════════════════════════════════════════════════════════════════
+      // V13.4.189 — "OBSIDIAN" DESIGN SYSTEM.
       //
-      // Mapping:
-      //   green  <- emerald, teal        (win / UP / positive)
-      //   red    <- rose, red, pink      (loss / DOWN / negative)
-      //   gold   <- amber, orange, yellow (signature accent / warm / caution)
-      //   gray   <- indigo, sky, blue, purple, violet, cyan (everything else)
-      // zinc/gray/neutral/stone are already grayscale and untouched.
+      // Bold redesign, requested as one system-wide pass rather than
+      // screen-by-screen. What deliberately did NOT change, and why:
+      //
+      //   * Still a disciplined palette. V13.4.29 removed categorical
+      //     multi-hue (sage/oxblood/indigo/...) on direct feedback that it
+      //     "read as inconsistent rather than considered". Going bold here
+      //     therefore means DEPTH, TYPE, ACCENT and MOTION -- not putting the
+      //     rejected hues back. Every non-signal family still collapses to
+      //     grayscale below.
+      //   * Green and red keep their Kalshi-sampled values (#28CC95/#FF4D6A).
+      //     Those are functional signals matched to the exchange's own UI, not
+      //     decoration, so they are the one thing a restyle must not touch.
+      //
+      // What DID change:
+      //   * Base moved off flat neutral black to a layered near-black with a
+      //     faint cool undertone (#08080B -> #1C1C24), so large dark areas read
+      //     as depth instead of a void, and elevation becomes legible.
+      //   * The two competing golds (#C9A961 and #D4A24C) are unified into one
+      //     brighter signature accent (#D9B368) with a highlight tone.
+      //   * Display typography: Space Grotesk is mapped onto `serif`, which
+      //     restyles all 43 existing font-serif headings with zero component
+      //     edits -- the single highest-leverage line in this file.
+      //   * A real motion + elevation language (tokens below), replacing
+      //     ad-hoc per-component transitions.
+      // ══════════════════════════════════════════════════════════════════════
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              // V13.4.30: red/green re-sampled directly from Kalshi's own UI
-              // (pixel-sampled: red #FF4D6A, green #28CC95) per direct request
-              // to match Kalshi's reference exactly rather than an invented tone.
+              // Signals — unchanged, exchange-matched.
               emerald: {
                 200: '#A8EDD4', 300: '#6EE0BC', 400: '#28CC95',
                 500: '#20A87A', 600: '#188060', 700: '#12604A', 900: '#093326',
@@ -54,30 +61,170 @@
               },
               red: { 400: '#FF4D6A' },
               pink: { 400: '#FF4D6A' },
-              amber: { 300: '#E0B978', 400: '#D4A24C', 500: '#BD8A38' },
-              orange: { 400: '#D4A24C' },
-              yellow: { 400: '#D4A24C' },
-              indigo: { 100: '#E5E5E5', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
-              sky: { 200: '#D4D4D4', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
-              blue: { 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
-              purple: { 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
-              violet: { 200: '#D4D4D4', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
-              cyan: { 400: '#8C8C8C' },
+              // Signature accent — unified + brightened.
+              amber: { 300: '#F0D9A0', 400: '#D9B368', 500: '#B8924D' },
+              orange: { 400: '#D9B368' },
+              yellow: { 400: '#D9B368' },
+              // Everything else collapses to the cool grayscale ramp.
+              indigo: { 100: '#E8E8ED', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
+              sky: { 200: '#D6D6DE', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
+              blue: { 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
+              purple: { 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
+              violet: { 200: '#D6D6DE', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
+              cyan: { 400: '#8E8E9A' },
             },
             fontFamily: {
               sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
               mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+              // The leverage line: 43 existing font-serif headings become the
+              // display face without touching a single component.
+              serif: ['"Space Grotesk"', '"Instrument Sans"', 'ui-sans-serif', 'sans-serif'],
             },
           },
         },
       };
     </script>
     <style>
-      /* V13.4.19: base font for any text that isn't explicitly tagged with a
-         Tailwind font-sans/font-mono class — same webfont, applies globally
-         with zero component changes. */
+      /* ── Design tokens ─────────────────────────────────────────────────── */
+      :root {
+        /* Surfaces, dark -> light. Cool undertone gives depth to big blacks. */
+        --bg-0: #08080B;   /* page */
+        --bg-1: #101014;   /* card */
+        --bg-2: #16161C;   /* raised card / hover */
+        --bg-3: #1C1C24;   /* overlay / popover */
+
+        /* Hairlines */
+        --line-1: #1C1C22;
+        --line-2: #2A2A34;
+        --line-3: #3A3A46;
+
+        /* Ink */
+        --ink-1: #EDEDED;
+        --ink-2: rgba(237, 237, 237, 0.66);
+        --ink-3: rgba(237, 237, 237, 0.42);
+        --ink-4: rgba(237, 237, 237, 0.26);
+
+        /* Signals + signature */
+        --up: #28CC95;
+        --down: #FF4D6A;
+        --accent: #D9B368;
+        --accent-hi: #F0D9A0;
+        --accent-glow: rgba(217, 179, 104, 0.16);
+        --accent-border: rgba(217, 179, 104, 0.38);
+
+        /* Elevation */
+        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.5);
+        --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.5);
+        --glow-accent: 0 0 24px rgba(217, 179, 104, 0.14);
+
+        /* Motion — one language, used everywhere */
+        --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+        --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+        --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+        --dur-1: 120ms;
+        --dur-2: 200ms;
+        --dur-3: 340ms;
+      }
+
       html, body {
         font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg-0);
+        color: var(--ink-1);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* Ambient depth: a vignette + a faint accent bloom at the top, so the
+         page reads as a lit surface rather than flat #000. Fixed and
+         pointer-events:none so it can never intercept a trade click. */
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background:
+          radial-gradient(1200px 600px at 50% -10%, rgba(217, 179, 104, 0.055), transparent 70%),
+          radial-gradient(900px 700px at 100% 100%, rgba(120, 120, 160, 0.035), transparent 70%);
+      }
+
+      /* Film grain — kills banding on large dark gradients. Very low opacity. */
+      body::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 9999;
+        opacity: 0.035;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      }
+
+      /* Display face: tighter tracking so headings read as designed, not default. */
+      .font-serif {
+        letter-spacing: -0.02em;
+        font-weight: 600;
+      }
+
+      /* Numerics never reflow mid-tick. */
+      .tabular-nums, [class*='tabular'] {
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1;
+      }
+
+      /* One interaction language instead of per-component transitions. */
+      button, a, [role='button'] {
+        transition:
+          background-color var(--dur-2) var(--ease-out),
+          border-color var(--dur-2) var(--ease-out),
+          color var(--dur-2) var(--ease-out),
+          box-shadow var(--dur-2) var(--ease-out),
+          transform var(--dur-1) var(--ease-out),
+          opacity var(--dur-2) var(--ease-out);
+      }
+      button:not(:disabled):active, [role='button']:not(:disabled):active {
+        transform: scale(0.975);
+      }
+      button:focus-visible, a:focus-visible, [role='button']:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 3.5px var(--accent-border);
+      }
+
+      /* Scrollbars, so overflow areas match the rest of the surface. */
+      * { scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
+      *::-webkit-scrollbar { width: 9px; height: 9px; }
+      *::-webkit-scrollbar-track { background: transparent; }
+      *::-webkit-scrollbar-thumb {
+        background: var(--line-2);
+        border-radius: 999px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+      }
+      *::-webkit-scrollbar-thumb:hover { background: var(--line-3); background-clip: content-box; }
+
+      ::selection { background: rgba(217, 179, 104, 0.26); color: #fff; }
+
+      /* Entrance for modals/overlays. */
+      @keyframes t2-fade-up {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .fixed.inset-0 > * { animation: t2-fade-up var(--dur-3) var(--ease-out) both; }
+
+      /* A locked call should feel alive without being noisy. */
+      @keyframes t2-pulse-accent {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(217, 179, 104, 0.28); }
+        50%      { box-shadow: 0 0 0 6px rgba(217, 179, 104, 0); }
+      }
+      .t2-live { animation: t2-pulse-accent 2.4s var(--ease-in-out) infinite; }
+
+      /* Respect the OS setting — never fight accessibility preferences. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
       }
     </style>
   </head>

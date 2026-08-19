@@ -1933,7 +1933,7 @@ const taraSetVizInterval=(fn,ms,maxMs)=>{
     if(_pill||!document.body)return;
     _pill=document.createElement('div');
     _pill.style.cssText='position:fixed;left:10px;bottom:10px;z-index:2147483647;'+
-      'font:600 11px system-ui,sans-serif;color:#0A0A0A;cursor:pointer;user-select:none;transition:all .2s;';
+      'font:600 11px system-ui,sans-serif;color:#08080B;cursor:pointer;user-select:none;transition:all .2s;';
     _pill.addEventListener('click',function(ev){ev.stopPropagation();_ensure();});
     document.body.appendChild(_pill);_render();
   }
@@ -2004,7 +2004,7 @@ const _Phase4Badge=({mode})=>{
   },`phase 4 · ${mode} · waiting`);
   const _palette={
     'fire-now':{bg:'rgba(40,204,149,0.10)',fg:'rgb(40,204,149)',border:'rgba(40,204,149,0.25)'},
-    'wait':    {bg:'rgba(201,169,97,0.10)',fg:'#C9A961',         border:'rgba(201,169,97,0.25)'},
+    'wait':    {bg:'rgba(217,179,104,0.10)',fg:'#D9B368',         border:'rgba(217,179,104,0.25)'},
     'abort':   {bg:'rgba(244,114,128,0.10)',fg:'rgb(244,114,128)',border:'rgba(244,114,128,0.25)'},
     'error':   {bg:'rgba(237,237,237,0.05)',fg:'rgba(237,237,237,0.40)',border:'rgba(237,237,237,0.12)'},
   };
@@ -2189,7 +2189,7 @@ if(typeof window!=='undefined'){
           .sort((a,b)=>b.n-a.n);
       };
       const _overallW=resolved.filter(e=>e.result==='WIN').length;
-      console.group(`%c━━━ Tara Audit Stats ━━━`,'color:#C9A961;font-weight:bold;font-size:13px');
+      console.group(`%c━━━ Tara Audit Stats ━━━`,'color:#D9B368;font-weight:bold;font-size:13px');
       console.info(`Filter: asset=${_asset}, autoExecOnly=${_autoOnly}, minN=${_minN}`);
       console.info(`Entries: ${filtered.length} total · ${resolved.length} resolved · ${filtered.length-resolved.length} pending/sit-out`);
       console.info(`Overall WR: ${_wrPct(_overallW,resolved.length)} (${_overallW}W / ${resolved.length-_overallW}L)`);
@@ -2331,7 +2331,7 @@ if(typeof window!=='undefined'){
     return{label:`${pct}% (${n})`,raw:pct,n,dim:n<minN};
   };
   const _printCrossTab=(title,table,rowLabels,colLabels,minN)=>{
-    console.group(`%c━━━ ${title} ━━━`,'color:#C9A961;font-weight:bold;font-size:13px');
+    console.group(`%c━━━ ${title} ━━━`,'color:#D9B368;font-weight:bold;font-size:13px');
     // Convert to console.table-friendly shape
     const _rows={};
     rowLabels.forEach(r=>{
@@ -2548,7 +2548,7 @@ if(typeof window!=='undefined'){
       const _n=Math.max(1,Number(opts.n)||_filtered.length);
       _filtered=_filtered.slice(-_n);
       if(opts.raw)return _filtered;
-      console.group(`%c━━━ Tara Auto-Exec Event Log ━━━`,'color:#C9A961;font-weight:bold;font-size:13px');
+      console.group(`%c━━━ Tara Auto-Exec Event Log ━━━`,'color:#D9B368;font-weight:bold;font-size:13px');
       console.info(`Showing: ${_filtered.length} events (filter: ${opts.type||'all types'}, ${opts.asset||'all assets'})`);
       // Summary by type
       const _byType={};
@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.188-window-clock';
-const TARA_VERSION_DISPLAY='Tara 13.4.188';
+const BASELINE_VERSION='2026.08.19-v13.4.189-obsidian';
+const TARA_VERSION_DISPLAY='Tara 13.4.189';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5940,12 +5940,12 @@ const PRICE_SOURCE_DEFAULT='coinbase';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
-//   Gold (#C9A961)   — premium, hero accents, V2.0 badge, major-release markers, "what changed" eyebrows
+//   Gold (#D9B368)   — premium, hero accents, V2.0 badge, major-release markers, "what changed" eyebrows
 //   Copper (#C97D4A) — cautionary, friction, geo risk, quality issues, exhausted/contrarian signals
 //   Emerald  — wins, UP locks, profit (unchanged)
 //   Rose     — losses, DOWN locks, adverse (unchanged)
 //   These coexist — copper sits between green and red as a "watch but don't alarm" tier.
-const T2_GOLD='#C9A961';
+const T2_GOLD='#D9B368';
 const T2_COPPER='#C97D4A';
 
 // V13.4.167: Discord embed palette + formatters, so alerts match the app instead of
@@ -5970,9 +5970,9 @@ const _signedMoney=(v)=>`${(Number(v)||0)>=0?'+':'-'}${_compactMoney(v)}`;
 //   whale alert line up identically instead of each padding its own way.
 const _dcRow=(label,value,note)=>
   (String(label).padEnd(8)+String(value).padStart(11)+(note?`   ${note}`:'')).replace(/\s+$/,'');
-const T2_GOLD_GLOW='rgba(201,169,97,0.18)';
-const T2_GOLD_BORDER='rgba(201,169,97,0.35)';
-const T2_GOLD_DIM='rgba(201,169,97,0.45)';
+const T2_GOLD_GLOW='rgba(217,179,104,0.18)';
+const T2_GOLD_BORDER='rgba(217,179,104,0.35)';
+const T2_GOLD_DIM='rgba(217,179,104,0.45)';
 const T2_COPPER_BG='rgba(201,125,74,0.08)';
 const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
 // Tabular-nums monospace style — used for all prices, posteriors, statistics
@@ -7431,7 +7431,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_PREMARKET:{   // 12:00-13:30 UTC
-    label:'NY Pre-Market',flag:'⏳',color:'rgba(201,169,97,0.85)',
+    label:'NY Pre-Market',flag:'⏳',color:'rgba(217,179,104,0.85)',
     liquidity:'MED',vol:'COMPRESSING',
     character:'Calm before the storm. Coiling action ahead of NY open.',
     cautions:['Wait for NY open before sizing up','Pre-market moves often reverse at the open'],
@@ -7467,7 +7467,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_LUNCH:{       // 16:00-17:00 UTC
-    label:'NY Lunch',flag:'🍽️',color:'rgba(201,169,97,0.85)',
+    label:'NY Lunch',flag:'🍽️',color:'rgba(217,179,104,0.85)',
     liquidity:'MED',vol:'COMPRESSING',
     character:'Lunch lull. Chop period with mean reversion to VWAP.',
     cautions:['Avoid breakout chasing — they fail here','Range-bound — fade extremes instead'],
@@ -7491,7 +7491,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_CLOSE:{       // 20:00-21:00 UTC
-    label:'NY Close',flag:'🌆',color:'rgba(201,169,97,0.85)',
+    label:'NY Close',flag:'🌆',color:'rgba(217,179,104,0.85)',
     liquidity:'HIGH',vol:'STEADY',
     character:'Position-squaring distorts signals. Algo-heavy.',
     cautions:['Late-day reversals common','Avoid initiating new positions','Funds rebalancing creates artificial flow'],
@@ -8137,8 +8137,8 @@ const classifyLossPattern=(trade)=>{
 };
 const LOSS_PATTERN_LABELS={
   WRONG_FROM_START:{label:'Wrong from start',color:'rgba(255,77,106,0.95)',icon:'✗',hint:'Signal read was off entry. Tighten entry filter.'},
-  EARLY_PEAK:     {label:'Early peak fade',  color:'rgba(201,169,97,0.85)',icon:'⤴',hint:'Peaked in first third then faded. Consider quicker take-profit.'},
-  MID_REVERSAL:   {label:'Mid-window reversal',color:'rgba(201,169,97,0.85)',icon:'⤵',hint:'Was winning at midpoint. Watch for vol shifts.'},
+  EARLY_PEAK:     {label:'Early peak fade',  color:'rgba(217,179,104,0.85)',icon:'⤴',hint:'Peaked in first third then faded. Consider quicker take-profit.'},
+  MID_REVERSAL:   {label:'Mid-window reversal',color:'rgba(217,179,104,0.85)',icon:'⤵',hint:'Was winning at midpoint. Watch for vol shifts.'},
   LATE_REVERSAL:  {label:'Late reversal',    color:'rgba(255,77,106,0.85)',icon:'⚡',hint:'Winning until last minute. Tighter trailing stop in final 90s.'},
   WHALE_SPIKE:    {label:'Whale spike',      color:'rgba(168,85,247,0.85)',icon:'🐋',hint:'Large contrary print near close. Not your read — circumstance.'},
   MACRO_SHOCK:    {label:'Macro shock',      color:'rgba(168,85,247,0.85)',icon:'⚠',hint:'External event spike during window. Not your read — circumstance.'},
@@ -9633,7 +9633,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
     <div style={{userSelect:'none',width:'100%'}}>
       {/* Resolution toolbar */}
       <div className="flex items-center justify-between px-3 pb-2 flex-wrap gap-2">
-        <div className={'flex items-center gap-0.5 bg-[#0A0A0A] rounded-lg border border-[#1F1F1F] overflow-hidden'}>
+        <div className={'flex items-center gap-0.5 bg-[#08080B] rounded-lg border border-[#1C1C22] overflow-hidden'}>
           {['1m','3m','5m','15m','30m','1h'].map(r=>(
             <button key={r}
               onClick={()=>onResolutionChange&&onResolutionChange(r)}
@@ -9655,7 +9655,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
           height:'430px',
           border:'none',
           borderRadius:'8px',
-          background:'#0A0A0A',
+          background:'#08080B',
           display:'block',
         }}
         allowFullScreen
@@ -14238,23 +14238,23 @@ class ErrorBoundary extends React.Component{
       }catch(_){}
     };
     return(
-      <div className="min-h-screen bg-[#0A0A0A] text-rose-500 p-6 sm:p-8 font-mono">
+      <div className="min-h-screen bg-[#08080B] text-rose-500 p-6 sm:p-8 font-mono">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-bold mb-1">Tara Engine Crash</h1>
           <p className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 mb-4">{typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown version'}</p>
           {/* Headline error message */}
           <pre className="bg-black p-4 rounded-lg text-xs mb-4 whitespace-pre-wrap border border-rose-500/30">{_err?.toString()||'(no error)'}</pre>
           {/* V8.8.4: Full diagnostic — stack + component stack — collapsed by default-look summary/details */}
-          <details className="mb-4 bg-black/60 border border-[#2A2A2A] rounded-lg text-[#EDEDED]/80" open>
-            <summary className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.14em] font-bold text-[#C9A961]">Diagnostic — stack &amp; component trail</summary>
+          <details className="mb-4 bg-black/60 border border-[#2A2A34] rounded-lg text-[#EDEDED]/80" open>
+            <summary className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.14em] font-bold text-[#D9B368]">Diagnostic — stack &amp; component trail</summary>
             <div className="px-3 pb-3 space-y-3">
               <div>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 mb-1">JS stack</div>
-                <pre className="bg-black p-2 rounded-lg text-[10px] whitespace-pre-wrap break-all border border-[#1F1F1F] max-h-64 overflow-auto leading-snug text-[#EDEDED]/85">{_err?.stack||'(no stack)'}</pre>
+                <pre className="bg-black p-2 rounded-lg text-[10px] whitespace-pre-wrap break-all border border-[#1C1C22] max-h-64 overflow-auto leading-snug text-[#EDEDED]/85">{_err?.stack||'(no stack)'}</pre>
               </div>
               <div>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 mb-1">React component stack</div>
-                <pre className="bg-black p-2 rounded-lg text-[10px] whitespace-pre-wrap break-all border border-[#1F1F1F] max-h-48 overflow-auto leading-snug text-[#EDEDED]/85">{_info?.componentStack||'(captured on next render — try refreshing if blank)'}</pre>
+                <pre className="bg-black p-2 rounded-lg text-[10px] whitespace-pre-wrap break-all border border-[#1C1C22] max-h-48 overflow-auto leading-snug text-[#EDEDED]/85">{_info?.componentStack||'(captured on next render — try refreshing if blank)'}</pre>
               </div>
             </div>
           </details>
@@ -14262,7 +14262,7 @@ class ErrorBoundary extends React.Component{
             Tara hit an error during render. Service workers and browser caches have been cleared in the background. Your trade history, weights, and learning are safe in Supabase.
           </p>
           <div className="flex gap-3 flex-wrap">
-            <button onClick={_copyDiag} className={'px-4 py-2 rounded-lg font-bold border transition-colors '+(this.state.copied?'bg-[#C9A961]/15 border-[#C9A961] text-[#C9A961]':'bg-[#EDEDED]/5 border-[#2A2A2A] text-[#EDEDED]/85 hover:bg-[#EDEDED]/10')}>{this.state.copied?'Copied — paste to me':'Copy diagnostic'}</button>
+            <button onClick={_copyDiag} className={'px-4 py-2 rounded-lg font-bold border transition-colors '+(this.state.copied?'bg-[#D9B368]/15 border-[#D9B368] text-[#D9B368]':'bg-[#EDEDED]/5 border-[#2A2A34] text-[#EDEDED]/85 hover:bg-[#EDEDED]/10')}>{this.state.copied?'Copied — paste to me':'Copy diagnostic'}</button>
             <button onClick={_softRecover} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold">Refresh Code Only (keeps data)</button>
             <button onClick={_hardRecover} className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-lg font-bold">Hard Recovery (clears everything)</button>
           </div>
@@ -14307,8 +14307,8 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
     else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow — Longs exiting. Bearish unwind.';oiColor='text-amber-400';}
   }
   return(
-    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0A0A] border border-l border-b border-[#2A2A2A] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#171717] border-b border-[#1F1F1F] flex justify-between items-center shrink-0'}>
+    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#08080B] border border-l border-b border-[#2A2A34] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
+      <div className={'p-3 bg-[#101014] border-b border-[#1C1C22] flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEDED]/70'}>Flow Intelligence</span>
@@ -14319,7 +14319,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
       <div className="overflow-y-auto flex-1 p-3 space-y-3">
 
         {/* Flow Score */}
-        <div className={'p-3 rounded-xl bg-[#171717] border border-[#1F1F1F]'}>
+        <div className={'p-3 rounded-xl bg-[#101014] border border-[#1C1C22]'}>
           <div className="flex justify-between items-start mb-2">
             <div>
               <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
@@ -14340,7 +14340,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
         </div>
 
         {/* Whale Streak */}
-        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#171717] border-[#1F1F1F]'}`}>
+        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#101014] border-[#1C1C22]'}`}>
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 mb-1.5 font-bold'}>Whale Streak</div>
           {hasStreak?(
             <div>
@@ -14359,7 +14359,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
         </div>
 
         {/* OI Context */}
-        <div className={'p-3 rounded-xl bg-[#171717] border border-[#1F1F1F]'}>
+        <div className={'p-3 rounded-xl bg-[#101014] border border-[#1C1C22]'}>
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 mb-1.5 font-bold'}>Open Interest Context</div>
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
@@ -14379,7 +14379,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
 
         {/* Long-Short Ratio */}
         {bloomberg?.longShortRatio&&(
-          <div className={'p-3 rounded-xl bg-[#171717] border border-[#1F1F1F]'}>
+          <div className={'p-3 rounded-xl bg-[#101014] border border-[#1C1C22]'}>
             <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 mb-2 font-bold'}>Market Positioning (Binance)</div>
             <div className="flex items-center gap-2 mb-1">
               <div className={'flex-1 h-2 bg-[#EDEDED]/10 rounded-full overflow-hidden'}>
@@ -14404,7 +14404,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
           <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
             {whaleLog.length===0?<div className={'text-xs text-[#EDEDED]/30 italic'}>No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
               const d=new Date(w.time);
-              return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded-lg bg-[#0A0A0A] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
+              return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded-lg bg-[#08080B] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
                 <span className={'text-[#EDEDED]/25 font-mono shrink-0'}>{_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                 <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
                 <span className={'text-[#EDEDED]/50'}>${(w.usd*0.001).toFixed(0)}K</span>
@@ -14434,8 +14434,8 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
     return 'text-rose-400/80';
   };
   return(
-    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0A0A] border border-l border-b border-[#2A2A2A] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#171717] border-b border-[#1F1F1F] flex justify-between items-center shrink-0'}>
+    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#08080B] border border-l border-b border-[#2A2A34] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
+      <div className={'p-3 bg-[#101014] border-b border-[#1C1C22] flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEDED]/70'}>Theory Lab</span>
@@ -14453,7 +14453,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
             const n=v?.n||0,correct=v?.correct||0;
             const wr=n>0?correct/n:0;
             return(
-              <div key={key} className="flex items-center justify-between bg-[#171717] rounded-lg px-2.5 py-2 border border-[#1F1F1F]">
+              <div key={key} className="flex items-center justify-between bg-[#101014] rounded-lg px-2.5 py-2 border border-[#1C1C22]">
                 <span className={'text-xs text-[#EDEDED]/70'}>{_labels[key]||key}</span>
                 <div className="flex items-center gap-2">
                   {n<30&&n>0&&<span className={'text-[9px] text-[#EDEDED]/30 italic'}>low-n</span>}
@@ -14465,7 +14465,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
           })}
         </div>
         {_last&&(
-          <div className="pt-2 border-t border-[#1F1F1F]">
+          <div className="pt-2 border-t border-[#1C1C22]">
             <div className={'text-[10px] uppercase tracking-wider text-[#EDEDED]/30 mb-1.5'}>Last scored window</div>
             <div className="text-[10px] text-[#EDEDED]/50 font-mono leading-relaxed space-y-0.5">
               <div>outcome: <span className={_last.outcomeDir==='UP'?'text-emerald-400':'text-rose-400'}>{_last.outcomeDir}</span>{_last.round_number_flag?<span className="ml-2 text-amber-400/70">● round#</span>:null}</div>
@@ -14495,7 +14495,7 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
     ?'bg-rose-500/15 border-rose-500/40 text-rose-400 animate-pulse'
     :isEmerging
     ?'bg-amber-500/10 border-amber-500/30 text-amber-400'
-    :'border-[#1F1F1F] text-[#EDEDED]/40 hover:text-purple-400';
+    :'border-[#1C1C22] text-[#EDEDED]/40 hover:text-purple-400';
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
     :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
@@ -14512,7 +14512,7 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
 const TheoryLabBtn=({active,onClick,cls})=>{
   const colorCls=active
     ?'bg-violet-500/20 border-violet-500/40 text-violet-400'
-    :'border-[#1F1F1F] text-[#EDEDED]/40 hover:text-violet-400';
+    :'border-[#1C1C22] text-[#EDEDED]/40 hover:text-violet-400';
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
     :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
@@ -14572,7 +14572,7 @@ function PositionReconciliationBanner({positionReconciliation}){
   if(!_rec||_rec.status!=='drift'||!Array.isArray(_rec.driftDetails)||_rec.driftDetails.length===0)return null;
   // If user dismissed this poll's banner, suppress until next poll arrives
   if(dismissedAt>0&&dismissedAt>=(_rec.lastCheckAt||0))return null;
-  const _kindColor=(k)=>k==='unknown-to-tara'?'#A78BFA':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#C9A961':'rgba(255,77,106,0.95)';
+  const _kindColor=(k)=>k==='unknown-to-tara'?'#A78BFA':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#D9B368':'rgba(255,77,106,0.95)';
   const _kindLabel=(k)=>{
     if(k==='phantom-auto')return 'phantom (auto)';
     if(k==='phantom-manual')return 'phantom (manual)';
@@ -14622,8 +14622,8 @@ function PositionReconciliationBanner({positionReconciliation}){
 function SyncButtons({userPosition,handleManualSync}){
   const upActive=userPosition==='UP';
   const dnActive=userPosition==='DOWN';
-  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#1F1F1F]');
-  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#1F1F1F]');
+  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#1C1C22]');
+  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#1C1C22]');
   return(
     <div className="flex gap-2">
       <button onClick={()=>handleManualSync('UP')} className={upCls}
@@ -14786,7 +14786,7 @@ function PredictionContent(props){
                 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
                 : isFail||isDiv
                 ? 'text-amber-300 bg-amber-500/10 border-amber-500/30'
-                : 'text-[#EDEDED]/50 bg-[#EDEDED]/5 border-[#2A2A2A]';
+                : 'text-[#EDEDED]/50 bg-[#EDEDED]/5 border-[#2A2A34]';
               const icon=vf.label.startsWith('BUY')?'↑':vf.label.startsWith('SELL')?'↓':'·';
               return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded-lg border font-bold '+cls} title={`Volume-flow: ${vf.context}. Tells you whether tape volume is confirming or failing the current price move. INFORMATIONAL ONLY — not yet integrated into Tara's posterior decision.`}>
                 {icon} VOL {vf.label.replace('BUY-','').replace('SELL-','')}
@@ -14804,7 +14804,7 @@ function PredictionContent(props){
                 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
                 : isBear
                 ? 'text-rose-300 bg-rose-500/10 border-rose-500/30'
-                : 'text-[#EDEDED]/55 bg-[#EDEDED]/5 border-[#2A2A2A]';
+                : 'text-[#EDEDED]/55 bg-[#EDEDED]/5 border-[#2A2A34]';
               const icon=
                 cp.label==='ENGULFING-BULL'||cp.label==='CLIMAX-BOTTOM'?'⤴':
                 cp.label==='ENGULFING-BEAR'||cp.label==='CLIMAX-TOP'?'⤵':
@@ -14840,8 +14840,8 @@ function PredictionContent(props){
                 : (lbl==='RANGE')
                 ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
                 : (lbl==='DEAD')
-                ? 'text-[#EDEDED]/50 bg-[#EDEDED]/5 border-[#2A2A2A]'
-                : 'text-[#EDEDED]/60 bg-[#EDEDED]/5 border-[#2A2A2A]';
+                ? 'text-[#EDEDED]/50 bg-[#EDEDED]/5 border-[#2A2A34]'
+                : 'text-[#EDEDED]/60 bg-[#EDEDED]/5 border-[#2A2A34]';
               const icon=
                 lbl==='TRENDING'?'↗':
                 lbl==='WHIPSAW'?'⇌':
@@ -15021,7 +15021,7 @@ function PredictionContent(props){
         })()}
 
         {/* V134: Plain-English summary line — always visible */}
-        <div className="mt-2 px-3 py-2 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F] max-w-md w-full">
+        <div className="mt-2 px-3 py-2 rounded-lg bg-[#08080B] border border-[#1C1C22] max-w-md w-full">
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 font-bold mb-1'}>What Tara sees</div>
           <div className="text-xs sm:text-sm text-[#EDEDED]/80 leading-snug">
             {buildPlainEnglish(analysis,qualityGate,analysis?.advisor)}
@@ -15171,7 +15171,7 @@ function PredictionContent(props){
                     <span className="text-[#EDEDED]/55">{line}</span>
                     {samplesNeeded>0&&<span className="text-[#EDEDED]/35 tabular-nums">{samplesHave}/{samplesNeeded}</span>}
                   </div>
-                  <div className="w-full h-1 bg-[#0A0A0A] rounded-full overflow-hidden">
+                  <div className="w-full h-1 bg-[#08080B] rounded-full overflow-hidden">
                     <div className={formingBarCls} style={{width:formingPct+'%'}}/>
                   </div>
                 </>
@@ -15222,7 +15222,7 @@ function PredictionContent(props){
                     <span className="text-[9px] uppercase text-purple-400/70 tracking-wider">KLSH</span>
                     <span className={kDir==='UP'?'text-emerald-300/80':'text-rose-300/80'}>{kDir} {Math.max(kUp,kDn).toFixed(0)}%</span>
                   </div>
-                  <div className={'flex items-center gap-1 px-1.5 py-0.5 rounded-lg border '+(edge>=20?'border-emerald-500/40 bg-emerald-500/10':edge>=10?'border-emerald-500/30':edge>=0?'border-[#2A2A2A]':edge>=-10?'border-amber-500/30 bg-amber-500/5':'border-rose-500/40 bg-rose-500/10')} title={edgeTooltip}>
+                  <div className={'flex items-center gap-1 px-1.5 py-0.5 rounded-lg border '+(edge>=20?'border-emerald-500/40 bg-emerald-500/10':edge>=10?'border-emerald-500/30':edge>=0?'border-[#2A2A34]':edge>=-10?'border-amber-500/30 bg-amber-500/5':'border-rose-500/40 bg-rose-500/10')} title={edgeTooltip}>
                     <span className="text-[9px] uppercase text-[#EDEDED]/50 tracking-wider">EDGE</span>
                     <span className={edgeCls}>{edgeLabel}</span>
                     {!isAgree&&edge!=null&&<span className="text-[9px] text-amber-400/80">⚡</span>}
@@ -15318,7 +15318,7 @@ function PredictionContent(props){
       )}
 
       {!userPosition&&analysis.lockInfo&&(
-        <div className={'mb-2 p-2.5 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'}>
+        <div className={'mb-2 p-2.5 rounded-lg bg-[#08080B] border border-[#1C1C22]'}>
           <div className={'text-[10px] uppercase tracking-wide text-[#EDEDED]/30 font-bold mb-1.5'}>Entry checklist</div>
           <div className="space-y-1">
             {checklistItems.map((item,i)=>{
@@ -15336,7 +15336,7 @@ function PredictionContent(props){
         </div>
       )}
 
-      <div className={'flex flex-col gap-1.5 border-t border-[#1F1F1F] pt-3 mt-4'}>
+      <div className={'flex flex-col gap-1.5 border-t border-[#1C1C22] pt-3 mt-4'}>
         <span className={'text-xs uppercase tracking-wide text-[#EDEDED]/30 text-center'}>-30% Stop Guard Sync</span>
         <SyncButtons userPosition={userPosition} handleManualSync={handleManualSync}/>
       </div>
@@ -15403,7 +15403,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
   // Color matches direction
   const _dirColor=userPosition==='UP'?'rgb(40,204,149)':'rgba(255,77,106,0.92)';
   return (
-    <div className="mt-2 p-2 rounded-lg border" style={{borderColor:'rgba(237,237,237,0.10)',background:'#0D0D0D'}}>
+    <div className="mt-2 p-2 rounded-lg border" style={{borderColor:'rgba(237,237,237,0.10)',background:'#0B0B0F'}}>
       <div className="flex items-baseline justify-between mb-1.5">
         <span className="text-[9px] uppercase tracking-wide font-bold" style={{color:'rgba(237,237,237,0.55)'}}>
           Real Kalshi fill <span style={{color:_dirColor}}>({userPosition})</span>
@@ -15427,7 +15427,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
             placeholder={_curOurCents?String(_curOurCents):'1-99'}
             className="w-full bg-transparent border rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:outline-none"
             style={{borderColor:'rgba(237,237,237,0.15)'}}
-            onFocus={(e)=>{e.target.style.borderColor='#C9A961';}}
+            onFocus={(e)=>{e.target.style.borderColor='#D9B368';}}
             onBlur={(e)=>{e.target.style.borderColor='rgba(237,237,237,0.15)';}}
           />
         </label>
@@ -15442,7 +15442,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
             placeholder="1-250"
             className="w-full bg-transparent border rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:outline-none"
             style={{borderColor:'rgba(237,237,237,0.15)'}}
-            onFocus={(e)=>{e.target.style.borderColor='#C9A961';}}
+            onFocus={(e)=>{e.target.style.borderColor='#D9B368';}}
             onBlur={(e)=>{e.target.style.borderColor='rgba(237,237,237,0.15)';}}
           />
         </label>
@@ -15464,9 +15464,9 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
             onClick={_clear}
             className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-wide transition-colors"
             style={{
-              background:'#141414',
+              background:'#0E0E12',
               color:'rgba(237,237,237,0.55)',
-              border:'1px solid #1F1F1F',
+              border:'1px solid #1C1C22',
               cursor:'pointer',
             }}
             title="forget the logged fill; ticket will revert to preview"
@@ -15873,15 +15873,15 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     }else{
       sub='Real lean, not yet locked. Wait for Tara to commit before acting. '+(reason?reason:'');
       color=call==='UP'?'#28CC95':'#FF4D6A';
-      bg='rgba(201,169,97,0.08)';
-      border='rgba(201,169,97,0.30)';
+      bg='rgba(217,179,104,0.08)';
+      border='rgba(217,179,104,0.30)';
     }
   }else{
     label='SIT OUT';
     sub=reason||'No tradeable read this round -- genuinely mixed or a coin flip.';
     color='#EDEDED';
     bg='rgba(237,237,237,0.05)';
-    border='#1F1F1F';
+    border='#1C1C22';
   }
   return React.createElement('div',{
     className:'mb-3 rounded-xl p-4 border',
@@ -15898,7 +15898,7 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     //   panel explains WHY a locked call is or isn't attractive, not just what it is.
     isDir&&Number.isFinite(qScore)&&qScore<40&&React.createElement('div',{className:'mt-2 text-[11px]',style:{color:'#FF4D6A'}},
       '\u26a0 quality gate LOW ('+qScore+'/100) -- weak historical WR at this reading, consider sitting out'),
-    isDir&&timeState&&Number(timeState.minsRemaining)<2&&React.createElement('div',{className:'mt-1 text-[11px]',style:{color:'#C9A961'}},
+    isDir&&timeState&&Number(timeState.minsRemaining)<2&&React.createElement('div',{className:'mt-1 text-[11px]',style:{color:'#D9B368'}},
       '\u26a0 '+(timeState.minsRemaining||0)+'m '+(timeState.secsRemaining||0)+'s left \u2013 under the 2m usually needed to fill and settle cleanly'),
     isDir&&(function(){
       const k=Number(kalshiYesPrice);
@@ -15925,7 +15925,7 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
       const _saveC=(_takeC!=null&&_restC!=null)?(_takeC-_restC):null;
       const _fee=(c)=>0.07*(c/100)*(1-c/100)*100; // Kalshi fee, peaks ~1.75c at 50c
       return React.createElement('div',{className:'mt-2 pt-2 border-t text-[11px]',style:{borderColor:'rgba(237,237,237,0.10)'}},
-        React.createElement('span',{style:{color:inBand?'#28CC95':'#C9A961'}},
+        React.createElement('span',{style:{color:inBand?'#28CC95':'#D9B368'}},
           'entry '+cost.toFixed(0)+'c'+(inBand?' – in the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, good price':' – OUTSIDE the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, paying up')),
         secsLeft!=null&&React.createElement('span',{className:'ml-2',style:{color:'rgba(237,237,237,0.5)'}},Math.round(secsLeft)+'s left in window'),
         _qFresh&&_saveC!=null&&_saveC>0&&React.createElement('div',{className:'mt-1.5 leading-relaxed'},
@@ -16063,14 +16063,14 @@ function HourlyMemoryModal({onClose}){
     return(
       <div key={c.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
         <div className="text-[10px] text-[#EDEDED]/45">{c.label}</div>
-        <div className="text-lg font-mono font-semibold mt-0.5" style={{color:bwr==null?'#EDEDED':bwr>=60?'#28CC95':bwr>=45?'#D4A24C':'#FF4D6A'}}>{bwr!=null?bwr+'%':'--'}</div>
+        <div className="text-lg font-mono font-semibold mt-0.5" style={{color:bwr==null?'#EDEDED':bwr>=60?'#28CC95':bwr>=45?'#D9B368':'#FF4D6A'}}>{bwr!=null?bwr+'%':'--'}</div>
         <div className="text-[10px] text-[#EDEDED]/40">{c.w}W&middot;{c.l}L{c.net?(' · '+(c.net>=0?'+':'')+c.net+'c'):''}</div>
       </div>
     );
   };
   return(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4" onClick={onClose}>
-      <div className="w-full max-w-3xl rounded-2xl border mt-8 mb-8" style={{background:'#0A0A0A',borderColor:'rgba(237,237,237,0.10)'}} onClick={e=>e.stopPropagation()}>
+      <div className="w-full max-w-3xl rounded-2xl border mt-8 mb-8" style={{background:'#08080B',borderColor:'rgba(237,237,237,0.10)'}} onClick={e=>e.stopPropagation()}>
         <div className="p-5 border-b flex items-start justify-between" style={{borderColor:'rgba(237,237,237,0.10)'}}>
           <div>
             <div className="text-[10px] uppercase tracking-wide" style={{color:'rgba(212,162,76,0.8)'}}>TARA &middot; HOURLY MEMORY</div>
@@ -16083,10 +16083,10 @@ function HourlyMemoryModal({onClose}){
             it duplicated wins+losses+open and forced a 5-up grid that wrapped badly. */}
         <div className="p-5 pb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            {label:'Win rate',value:wr!=null?wr+'%':'--',color:wr==null?'#EDEDED':wr>=60?'#28CC95':wr>=45?'#D4A24C':'#FF4D6A'},
+            {label:'Win rate',value:wr!=null?wr+'%':'--',color:wr==null?'#EDEDED':wr>=60?'#28CC95':wr>=45?'#D9B368':'#FF4D6A'},
             {label:'Wins',value:rec.w,color:'#28CC95'},
             {label:'Losses',value:rec.l,color:'#FF4D6A'},
-            {label:'Open',value:pendingN,color:'#D4A24C'},
+            {label:'Open',value:pendingN,color:'#D9B368'},
           ].map(c=>(
             <div key={c.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
               <div className="text-[10px] uppercase tracking-[0.12em] text-[#EDEDED]/45">{c.label}</div>
@@ -16115,7 +16115,7 @@ function HourlyMemoryModal({onClose}){
           {[['all','all'],['wins','wins'],['losses','losses']].map(([k,label])=>(
             <button key={k} onClick={()=>setFilter(k)}
               className="text-[11px] px-2.5 py-1 rounded-lg capitalize"
-              style={filter===k?{background:'rgba(212,162,76,0.15)',color:'#D4A24C',border:'1px solid rgba(212,162,76,0.35)'}:{background:'rgba(237,237,237,0.04)',color:'rgba(237,237,237,0.5)',border:'1px solid rgba(237,237,237,0.08)'}}
+              style={filter===k?{background:'rgba(212,162,76,0.15)',color:'#D9B368',border:'1px solid rgba(212,162,76,0.35)'}:{background:'rgba(237,237,237,0.04)',color:'rgba(237,237,237,0.5)',border:'1px solid rgba(237,237,237,0.08)'}}
             >{label}</button>
           ))}
         </div>
@@ -16157,13 +16157,13 @@ function HourlyMemoryModal({onClose}){
               const l=settled.filter(isLoss).length;
               const resolved=w+l;
               const hourWr=resolved>0?Math.round(100*w/resolved):null;
-              const wrColor=hourWr==null?'rgba(237,237,237,0.4)':hourWr>=70?'rgb(40,204,149)':hourWr>=55?'rgba(237,237,237,0.85)':hourWr>=45?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
+              const wrColor=hourWr==null?'rgba(237,237,237,0.4)':hourWr>=70?'rgb(40,204,149)':hourWr>=55?'rgba(237,237,237,0.85)':hourWr>=45?'rgba(217,179,104,0.85)':'rgb(255,77,106)';
               return(
                 <div key={hourKey}>
-                  <div className="sticky top-0 z-10 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md" style={{background:'#0A0A0A',borderBottom:'1px solid rgba(237,237,237,0.10)'}}>
+                  <div className="sticky top-0 z-10 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md" style={{background:'#08080B',borderBottom:'1px solid rgba(237,237,237,0.10)'}}>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-[11px] uppercase font-bold tracking-[0.14em]" style={{color:'#D4A24C'}}>{hourLabel}</span>
-                      {hasPending&&<span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded" style={{background:'rgba(212,162,76,0.15)',color:'#D4A24C'}}>live</span>}
+                      <span className="text-[11px] uppercase font-bold tracking-[0.14em]" style={{color:'#D9B368'}}>{hourLabel}</span>
+                      {hasPending&&<span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded" style={{background:'rgba(212,162,76,0.15)',color:'#D9B368'}}>live</span>}
                       <span className="text-[9px] tabular-nums text-[#EDEDED]/35">{entries.length} lock{entries.length===1?'':'s'}</span>
                     </div>
                     {/* V13.4.168: a percentage on ONE lock is noise -- the old header
@@ -16198,7 +16198,7 @@ function HourlyMemoryModal({onClose}){
                           )}
                           <span className="text-[#EDEDED]/40 tabular-nums w-[64px] text-right">{_fmtAt(h)}</span>
                           {h._pending
-                            ?<span className="font-semibold text-[10px] uppercase w-[42px] text-right" style={{color:'#D4A24C'}}>open</span>
+                            ?<span className="font-semibold text-[10px] uppercase w-[42px] text-right" style={{color:'#D9B368'}}>open</span>
                             :<span className="font-semibold text-[11px] w-[42px] text-right" style={{color:resultColor(h)}}>{resultLabel(h)}</span>}
                         </div>
                       </div>
@@ -16798,7 +16798,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
     const _taraDirConf=_dir==='UP'?_post:(100-_post);
     const _kalshiDirConf=_dir==='UP'?Number(kalshiYesPrice):(100-Number(kalshiYesPrice));
     _edge=Math.round(_taraDirConf-_kalshiDirConf);
-    _edgeColor=_edge>=15?'rgb(40,204,149)':_edge>=5?'rgba(40,204,149,0.85)':_edge>=-5?'rgba(201,169,97,0.85)':'rgba(255,77,106,0.95)';
+    _edgeColor=_edge>=15?'rgb(40,204,149)':_edge>=5?'rgba(40,204,149,0.85)':_edge>=-5?'rgba(217,179,104,0.85)':'rgba(255,77,106,0.95)';
     _edgeLabel=_edge>=15?'BIG EDGE':_edge>=5?'GOOD EDGE':_edge>=-5?'TIGHT':'LATE';
   }
   // ── Position size hint ── Combine regime vol + tilt status + edge + time-of-day into recommendation
@@ -16843,7 +16843,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   } else if(_edge!=null&&_edge>=15&&_isInBestHour&&_isLocked){
     _sizeHint='LARGE';_sizeColor='rgb(40,204,149)';_sizeReason=`big edge + ${_curHourEntry.wr}% historical hour`;
   } else if(analysis?.regime==='HIGH_VOL'||analysis?.regime==='EXTREME_VOL'){
-    _sizeHint='HALF';_sizeColor='rgba(201,169,97,0.85)';_sizeReason='vol regime — cut size';
+    _sizeHint='HALF';_sizeColor='rgba(217,179,104,0.85)';_sizeReason='vol regime — cut size';
   } else if(_isLocked&&(((_gapAl>3?1:0)+(_flowAl>3?1:0)+(_momAl>3?1:0))<=1)){
     // V10.9.4: WEAK-AGREEMENT DOWNSIZE.
     //   Same n_aligned definition as the V10.9.0 signal-agreement gate (each of
@@ -16867,13 +16867,13 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   const _showRiskChip=movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME');
   // Don't render if nothing meaningful to show
   if(!_edgeLabel&&!_sizeHint&&!_showCooldown&&!_showTrajectory&&!_showRiskChip)return null;
-  return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#1F1F1F]'},
+  return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#1C1C22]'},
     React.createElement('div',{className:'flex items-center justify-between gap-2 flex-wrap'},
       React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 flex-wrap'},
         // Edge pill
         _edgeLabel&&React.createElement('div',{
           className:'flex items-baseline gap-1 px-1.5 py-0.5 rounded-lg',
-          style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1F1F1F'},
+          style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1C1C22'},
           title:'Tara\'s directional confidence minus Kalshi\'s. Positive = Tara more confident; negative = Kalshi prices it better than Tara.',
         },
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold text-[#EDEDED]/40'},'Edge'),
@@ -16883,7 +16883,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
         // Position size hint
         _sizeHint&&React.createElement('div',{
           className:'flex items-baseline gap-1 px-1.5 py-0.5 rounded-lg',
-          style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1F1F1F'},
+          style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1C1C22'},
           title:`Size hint: ${_sizeHint}${_sizeReason?' · '+_sizeReason:''}`,
         },
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold text-[#EDEDED]/40'},'Size'),
@@ -16892,7 +16892,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
         // Conviction trajectory (when locked)
         _showTrajectory&&React.createElement('div',{
           className:'flex items-baseline gap-1 px-1.5 py-0.5 rounded-lg',
-          style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1F1F1F'},
+          style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1C1C22'},
           title:`Conviction since lock: ${convictionTrajectory.state.toLowerCase()}${convictionTrajectory.delta?' ('+(convictionTrajectory.delta>0?'+':'')+convictionTrajectory.delta.toFixed(1)+'pp)':''}`,
         },
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold text-[#EDEDED]/40'},'Conv'),
@@ -16903,8 +16903,8 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
         movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME')&&React.createElement('div',{
           className:'flex items-baseline gap-1 px-1.5 py-0.5 rounded-lg',
           style:{
-            background:movementRisk.level==='EXTREME'?'rgba(255,77,106,0.08)':'rgba(201,169,97,0.06)',
-            border:'1px solid '+(movementRisk.level==='EXTREME'?'rgba(255,77,106,0.30)':'rgba(201,169,97,0.22)'),
+            background:movementRisk.level==='EXTREME'?'rgba(255,77,106,0.08)':'rgba(217,179,104,0.06)',
+            border:'1px solid '+(movementRisk.level==='EXTREME'?'rgba(255,77,106,0.30)':'rgba(217,179,104,0.22)'),
           },
           title:[
             `Movement risk: ${movementRisk.level} (${movementRisk.score}/100)`,
@@ -16913,21 +16913,21 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
           ].filter(Boolean).join('\n'),
         },
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold text-[#EDEDED]/40'},'Risk'),
-          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider',style:{color:movementRisk.level==='EXTREME'?'rgb(255,77,106)':'rgba(201,169,97,0.95)'}},movementRisk.level),
-          movementRisk.dirBias&&React.createElement('span',{className:'text-[10px] font-bold leading-none',style:{color:movementRisk.level==='EXTREME'?'rgb(255,77,106)':'rgba(201,169,97,0.95)'}},movementRisk.dirBias==='UP'?'↑':'↓'),
+          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider',style:{color:movementRisk.level==='EXTREME'?'rgb(255,77,106)':'rgba(217,179,104,0.95)'}},movementRisk.level),
+          movementRisk.dirBias&&React.createElement('span',{className:'text-[10px] font-bold leading-none',style:{color:movementRisk.level==='EXTREME'?'rgb(255,77,106)':'rgba(217,179,104,0.95)'}},movementRisk.dirBias==='UP'?'↑':'↓'),
         ),
       ),
       // V8.1: Predictive readout strip (only when notable signal)
       movementRisk&&movementRisk.predictive&&movementRisk.score>=45&&React.createElement('div',{
         className:'mt-2 text-[10px] italic',
-        style:{color:movementRisk.level==='EXTREME'?'rgba(255,77,106,0.85)':'rgba(201,169,97,0.85)'},
+        style:{color:movementRisk.level==='EXTREME'?'rgba(255,77,106,0.85)':'rgba(217,179,104,0.85)'},
       },
         React.createElement('span',null,'→ ',movementRisk.predictive),
       ),
       // Cooldown indicator
       _showCooldown&&React.createElement('div',{
         className:'text-[10px] flex items-baseline gap-1.5 px-1.5 py-0.5 rounded-lg mt-1.5',
-        style:{background:'rgba(201,169,97,0.05)',border:'1px solid rgba(201,169,97,0.18)',color:'rgba(201,169,97,0.85)'},
+        style:{background:'rgba(217,179,104,0.05)',border:'1px solid rgba(217,179,104,0.18)',color:'rgba(217,179,104,0.85)'},
       },
         React.createElement('span',null,'⧗'),
         React.createElement('span',{className:'tabular-nums'},`${todayData.cooldownMinSinceLoss}m since loss · slow down`),
@@ -17047,7 +17047,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       :isWatching
         ?(effDir==='UP'?'rgba(52,211,153,0.04)':'rgba(255,77,106,0.04)')
         :isNoGoSnap?'rgba(255,77,106,0.10)'
-        :isSatOutSnap?'rgba(212,162,76,0.06)':'rgba(201,169,97,0.05)';
+        :isSatOutSnap?'rgba(212,162,76,0.06)':'rgba(217,179,104,0.05)';
     // V13.4.124: DECISIVE EARLY SIT-OUT DISPLAY. User request: 'if its a sitout we
     //   lock that early too' -- a genuinely weak window used to show bare 'SCANNING'
     //   the whole time and only reveal SIT_OUT at window close. This reads the V11.2
@@ -17174,7 +17174,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             {/* V10.3.1: coin-flip detector — high conviction but weak core signals.
                 Locks still fire, but user sees the awareness badge. Audit showed 75-84%
                 conviction with weak htfPatterns/flow = 50% WR (true coin flip). */}
-            {analysis?._v10_3_1_coinFlip&&!snap?.isStructuralLed&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#D4A24C'}}>⚠ coin-flip · weak core</span>}
+            {analysis?._v10_3_1_coinFlip&&!snap?.isStructuralLed&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#D9B368'}}>⚠ coin-flip · weak core</span>}
             {/* V5.7.7: Confluence indicator — visible while forming and after lock. */}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ super-confluence</span>}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&!(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&(tc?._ctx?.isConfluent||snap?.isConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ confluence</span>}
@@ -17191,7 +17191,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               const _activeCallDir=isLockedSnap?(snap.call==='UP'?'UP':snap.call==='DOWN'?'DOWN':null):(isWatching?_liveLeanDir:null);
               const _aligned=_activeCallDir&&_kl.dir===_activeCallDir;
               const _opposing=_activeCallDir&&_kl.dir!==_activeCallDir;
-              const _color=_aligned?'#28CC95':_opposing?'#D4A24C':'#7DD3FC';
+              const _color=_aligned?'#28CC95':_opposing?'#D9B368':'#7DD3FC';
               const _label=_kl.dir==='UP'?'▲ kalshi-lead':'▼ kalshi-lead';
               const _hint=`Kalshi YES ${_kl.kDelta>0?'+':''}${_kl.kDelta}¢ · spot ${_kl.spotDeltaBps>0?'+':''}${_kl.spotDeltaBps}bps over 60s — ${_aligned?'confirms call':_opposing?'positioning AGAINST call':'standalone signal'}`;
               return <span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:_color}} title={_hint}>{_label} +{_kl.score}</span>;
@@ -17218,9 +17218,9 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               if(_n===0)return null;
               const _wins=_last30.filter(e=>e.result==='WIN').length;
               const _wr=Math.round((_wins/_n)*100);
-              const _color=_wr>=70?'rgb(40,204,149)':_wr>=60?'#C9A961':'rgba(255,77,106,0.85)';
-              const _bg=_wr>=70?'rgba(40,204,149,0.08)':_wr>=60?'rgba(201,169,97,0.08)':'rgba(255,77,106,0.06)';
-              const _border=_wr>=70?'rgba(40,204,149,0.30)':_wr>=60?'rgba(201,169,97,0.30)':'rgba(255,77,106,0.22)';
+              const _color=_wr>=70?'rgb(40,204,149)':_wr>=60?'#D9B368':'rgba(255,77,106,0.85)';
+              const _bg=_wr>=70?'rgba(40,204,149,0.08)':_wr>=60?'rgba(217,179,104,0.08)':'rgba(255,77,106,0.06)';
+              const _border=_wr>=70?'rgba(40,204,149,0.30)':_wr>=60?'rgba(217,179,104,0.30)':'rgba(255,77,106,0.22)';
               return <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-lg self-baseline tabular-nums" style={{color:_color,background:_bg,border:`1px solid ${_border}`}} title={`Tara's directional accuracy on last ${_n} resolved windows. Target: ≥70%. Excludes sit-outs.`}>WR · {_wr}% <span className="opacity-60 normal-case">(last {_n})</span></span>;
             })()}
             {/* V10.7.50: Direction Bias pill — surfaces UP/DOWN call distribution and per-dir WR
@@ -17250,9 +17250,9 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               const _arrow=_dominantDir==='UP'?'▲':'▼';
               // Only show when skewed (>55%) so we don't add noise when balanced
               if(_domPct<0.55)return null;
-              const _color=_warn?'rgba(255,77,106,0.95)':_domPct>0.65?'#C9A961':'rgba(237,237,237,0.55)';
-              const _bg=_warn?'rgba(255,77,106,0.12)':_domPct>0.65?'rgba(201,169,97,0.08)':'rgba(237,237,237,0.04)';
-              const _border=_warn?'rgba(255,77,106,0.40)':_domPct>0.65?'rgba(201,169,97,0.30)':'rgba(237,237,237,0.15)';
+              const _color=_warn?'rgba(255,77,106,0.95)':_domPct>0.65?'#D9B368':'rgba(237,237,237,0.55)';
+              const _bg=_warn?'rgba(255,77,106,0.12)':_domPct>0.65?'rgba(217,179,104,0.08)':'rgba(237,237,237,0.04)';
+              const _border=_warn?'rgba(255,77,106,0.40)':_domPct>0.65?'rgba(217,179,104,0.30)':'rgba(237,237,237,0.15)';
               return(
                 <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-lg self-baseline tabular-nums" style={{color:_color,background:_bg,border:`1px solid ${_border}`}} title={`Last ${_last30.length} resolved windows: UP=${_up.length} (${Math.round(_upWR*100)}% WR) · DOWN=${_dn.length} (${Math.round(_dnWR*100)}% WR).${_warn?' Warning: dominant direction losing more than winning.':''}`}>
                   {_arrow}{Math.round(_domPct*100)}% · {Math.round(_domWR*100)}%WR
@@ -17270,7 +17270,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               const _t=snap.tier;
               const _isTier1=_t==='super-confluence'||_t==='confluence'||_t==='structural-led'||_t==='tape-led'||_t==='rising-confluence'||_t==='patient'||_t==='exceptional';
               const _isTier3=_t==='single'||_t==='time-cap-commit'||_t==='timer-commit'||_t==='no-go-data'||_t==='no-go-edge';
-              const _color=_isTier1?'#7fa189':_isTier3?'#b26558':'#C9A961';
+              const _color=_isTier1?'#6FA98C':_isTier3?'#C06A72':'#D9B368';
               return <span
                 className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-lg self-baseline tabular-nums"
                 style={{color:_color,background:`${_color}1c`,border:`1px solid ${_color}55`}}
@@ -17336,9 +17336,9 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _dir=_post>=50?'UP':'DOWN';
           const _zone=_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
           const _zoneLabel=_conv<5?'DEADZONE — coin flip':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
-          const _zoneColor=_conv<5?'rgb(255,77,106)':_conv<10?'#C9A961':_conv<15?'rgb(40,204,149)':'rgb(52,211,153)';
-          const _zoneBg=_conv<5?'rgba(255,77,106,0.06)':_conv<10?'rgba(201,169,97,0.06)':_conv<15?'rgba(40,204,149,0.06)':'rgba(52,211,153,0.08)';
-          const _zoneBorder=_conv<5?'rgba(255,77,106,0.30)':_conv<10?'rgba(201,169,97,0.30)':_conv<15?'rgba(40,204,149,0.30)':'rgba(52,211,153,0.40)';
+          const _zoneColor=_conv<5?'rgb(255,77,106)':_conv<10?'#D9B368':_conv<15?'rgb(40,204,149)':'rgb(52,211,153)';
+          const _zoneBg=_conv<5?'rgba(255,77,106,0.06)':_conv<10?'rgba(217,179,104,0.06)':_conv<15?'rgba(40,204,149,0.06)':'rgba(52,211,153,0.08)';
+          const _zoneBorder=_conv<5?'rgba(255,77,106,0.30)':_conv<10?'rgba(217,179,104,0.30)':_conv<15?'rgba(40,204,149,0.30)':'rgba(52,211,153,0.40)';
           const _dirColor=_dir==='UP'?'rgb(40,204,149)':'rgb(255,77,106)';
           // Position on 0-30+ scale (clamp at 30 for visual)
           const _maxScale=30;
@@ -17389,8 +17389,8 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _isEdgeWatch=snap.noGoCategory==='no-go-edge'||snap.tier==='no-go-edge'||snap.noGoCategory==='no-go-coinflip-late'||snap.tier==='no-go-coinflip-late';
           const _isHardOverride=(snap.wasOverriddenNoTrade||snap.wasOverriddenSitOut)&&!_isEdgeWatch;
           const _color=_isHardOverride?'rgba(255,77,106,0.95)':T2_GOLD;
-          const _bg=_isHardOverride?'rgba(255,77,106,0.10)':'rgba(201,169,97,0.10)';
-          const _border=_isHardOverride?'rgba(255,77,106,0.35)':'rgba(201,169,97,0.28)';
+          const _bg=_isHardOverride?'rgba(255,77,106,0.10)':'rgba(217,179,104,0.10)';
+          const _border=_isHardOverride?'rgba(255,77,106,0.35)':'rgba(217,179,104,0.28)';
           const _label=_isEdgeWatch?'Edge Watch'
             :snap.wasOverriddenNoTrade?'No-Trade Override'
             :snap._originalTier?`V11 Gate (was ${snap._originalTier})`
@@ -17411,7 +17411,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             {snap.v11Size&&(
               <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded-lg"
                     style={{background:snap.v11Size==='FULL'?'rgba(52,211,153,0.18)':snap.v11Size==='STANDARD'?'rgba(212,162,76,0.15)':snap.v11Size==='HALF'?'rgba(251,146,60,0.15)':'rgba(239,68,68,0.15)',
-                            color:snap.v11Size==='FULL'?'#7fa189':snap.v11Size==='STANDARD'?'#fcd34d':snap.v11Size==='HALF'?'#fb923c':'#fca5a5'}}>
+                            color:snap.v11Size==='FULL'?'#6FA98C':snap.v11Size==='STANDARD'?'#fcd34d':snap.v11Size==='HALF'?'#fb923c':'#fca5a5'}}>
                 {snap.v11Size} SIZE
               </span>
             )}
@@ -17423,7 +17423,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             </span>
             {snap.v11KalshiEdge!=null&&(
               <span className="text-[9px] font-mono"
-                    style={{color:snap.v11KalshiEdge>=8?'#7fa189':snap.v11KalshiEdge<=-5?'#fca5a5':'#94a3b8'}}>
+                    style={{color:snap.v11KalshiEdge>=8?'#6FA98C':snap.v11KalshiEdge<=-5?'#fca5a5':'#94a3b8'}}>
                 K{snap.v11KalshiEdge>=0?'+':''}{snap.v11KalshiEdge.toFixed(0)}
               </span>
             )}
@@ -17488,13 +17488,13 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _pastThresh=_kalshiForDir!=null&&_kalshiForDir>_ENTRY_THRESH;
           const _closeToThresh=_kalshiForDir!=null&&_kalshiForDir>=62&&_kalshiForDir<=_ENTRY_THRESH;
           const _kColor=_pastThresh?'text-rose-400':_closeToThresh?'text-amber-400':_kalshiForDir!=null?'text-emerald-400':'text-[#EDEDED]/55';
-          const _kBorder=_pastThresh?'border-rose-500/40':_closeToThresh?'border-amber-500/30':'border-[#2A2A2A]';
+          const _kBorder=_pastThresh?'border-rose-500/40':_closeToThresh?'border-amber-500/30':'border-[#2A2A34]';
           // V6.4.1: live both-side Kalshi % even when Tara has no direction yet
           const _kalshiLive=_kPct!=null&&!isNaN(_kPct);
           const _kUpPct=_kalshiLive?Math.round(_kPct):null;
           const _kDnPct=_kalshiLive?Math.round(100-_kPct):null;
           return(
-          <div className={`flex items-center justify-between gap-2 mb-3 px-2.5 py-1.5 rounded-lg bg-[#0A0A0A] border ${_kBorder}`}>
+          <div className={`flex items-center justify-between gap-2 mb-3 px-2.5 py-1.5 rounded-lg bg-[#08080B] border ${_kBorder}`}>
             <div className="flex items-baseline gap-1.5 min-w-0">
               <span className={`text-[14px] ${_kColor}`}>◷</span>
               <span className={`text-[10px] uppercase tracking-[0.18em] font-bold shrink-0 ${_kColor}`}>Entry Window</span>
@@ -17547,7 +17547,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             const _tw=snap?(snap._v112Why||null):(taraCall&&taraCall._v112Why||null);
             if(!_tm&&!_tw)return null;
             const _tmU=(_tm||'').toUpperCase();
-            const _color=_tm==='wait'?'#C9A961':_tm==='early'?'#7fa189':_tm==='late'?'#fb923c':'#a7f3d0';
+            const _color=_tm==='wait'?'#D9B368':_tm==='early'?'#6FA98C':_tm==='late'?'#fb923c':'#a7f3d0';
             const _icon=_tm==='wait'?'\u23F3':_tm==='early'?'\u26A1':_tm==='late'?'\u23F1':'\u2192';
             const _verb=_tm==='wait'?'WAIT':_tm==='early'?'LOCK EARLY':_tm==='late'?'LOCK LATE':'LOCK NOW';
             return React.createElement('div',{className:'flex items-center gap-1.5 mb-1 px-2 py-1 rounded-lg',
@@ -17556,12 +17556,12 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               _tw?React.createElement('span',{className:'text-[10px] opacity-60 leading-tight truncate'},_tw):null
             );
           })()}
-          <div className="relative h-1.5 bg-[#0A0A0A] rounded-full overflow-hidden">
+          <div className="relative h-1.5 bg-[#08080B] rounded-full overflow-hidden">
             {/* Minute tick markers */}
             {_minMarkers.map((mk,i)=>(
               <div key={i} className="absolute top-0 bottom-0 w-px" style={{
                 left:mk.pos+'%',
-                background:mk.isPast?'rgba(201,169,97,0.4)':'rgba(237,237,237,0.15)',
+                background:mk.isPast?'rgba(217,179,104,0.4)':'rgba(237,237,237,0.15)',
               }}></div>
             ))}
             {/* Progress fill — elapsed-time based */}
@@ -17598,7 +17598,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _edgeColor=_edge>=15?'text-emerald-400':_edge>=5?'text-emerald-400/70':_edge>=-5?'text-[#EDEDED]/55':'text-amber-400/85';
           const _edgeLabel=_edge>=20?'BIG EDGE':_edge>=10?'GOOD EDGE':_edge>=0?'MODEST EDGE':_edge>=-10?'LATE ENTRY':'KALSHI AHEAD';
           return(
-            <div className="mb-3 px-2.5 py-2 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]">
+            <div className="mb-3 px-2.5 py-2 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]">
               <div className="flex items-baseline justify-between gap-2 mb-1">
                 <span className="text-[8px] uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold">Edge vs market</span>
                 <span className={`text-[9px] uppercase tracking-wider font-bold ${_edgeColor}`}>{_edgeLabel}</span>
@@ -17616,7 +17616,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         })()}
 
         {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
-        <div className="border-t border-[#1F1F1F] pt-2.5">
+        <div className="border-t border-[#1C1C22] pt-2.5">
           <div className="flex justify-between items-baseline mb-1.5">
             {/* V13.4.162: was "Tara's Record", which read as an all-time count. The
                 numbers are a ROLLING WINDOW (the cloud log is capped at
@@ -17641,7 +17641,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             <div className="h-7 w-px bg-[#EDEDED]/10"></div>
             <div className="flex flex-col items-center">
               <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_GOLD}}>{sc.sitouts||0}</span>
-              <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(201,169,97,0.6)'}}>sat out</span>
+              <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(217,179,104,0.6)'}}>sat out</span>
             </div>
           </div>
         </div>
@@ -17795,8 +17795,8 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           }
           return(
             <>
-            <div className="border-t border-[#1F1F1F] pt-2.5 mt-2.5">
-              <div className="px-2.5 py-2 rounded-lg" style={{background:'#141414',border:`1px solid ${_dcCol.replace('rgb','rgba').replace(')',',0.35)').replace('rgba(','rgba(')}`}}>
+            <div className="border-t border-[#1C1C22] pt-2.5 mt-2.5">
+              <div className="px-2.5 py-2 rounded-lg" style={{background:'#0E0E12',border:`1px solid ${_dcCol.replace('rgb','rgba').replace(')',',0.35)').replace('rgba(','rgba(')}`}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold">Decision Clock</span>
                   <span className="text-[9px] uppercase tracking-wide tabular-nums" style={{color:_dcCol}}>{_dcState}</span>
@@ -17805,8 +17805,8 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 <div className="text-[9px] text-[#EDEDED]/50 mt-0.5 leading-snug">{_dcSub}</div>
               </div>
             </div>
-            <div className="border-t border-[#1F1F1F] pt-2.5 mt-2.5">
-              <div className="px-2.5 py-2 rounded-lg" style={{background:'#141414',border:'1px solid #1F1F1F'}}>
+            <div className="border-t border-[#1C1C22] pt-2.5 mt-2.5">
+              <div className="px-2.5 py-2 rounded-lg" style={{background:'#0E0E12',border:'1px solid #1C1C22'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold">Lock ETA</span>
                   {_tierLabel&&<span className="text-[9px] uppercase tracking-wide text-[#EDEDED]/35 tabular-nums">{_tierLabel}</span>}
@@ -17819,7 +17819,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           );
         })()}
         {!isCommittedSnap&&(onSoftHint||onHardForce)&&(
-          <div className="border-t border-[#1F1F1F] pt-2.5 mt-2.5 flex flex-col gap-1.5">
+          <div className="border-t border-[#1C1C22] pt-2.5 mt-2.5 flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold">Force Call</span>
               {onHardForce&&(
@@ -17854,7 +17854,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 },
                 disabled:_isActive,
                 className:'w-full py-2 px-3 rounded-lg text-xs font-bold uppercase tracking-wide transition-all text-center',
-                style:_isActive?{background:'rgba(201,169,97,0.25)',color:T2_GOLD,border:'1px solid '+T2_GOLD,opacity:0.8}:{background:'rgba(201,169,97,0.12)',color:T2_GOLD,border:'1px solid '+T2_GOLD_BORDER},
+                style:_isActive?{background:'rgba(217,179,104,0.25)',color:T2_GOLD,border:'1px solid '+T2_GOLD,opacity:0.8}:{background:'rgba(217,179,104,0.12)',color:T2_GOLD,border:'1px solid '+T2_GOLD_BORDER},
               },_isActive?`⚡ Hint active · ${_hintRemaining}s left`:'⚡ Hint to Lock Faster');
             })()}
             <span className="text-[9px] text-[#EDEDED]/30 italic text-center">
@@ -17933,7 +17933,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
   return React.createElement('div',{ref:wrapRef,className:'relative'},
     React.createElement('button',{
       onClick:()=>setOpen(!open),
-      className:'flex items-center gap-1.5 bg-[#0A0A0A] border border-[#2A2A2A] px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors shadow-sm',
+      className:'flex items-center gap-1.5 bg-[#08080B] border border-[#2A2A34] px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(217,179,104,0.4)] transition-colors shadow-sm',
     },
       React.createElement('span',{className:`text-[10px] text-[#EDEDED]/55 transition-transform inline-block ${open?'rotate-180':''}`},'▾'),
       React.createElement('span',{className:'text-[#EDEDED]/65 text-[11px]'},'Past'),
@@ -17946,8 +17946,8 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
       ),
     ),
     open&&React.createElement('div',{
-      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#171717] border border-[#2A2A2A] rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
-      style:{boxShadow:'0 8px 32px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(201,169,97,0.06)'},
+      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#101014] border border-[#2A2A34] rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
+      style:{boxShadow:'0 8px 32px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(217,179,104,0.06)'},
     },
       filtered.slice(0,15).map((w)=>React.createElement('div',{
         key:w.id,
@@ -17984,12 +17984,12 @@ function BestPracticesModal({open,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#171717] border border-[#2A2A2A] rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#101014] border border-[#2A2A34] rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
-      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
+      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(217,179,104,0.06)'},
     },
       // Header
-      React.createElement('div',{className:'flex justify-between items-baseline mb-4 sm:mb-5 pb-3 border-b border-[#1F1F1F]'},
+      React.createElement('div',{className:'flex justify-between items-baseline mb-4 sm:mb-5 pb-3 border-b border-[#1C1C22]'},
         React.createElement('div',null,
           React.createElement('h2',{className:'text-lg sm:text-xl font-serif text-white tracking-tight'},'Best Practices · Trading with Tara'),
           React.createElement('p',{className:'text-[10px] uppercase tracking-wider text-[#EDEDED]/45 mt-0.5'},'how to extract her edge'),
@@ -18024,9 +18024,9 @@ function BestPracticesModal({open,onClose}){
           `4+ losses in a row triggers a 15min forced cooldown. The override exists but is psychologically expensive — tilt entries are statistically the worst trades you'll ever make. Take the break.`),
         _row('✗','rgb(255,77,106)','TIGHT-edge bucket with sub-50% WR',
           `Check the edge-bucket WR in the Performance card. If your TIGHT bucket is below 50%, every TIGHT trade is destroying capital. This filter alone often saves more than any other improvement.`),
-        _row('⚠','rgba(201,169,97,0.85)','Macro event imminent',
+        _row('⚠','rgba(217,179,104,0.85)','Macro event imminent',
           `When CPI/NFP/FOMC is within ~30 minutes, posterior models break down. The market is repricing on news, not orderflow. Sit out unless you have specific edge on the event.`),
-        _row('⚠','rgba(201,169,97,0.85)','Phase transition in progress',
+        _row('⚠','rgba(217,179,104,0.85)','Phase transition in progress',
           `Asia → EU open, EU → NY open are 15-30min windows where regime can flip violently. The phase pill above shows next transition — give those windows extra caution.`),
       ]),
 
@@ -18038,7 +18038,7 @@ function BestPracticesModal({open,onClose}){
           `Score 70+ means vol acceleration + volume spike + tape imbalance are all firing. Even when you're winning, this is when reversals happen. Be ready to exit.`),
         _row('🐋','rgba(168,85,247,0.85)','Whale prints opposing your position',
           `A $200K+ whale on the wrong side, especially in the last 60s, is the leading indicator of a late-window reversal. Watch the whale strip — if you see contrary prints stacking, exit.`),
-        _row('⤵','rgba(201,169,97,0.85)','Conviction FADING',
+        _row('⤵','rgba(217,179,104,0.85)','Conviction FADING',
           `In the DecisionalOverlay, the Conv chip shows BUILDING / STABLE / FADING. If it goes FADING (Tara's confidence dropped 5+ points since lock), her own model is losing confidence. That's your cue.`),
       ]),
 
@@ -18060,9 +18060,9 @@ function BestPracticesModal({open,onClose}){
           `Hard rule. Don't argue with it. The math says positions that hit -30% statistically continue down — the recovery rate is below your fee + slippage cost.`),
         _row('🛑','rgb(255,77,106)','Advisor: "Tara LOCKED — STALE"',
           `The conditions justifying the lock have inverted. Tara herself is telling you to exit. The exit-warning logic only fires after 30+ point posterior flip — by the time it fires, the trade is statistically lost.`),
-        _row('⚠','rgba(201,169,97,0.85)','In-loss for 3+ minutes',
+        _row('⚠','rgba(217,179,104,0.85)','In-loss for 3+ minutes',
           `Configure auto-suggest in Trading Settings. If you've been underwater for 3 minutes and price isn't recovering, the trade was likely wrong from start. Cut and re-evaluate.`),
-        _row('⚠','rgba(201,169,97,0.85)','Whale print opposing in last 60s',
+        _row('⚠','rgba(217,179,104,0.85)','Whale print opposing in last 60s',
           `Late-window whale spike against you is THE most common reversal cause. Even if Tara still says you should be winning, the path to expiry just got dangerous.`),
       ]),
 
@@ -18080,7 +18080,7 @@ function BestPracticesModal({open,onClose}){
       _section('Anti-tilt psychology',[
         _row('🛑','rgb(255,77,106)','Respect the cooldown',
           `4 losses in a row → 15min forced cooldown. Built-in for a reason: empirically, the trade right after a 4-loss streak has the worst WR you'll ever produce. The override exists only for genuine setups; never override out of frustration.`),
-        _row('⚠','rgba(201,169,97,0.85)','Recognize chase patterns',
+        _row('⚠','rgba(217,179,104,0.85)','Recognize chase patterns',
           `Common tilt: lose 2 in a row → take a tight-edge call you'd normally skip → lose → repeat. The edge-bucket filter blocks this; trust it.`),
         _row('—','rgba(237,237,237,0.65)','Wins also need management',
           `4+ win streak → don't size up. Mean reversion is real. The heater pill warns you not to give back gains by suddenly trading bigger.`),
@@ -18112,11 +18112,11 @@ function BestPracticesModal({open,onClose}){
 
       // 10. Auto-execution (V9.3.0+)
       _section('Auto-execution — when to use it',[
-        _row('⚡','rgba(201,169,97,0.95)','Default OFF, dry-run ON',
+        _row('⚡','rgba(217,179,104,0.95)','Default OFF, dry-run ON',
           `Auto-exec is opt-in. When you flip it on, dry-run is on by default — orders are simulated, never sent. Verify a full window in dry-run before flipping the live switch. Settings live in the Trading Settings modal under Kalshi Auto-Execution.`),
-        _row('⚡','rgba(201,169,97,0.95)','Conservative-but-aggressive config',
+        _row('⚡','rgba(217,179,104,0.95)','Conservative-but-aggressive config',
           `Highest-leverage setup: minTier=super-confluence, skipMarginalCaution=ON, lockStabilitySec=5, stopLossDeltaCents=30. Fires 1-3× per day on highest-conviction setups only. Lower volume, much higher WR per fire.`),
-        _row('⚡','rgba(201,169,97,0.95)','High-volume config',
+        _row('⚡','rgba(217,179,104,0.95)','High-volume config',
           `If you want her trading more: minTier=any, all assets/windows on, sizingMode=confidence with $5 low / $25 high. Fires on most windows. Higher noise, more loss-streak exposure — set tighter daily-loss caps to compensate.`),
         _row('⛔','#FF4D6A','Kill switch is in 3 places',
           `Top-bar pill (opens settings), Live Trade Coach status strip (always visible during a trade), and the big red button in settings. Engaging it instantly blocks new orders. Existing positions are NOT auto-closed — you decide whether to manually exit.`),
@@ -18141,12 +18141,12 @@ function BestPracticesModal({open,onClose}){
       ]),
 
       React.createElement('div',{
-        className:'mt-5 pt-4 border-t border-[#1F1F1F] text-center',
+        className:'mt-5 pt-4 border-t border-[#1C1C22] text-center',
       },
         React.createElement('button',{
           onClick:onClose,
           className:'px-6 py-2 rounded-lg text-[12px] uppercase font-bold tracking-wider transition-colors',
-          style:{background:'rgba(201,169,97,0.12)',color:T2_GOLD,border:'1px solid rgba(201,169,97,0.3)'},
+          style:{background:'rgba(217,179,104,0.12)',color:T2_GOLD,border:'1px solid rgba(217,179,104,0.3)'},
         },'Got it'),
       ),
     ),
@@ -18476,14 +18476,14 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     const _toneStyles={
       urgent:{border:'rgba(255,77,106,0.50)',bg:'rgba(255,77,106,0.07)',accent:'rgb(255,77,106)',pulse:true},
       good:  {border:'rgba(40,204,149,0.40)',bg:'rgba(40,204,149,0.05)',accent:'rgb(40,204,149)',pulse:false},
-      watch: {border:'rgba(201,169,97,0.40)',bg:'rgba(201,169,97,0.05)',accent:'rgba(201,169,97,0.95)',pulse:false},
+      watch: {border:'rgba(217,179,104,0.40)',bg:'rgba(217,179,104,0.05)',accent:'rgba(217,179,104,0.95)',pulse:false},
       info:  {border:'rgba(147,197,253,0.30)',bg:'rgba(147,197,253,0.04)',accent:'rgba(147,197,253,0.85)',pulse:false},
     };
     return React.createElement('div',{
       className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
-      style:{border:'1px solid rgba(201,169,97,0.30)',background:'rgba(201,169,97,0.03)'},
+      style:{border:'1px solid rgba(217,179,104,0.30)',background:'rgba(217,179,104,0.03)'},
     },
-      React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#1F1F1F] flex items-baseline justify-between gap-2 flex-wrap'},
+      React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#1C1C22] flex items-baseline justify-between gap-2 flex-wrap'},
         React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap'},
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
           // V9.1.8: Market-character badges — surfaces windowAmplitude + regime so user
@@ -18507,7 +18507,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             const _entry=_waMap[_waLabel]||{plain:_waLabel.toLowerCase(),color:'rgba(237,237,237,0.7)',hint:''};
             return React.createElement('span',{
               className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded-lg',
-              style:{color:_entry.color,background:'#141414',border:'1px solid #1F1F1F'},
+              style:{color:_entry.color,background:'#0E0E12',border:'1px solid #1C1C22'},
               title:`${_waLabel} — ${_entry.hint}. Range: ${Math.round(_wa.rangeBps||0)}bps · ${_wa.directionChanges||0} reversals.`,
             },_entry.plain);
           })(),
@@ -18517,10 +18517,10 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             style:{
               color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(40,204,149)':
                 analysis.regime==='TRENDING DOWN'?'rgba(255,77,106,0.95)':
-                analysis.regime==='HIGH VOL CHOP'?'rgba(201,169,97,0.95)':
+                analysis.regime==='HIGH VOL CHOP'?'rgba(217,179,104,0.95)':
                 'rgba(147,197,253,0.85)',
-              background:'#141414',
-              border:'1px solid #1F1F1F',
+              background:'#0E0E12',
+              border:'1px solid #1C1C22',
             },
             title:`Market regime: ${analysis.regime}`,
           },(()=>{
@@ -18547,8 +18547,8 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       // V9.3.0: Kalshi auto-order status strip — shows when Tara placed an auto-order
       // for this lock. Compact: status pill, fill price, contracts, kill switch.
       autoOrderState&&React.createElement('div',{
-        className:'px-3 sm:px-4 py-1.5 border-b border-[#1F1F1F] flex items-baseline justify-between gap-2 flex-wrap text-[10px]',
-        style:{background:autoOrderState.dryRun?'rgba(212,162,76,0.04)':'rgba(201,169,97,0.04)'},
+        className:'px-3 sm:px-4 py-1.5 border-b border-[#1C1C22] flex items-baseline justify-between gap-2 flex-wrap text-[10px]',
+        style:{background:autoOrderState.dryRun?'rgba(212,162,76,0.04)':'rgba(217,179,104,0.04)'},
       },
         React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap'},
           React.createElement('span',{
@@ -18559,11 +18559,11 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
               // V9.17.16: 'exited' is the final state — neutral gray, P&L color carries the meaning
               if(s==='exited')return{color:'rgba(237,237,237,0.75)',border:'1px solid rgba(237,237,237,0.25)',background:'rgba(237,237,237,0.04)'};
               if(s==='error'||s==='canceled')return{color:'#FF4D6A',border:'1px solid rgba(255,77,106,0.40)',background:'rgba(255,77,106,0.08)'};
-              if(s==='exiting')return{color:'#D4A24C',border:'1px solid rgba(212,162,76,0.40)',background:'rgba(212,162,76,0.08)'};
+              if(s==='exiting')return{color:'#D9B368',border:'1px solid rgba(212,162,76,0.40)',background:'rgba(212,162,76,0.08)'};
               // V9.17.11: patient-waiting/skipped get neutral grey — not "active order" gold
               if(s==='patient-waiting')return{color:'rgba(196,181,253,0.95)',border:'1px solid rgba(196,181,253,0.35)',background:'rgba(124,93,250,0.08)'};
               if(s==='patient-skipped')return{color:'rgba(237,237,237,0.55)',border:'1px solid rgba(237,237,237,0.15)',background:'rgba(237,237,237,0.04)'};
-              return{color:T2_GOLD,border:'1px solid rgba(201,169,97,0.40)',background:'rgba(201,169,97,0.06)'};
+              return{color:T2_GOLD,border:'1px solid rgba(217,179,104,0.40)',background:'rgba(217,179,104,0.06)'};
             })(),
           },(autoOrderState.dryRun?'DRY · ':'')+'KALSHI '+String(autoOrderState.status||'').toUpperCase()),
           // V9.17.16: enhanced order info display per user request.
@@ -18645,7 +18645,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
         autoOrderState.status==='error'&&typeof onClearAutoOrder==='function'&&React.createElement('button',{
           onClick:onClearAutoOrder,
           className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider mr-1',
-          style:{color:'rgba(201,169,97,0.95)',border:'1px solid rgba(201,169,97,0.40)',background:'rgba(201,169,97,0.06)'},
+          style:{color:'rgba(217,179,104,0.95)',border:'1px solid rgba(217,179,104,0.40)',background:'rgba(217,179,104,0.06)'},
           title:'Dismiss the error state. Auto-exec will be eligible to fire on the next window.',
         },'✕ Clear'),
         onKillSwitch&&React.createElement('button',{
@@ -18704,7 +18704,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
         onClick:(e)=>{e.preventDefault();_setSettingsTip(_isOpen?null:id);},
         title:tip,
         className:'text-[9px] opacity-60 hover:opacity-100 cursor-pointer',
-        style:{background:'none',border:'none',padding:0,color:'#C9A961'},
+        style:{background:'none',border:'none',padding:0,color:'#D9B368'},
       },'(?)'),
     );
   };
@@ -18713,7 +18713,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
     if(_settingsTip!==id)return null;
     return React.createElement('div',{
       className:'mt-1 px-2 py-1.5 rounded-lg text-[10px] leading-relaxed',
-      style:{background:'rgba(201,169,97,0.06)',border:'1px solid rgba(201,169,97,0.20)',color:'rgba(237,237,237,0.85)'},
+      style:{background:'rgba(217,179,104,0.06)',border:'1px solid rgba(217,179,104,0.20)',color:'rgba(237,237,237,0.85)'},
     },tip);
   };
   return React.createElement('div',{
@@ -18721,9 +18721,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#171717] border border-[#2A2A2A] rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#101014] border border-[#2A2A34] rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
-      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
+      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(217,179,104,0.06)'},
     },
       React.createElement('div',{className:'flex justify-between items-baseline mb-4'},
         React.createElement('div',null,
@@ -18738,7 +18738,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       //   payouts depend on kalshiAtLock entry price, not a fixed 2:1 ratio.
       //   The fields stay (used for P&L stats display + Kelly sizing math) but
       //   the misleading subtitle is replaced with a clarifying note.
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'Position Sizing — Stats Display'),
         React.createElement('div',{className:'grid grid-cols-2 gap-3'},
           React.createElement('label',{className:'block'},
@@ -18746,7 +18746,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('input',{
               type:'number',min:0.01,step:0.01,value:settings.betSize,
               onChange:(e)=>_update('betSize',_num(e.target.value,10)),
-              className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+              className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
             }),
             React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
               `= $${(Number(settings.betSize)||0).toFixed(2)} per trade (for P&L tracking)`,
@@ -18757,14 +18757,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('input',{
               type:'number',min:0.01,step:0.01,value:settings.winPayout,
               onChange:(e)=>_update('winPayout',_num(e.target.value,8.5)),
-              className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+              className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
             }),
             React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
               `= average net profit when you win (for stats display)`,
             ),
           ),
         ),
-        React.createElement('div',{className:'mt-2 text-[10px] text-[#C9A961]/70'},
+        React.createElement('div',{className:'mt-2 text-[10px] text-[#D9B368]/70'},
           '⚠ Actual Kalshi payouts vary by entry price. Real bet sizing is set under "Max bet/trade" in Risk Guardrails below.',
         ),
       ),
@@ -18776,7 +18776,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       //   so no extra state needed and persists nothing across reloads.
       React.createElement('details',{
         className:'mb-4 rounded-lg',
-        style:{background:'rgba(0,0,0,0.20)',border:'1px solid #1F1F1F'},
+        style:{background:'rgba(0,0,0,0.20)',border:'1px solid #1C1C22'},
       },
         React.createElement('summary',{
           className:'px-4 py-3 cursor-pointer flex items-baseline justify-between select-none',
@@ -18790,7 +18790,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
         ),
         React.createElement('div',{className:'px-3 pb-3 pt-1'},
       // V9.9.6: TIER-1 ONLY MODE — mechanically prevents marginal-tier locks
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
         React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer gap-2'},
           React.createElement('div',{className:'min-w-0 flex-1'},
             React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-0.5'},'Tier-1 only mode'),
@@ -18812,14 +18812,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       //   are now the single source of truth. antiTiltEnabled/antiTiltStreakLen/
       //   antiTiltMinutes settings are kept in localStorage for backward compat
       //   but no longer wired to any active code path or surfaced in UI.
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/35 mb-1'},'Anti-tilt cooldown'),
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 leading-snug'},
           'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Cooldown after losses'),' in Kalshi Auto-Execution settings below. Single source of truth, no more duplicates.',
         ),
       ),
       // High-edge Discord filter
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
         React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
           React.createElement('div',null,
             React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-0.5'},'Discord: high-edge alerts only'),
@@ -18832,7 +18832,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           React.createElement('input',{
             type:'number',min:5,max:40,step:1,value:settings.highEdgeMinPp,
             onChange:(e)=>_update('highEdgeMinPp',Math.max(5,Math.min(40,_num(e.target.value,15)))),
-            className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
           }),
           // V9.17.20: unit hint
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -18846,7 +18846,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       //   (suggested $0.19 exits on $0.84-expected positions per real-world test).
       //   takeProfitEnabled/Offer/cutLossEnabled/Minutes preserved in localStorage
       //   for backward compat, no longer surfaced.
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/35 mb-1'},'Auto exit suggestions'),
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 leading-snug'},
           'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Exit thresholds'),' in Kalshi Auto-Execution below. The auto-exit layer (88¢/13¢) is the active system — single source of truth.',
@@ -18857,7 +18857,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
         React.createElement(MissionPanel,{mission,setMission,regimeDirCalibration,killSwitchEngaged,setKillSwitchEngaged,compact:false}),
       ),
       // ── V9.3.0: KALSHI AUTO-EXECUTION ─────────────────────────────────
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg border',style:{background:'rgba(201,169,97,0.04)',borderColor:'rgba(201,169,97,0.20)'}},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg border',style:{background:'rgba(217,179,104,0.04)',borderColor:'rgba(217,179,104,0.20)'}},
         React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
           React.createElement('div',null,
             React.createElement('div',{className:'flex items-baseline gap-2'},
@@ -18872,7 +18872,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             const _on=!!autoExecSettings?.enabled&&!_killed;
             const _dry=!!autoExecSettings?.dryRun;
             const _label=_killed?'KILLED':_on?(_dry?'LIVE · DRY-RUN':'LIVE'):'OFF';
-            const _color=_killed?'#FF4D6A':_on?(_dry?'#D4A24C':'#28CC95'):'rgba(237,237,237,0.45)';
+            const _color=_killed?'#FF4D6A':_on?(_dry?'#D9B368':'#28CC95'):'rgba(237,237,237,0.45)';
             return React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-lg',style:{color:_color,border:`1px solid ${_color}`,background:`${_color}15`}},_label);
           })(),
         ),
@@ -18894,12 +18894,12 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             // Step 1
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#28CC95'}},'1. Get Kalshi API credentials'),
-              React.createElement('p',null,'Log into Kalshi → Account → API. Generate a new RSA key pair. Kalshi keeps the public key; you save the private key (PKCS#8 PEM format starting with ',React.createElement('code',{className:'text-[10px] bg-[#0A0A0A] px-1'},'-----BEGIN PRIVATE KEY-----'),'). Copy your Key ID (UUID).'),
+              React.createElement('p',null,'Log into Kalshi → Account → API. Generate a new RSA key pair. Kalshi keeps the public key; you save the private key (PKCS#8 PEM format starting with ',React.createElement('code',{className:'text-[10px] bg-[#08080B] px-1'},'-----BEGIN PRIVATE KEY-----'),'). Copy your Key ID (UUID).'),
             ),
             // Step 2
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#28CC95'}},'2. Paste credentials below'),
-              React.createElement('p',null,'Both fields are stored in your browser only. Anthropic and Tara servers never see them. Test connection — expect a ',React.createElement('span',{className:'text-emerald-400'},'✓ balance $X.XX'),'. If you see ',React.createElement('span',{className:'text-rose-400'},'✗ http 401'),', your Vercel rewrite at ',React.createElement('code',{className:'text-[10px] bg-[#0A0A0A] px-1'},'/api/kalshi/*'),' is stripping custom headers — fix vercel.json before continuing.'),
+              React.createElement('p',null,'Both fields are stored in your browser only. Anthropic and Tara servers never see them. Test connection — expect a ',React.createElement('span',{className:'text-emerald-400'},'✓ balance $X.XX'),'. If you see ',React.createElement('span',{className:'text-rose-400'},'✗ http 401'),', your Vercel rewrite at ',React.createElement('code',{className:'text-[10px] bg-[#08080B] px-1'},'/api/kalshi/*'),' is stripping custom headers — fix vercel.json before continuing.'),
             ),
             // Step 3
             React.createElement('div',null,
@@ -18909,12 +18909,12 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             // Step 4
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#28CC95'}},'4. Test in dry-run'),
-              React.createElement('p',null,'Toggle ',React.createElement('strong',{className:'text-white'},'Auto-place orders on lock'),' ON, leave ',React.createElement('strong',{style:{color:'#D4A24C'}},'Dry-run'),' ON. Wait for Tara to lock a window. Verify the ',React.createElement('code',{className:'text-[10px] bg-[#0A0A0A] px-1'},'KALSHI · DRY · placing → resting → filled'),' status strip appears in Live Trade Coach. Confirm the trade lands in the call log with ',React.createElement('code',{className:'text-[10px] bg-[#0A0A0A] px-1'},'autoExec: true'),'.'),
+              React.createElement('p',null,'Toggle ',React.createElement('strong',{className:'text-white'},'Auto-place orders on lock'),' ON, leave ',React.createElement('strong',{style:{color:'#D9B368'}},'Dry-run'),' ON. Wait for Tara to lock a window. Verify the ',React.createElement('code',{className:'text-[10px] bg-[#08080B] px-1'},'KALSHI · DRY · placing → resting → filled'),' status strip appears in Live Trade Coach. Confirm the trade lands in the call log with ',React.createElement('code',{className:'text-[10px] bg-[#08080B] px-1'},'autoExec: true'),'.'),
             ),
             // Step 5
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#28CC95'}},'5. Go live carefully'),
-              React.createElement('p',null,'Only after one full window working in dry-run, flip ',React.createElement('strong',{style:{color:'#D4A24C'}},'Dry-run'),' OFF. Use the smallest bet you can. Watch the next window completely — verify the order Tara placed matches what shows in your Kalshi UI. Only then increase size.'),
+              React.createElement('p',null,'Only after one full window working in dry-run, flip ',React.createElement('strong',{style:{color:'#D9B368'}},'Dry-run'),' OFF. Use the smallest bet you can. Watch the next window completely — verify the order Tara placed matches what shows in your Kalshi UI. Only then increase size.'),
             ),
             // Step 6
             React.createElement('div',null,
@@ -18924,7 +18924,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             // Step 7
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#28CC95'}},'7. Tune entry filters'),
-              React.createElement('p',null,'See ',React.createElement('strong',{className:'text-white'},'Advanced entry filters'),' below. Conservative play: set ',React.createElement('strong',{className:'text-white'},'Minimum tier'),' to ',React.createElement('code',{className:'text-[10px] bg-[#0A0A0A] px-1'},'super-confluence'),' and turn on ',React.createElement('strong',{className:'text-white'},'Skip marginal-zone caution'),'. This trades way less often but with much higher conviction.'),
+              React.createElement('p',null,'See ',React.createElement('strong',{className:'text-white'},'Advanced entry filters'),' below. Conservative play: set ',React.createElement('strong',{className:'text-white'},'Minimum tier'),' to ',React.createElement('code',{className:'text-[10px] bg-[#08080B] px-1'},'super-confluence'),' and turn on ',React.createElement('strong',{className:'text-white'},'Skip marginal-zone caution'),'. This trades way less often but with much higher conviction.'),
             ),
           ),
         ),
@@ -18935,14 +18935,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           style:killSwitchEngaged?{background:'rgba(255,77,106,0.20)',color:'#FF4D6A',border:'1px solid rgba(255,77,106,0.50)'}:{background:'rgba(255,77,106,0.06)',color:'#FF4D6A',border:'1px solid rgba(255,77,106,0.30)'},
         },killSwitchEngaged?'⛔ Kill switch ENGAGED — tap to release':'Engage kill switch'),
         // API credentials
-        React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#0A0A0A]'},
+        React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#08080B]'},
           React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'API credentials'),
           React.createElement('label',{className:'block mb-2'},
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Key ID'),
             React.createElement('input',{
               type:'text',value:kalshiCreds?.apiKeyId||'',spellCheck:false,autoComplete:'off',
               onChange:(e)=>saveKalshiCreds({apiKeyId:e.target.value,privateKeyPem:kalshiCreds?.privateKeyPem||''}),
-              className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-[11px] tabular-nums focus:border-[#C9A961] focus:outline-none font-mono',
+              className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-[11px] tabular-nums focus:border-[#D9B368] focus:outline-none font-mono',
               placeholder:'00000000-0000-0000-0000-000000000000',
             }),
           ),
@@ -18951,7 +18951,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('textarea',{
               rows:4,value:kalshiCreds?.privateKeyPem||'',spellCheck:false,autoComplete:'off',
               onChange:(e)=>saveKalshiCreds({apiKeyId:kalshiCreds?.apiKeyId||'',privateKeyPem:e.target.value}),
-              className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-[10px] focus:border-[#C9A961] focus:outline-none font-mono leading-tight',
+              className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-[10px] focus:border-[#D9B368] focus:outline-none font-mono leading-tight',
               placeholder:'-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----',
             }),
           ),
@@ -18977,7 +18977,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           ),
         ),
         // Master toggles
-        React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#0A0A0A]'},
+        React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#08080B]'},
           React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mb-2'},
             React.createElement('div',null,
               React.createElement('div',{className:'text-[11px] font-bold text-white'},'Auto-place orders on lock'),
@@ -19003,7 +19003,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           ),
           React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
             React.createElement('div',null,
-              React.createElement('div',{className:'text-[11px] font-bold',style:{color:'#D4A24C'}},'Dry-run mode'),
+              React.createElement('div',{className:'text-[11px] font-bold',style:{color:'#D9B368'}},'Dry-run mode'),
               React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'Simulates orders without hitting Kalshi. Keep ON until you\'ve verified one sandbox order end-to-end.'),
             ),
             React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.dryRun,onChange:(e)=>setAutoExecSettings(prev=>({...prev,dryRun:e.target.checked})),className:'ml-2'}),
@@ -19018,7 +19018,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
         //   6. Entry filters             — Edge cap, Skip time-cap-commit
         //   7. Decision routing          — Phase 4 mode
         //   Each field's wiring is unchanged; only the wrapping divs reorder them.
-        React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#0A0A0A]'},
+        React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#08080B]'},
           React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-1'},'Risk guardrails'),
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mb-3 leading-relaxed'},'Hard discipline guards. Block or exit trades automatically — no opinions, just rules.'),
           //
@@ -19190,9 +19190,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 },
                 className:'text-[10px] py-2.5 px-1 rounded-lg transition-colors',
                 style:{
-                  background:'rgba(201,169,97,0.10)',
-                  border:'1px solid rgba(201,169,97,0.45)',
-                  color:'rgb(201,169,97)',
+                  background:'rgba(217,179,104,0.10)',
+                  border:'1px solid rgba(217,179,104,0.45)',
+                  color:'rgb(217,179,104)',
                 },
                 title:'Confident lock + cheap entry. Waits for price to drop to ≤70¢ before firing. Patient tier wins 80% recent / 66% lifetime.',
               },
@@ -19341,9 +19341,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 },
                 className:'text-[10px] py-2 px-1 rounded-lg transition-colors',
                 style:{
-                  background:'rgba(201,169,97,0.06)',
-                  border:'1px solid rgba(201,169,97,0.20)',
-                  color:'rgba(201,169,97,0.80)',
+                  background:'rgba(217,179,104,0.06)',
+                  border:'1px solid rgba(217,179,104,0.20)',
+                  color:'rgba(217,179,104,0.80)',
                 },
                 title:'Audit-optimal. Mid WR, mid volume. PRE-V10.2.x calibration.',
               },
@@ -19396,7 +19396,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:1,max:500,step:1,value:autoExecSettings?.maxBetPerTrade||0,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxBetPerTrade:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                 `= reject any single auto-trade larger than $${Number(autoExecSettings?.maxBetPerTrade||25).toFixed(0)} dollars`,
@@ -19408,7 +19408,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:0,max:10,step:1,value:autoExecSettings?.slippageCents||0,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,slippageCents:Math.max(0,Math.min(10,_num(e.target.value,2)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                 `= bid +${autoExecSettings?.slippageCents||0}¢ above market to improve fill (each ¢ = 1% of $1 contract)`,
@@ -19419,7 +19419,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           //
           // ── 2. Daily caps ────────────────────────────────────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Daily caps'),
           ),
           React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
@@ -19428,7 +19428,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:0,max:200,step:1,value:autoExecSettings?.maxAutoTradesPerDay??10,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerDay:Math.max(0,Math.min(200,_num(e.target.value,10)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
                 const _n=Number(autoExecSettings?.maxAutoTradesPerDay);
@@ -19445,7 +19445,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:0,max:10000,step:1,value:autoExecSettings?.maxDailyLoss??50,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxDailyLoss:Math.max(0,Math.min(10000,_num(e.target.value,50)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
                 const _n=Number(autoExecSettings?.maxDailyLoss);
@@ -19458,7 +19458,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           //
           // ── 3. Per-window cap ────────────────────────────────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Per-window cap'),
           ),
           React.createElement('div',{className:'mb-3'},
@@ -19471,7 +19471,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 // V10.2.24: max raised to 1 (was 5). Hard floor; cannot exceed.
                 type:'number',min:1,max:1,step:1,value:1,disabled:true,
                 onChange:()=>{}, // no-op — value is hardcoded
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white/50 text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1 cursor-not-allowed',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white/50 text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1 cursor-not-allowed',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                 '= 1 auto-exec entry per window across ALL subsystems (hard floor since V10.2.24; Tara + scalper share this slot, manual click bypasses)'
@@ -19482,7 +19482,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           //
           // ── 4. Exit thresholds (Take-profit + Stop-loss) ─────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'flex items-baseline justify-between'},
               React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Exit thresholds'),
               React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.5'),
@@ -19494,7 +19494,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:60,max:99,step:1,value:autoExecSettings?.autoExitOffer||85,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(60,Math.min(99,_num(e.target.value,85)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
                 const _c=autoExecSettings?.autoExitOffer||85;
@@ -19510,7 +19510,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 //   range is 8-30¢; everything above is "no stop" with extra steps.
                 type:'number',min:0,max:50,step:1,value:autoExecSettings?.stopLossDeltaCents??15,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,15)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
                 const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
@@ -19529,7 +19529,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           //
           // ── 5. Cooldown after losses ─────────────────────────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Cooldown after losses'),
           ),
           React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
@@ -19538,7 +19538,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:2,max:10,step:1,value:autoExecSettings?.cooldownLossStreak||3,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownLossStreak:Math.max(2,Math.min(10,_num(e.target.value,3)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                 `= ${autoExecSettings?.cooldownLossStreak||3} consecutive losses triggers a cooldown`,
@@ -19550,7 +19550,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:1,max:240,step:1,value:autoExecSettings?.cooldownMinutes||20,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownMinutes:Math.max(1,Math.min(240,_num(e.target.value,20)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                 `= ${autoExecSettings?.cooldownMinutes||20} minutes of no new auto-trades after streak`,
@@ -19561,20 +19561,20 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           //
           // ── 6. Entry filters ─────────────────────────────────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Entry filters'),
           ),
           React.createElement('div',{className:'mb-2'},
             React.createElement('label',{className:'block'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
                 _labelTip('edge-cap','Edge cap — max Tara-vs-Kalshi gap (pt)','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
-                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#C9A961'}},'V9.19.24'),
+                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#D9B368'}},'V9.19.24'),
               ),
               React.createElement('input',{
                 type:'number',min:0,max:100,step:1,
                 value:Number.isFinite(Number(autoExecSettings?.maxEdgePt))?Number(autoExecSettings.maxEdgePt):15,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxEdgePt:Math.max(0,Math.min(100,_num(e.target.value,15)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
               }),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
                 const _e=Number(autoExecSettings?.maxEdgePt);
@@ -19590,7 +19590,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('div',{className:'flex-1 pr-2'},
                 React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
                   _labelTip('skip-timecap','Skip time-cap-commit locks','When Tara hits her decision deadline without genuine conviction, she fires a "time-cap-commit" lock — basically "I had to pick something." May 14 audit of 642 trades: time-cap commits made up 50% of trades and won 62.4% (vs 78.5% for normal commits, 65.7% for early locks). Worst sub-band: 90-119s lock window won only 54.6% — pure coin flip. This filter blocks them at auto-exec gate. Manual click still fires them. Default OFF for A/B testing — turn ON to filter the lowest-WR cluster.'),
-                  React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#C9A961'}},'V9.19.26'),
+                  React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#D9B368'}},'V9.19.26'),
                 ),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 leading-relaxed mt-0.5'},
                   autoExecSettings?.skipTimeCapCommit
@@ -19610,7 +19610,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           //
           // ── 7. Decision routing (Phase 4) ────────────────────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Decision routing'),
           ),
           React.createElement('div',{className:'mb-1'},
@@ -19621,13 +19621,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('select',{
               value:autoExecSettings?.tradeTimingMode||'shadow',
               onChange:(e)=>setAutoExecSettings(prev=>({...prev,tradeTimingMode:e.target.value})),
-              className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm focus:border-[#A78BFA] focus:outline-none',
-              style:{background:'#15151a',color:'#EDEDED'},
+              className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm focus:border-[#A78BFA] focus:outline-none',
+              style:{background:'#121218',color:'#EDEDED'},
             },
-              React.createElement('option',{value:'off',style:{background:'#15151a',color:'#EDEDED'}},'Off — Phase 4 disabled'),
-              React.createElement('option',{value:'shadow',style:{background:'#15151a',color:'#EDEDED'}},'Shadow — logs decisions, no blocking (RECOMMENDED)'),
-              React.createElement('option',{value:'advisory',style:{background:'#15151a',color:'#EDEDED'}},'Advisory — shows decision badge, no blocking'),
-              React.createElement('option',{value:'pregate',style:{background:'#15151a',color:'#EDEDED'}},'Pre-gate — BLOCKS abort/wait decisions'),
+              React.createElement('option',{value:'off',style:{background:'#121218',color:'#EDEDED'}},'Off — Phase 4 disabled'),
+              React.createElement('option',{value:'shadow',style:{background:'#121218',color:'#EDEDED'}},'Shadow — logs decisions, no blocking (RECOMMENDED)'),
+              React.createElement('option',{value:'advisory',style:{background:'#121218',color:'#EDEDED'}},'Advisory — shows decision badge, no blocking'),
+              React.createElement('option',{value:'pregate',style:{background:'#121218',color:'#EDEDED'}},'Pre-gate — BLOCKS abort/wait decisions'),
             ),
             React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
               const _m=autoExecSettings?.tradeTimingMode||'shadow';
@@ -19651,7 +19651,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#EDEDED]/60 mb-1.5'},'Trade these assets'),
               React.createElement('div',{className:'flex gap-2'},
                 ['BTC'].map(a=>
-                  React.createElement('label',{key:a,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:autoExecSettings?.enabledAssets?.[a]!==false?'rgba(196,181,253,0.08)':'rgba(237,237,237,0.04)',border:autoExecSettings?.enabledAssets?.[a]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid #1F1F1F'}},
+                  React.createElement('label',{key:a,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:autoExecSettings?.enabledAssets?.[a]!==false?'rgba(196,181,253,0.08)':'rgba(237,237,237,0.04)',border:autoExecSettings?.enabledAssets?.[a]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid #1C1C22'}},
                     React.createElement('span',{className:'text-[11px] font-bold text-white'},a),
                     React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledAssets?.[a]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledAssets:{...(prev.enabledAssets||{BTC:true}),[a]:e.target.checked}}))}),
                   )
@@ -19663,7 +19663,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#EDEDED]/60 mb-1.5'},'Trade these windows'),
               React.createElement('div',{className:'flex gap-2'},
                 ['15m','5m'].map(w=>
-                  React.createElement('label',{key:w,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:autoExecSettings?.enabledWindowTypes?.[w]!==false?'rgba(196,181,253,0.08)':'rgba(237,237,237,0.04)',border:autoExecSettings?.enabledWindowTypes?.[w]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid #1F1F1F'}},
+                  React.createElement('label',{key:w,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:autoExecSettings?.enabledWindowTypes?.[w]!==false?'rgba(196,181,253,0.08)':'rgba(237,237,237,0.04)',border:autoExecSettings?.enabledWindowTypes?.[w]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid #1C1C22'}},
                     React.createElement('span',{className:'text-[11px] font-bold text-white'},w),
                     React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledWindowTypes?.[w]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledWindowTypes:{...(prev.enabledWindowTypes||{'15m':true,'5m':true}),[w]:e.target.checked}}))}),
                   )
@@ -19676,7 +19676,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('select',{
                 value:autoExecSettings?.minTier||'any',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,minTier:e.target.value})),
-                className:'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#D9B368] focus:outline-none',
               },
                 React.createElement('option',{value:'any'},'Any tier (default — fires most often)'),
                 React.createElement('option',{value:'tape'},'Tape-led or higher (skips single-tier)'),
@@ -19699,7 +19699,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('select',{
                 value:autoExecSettings?.signalSource||'snapshot',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,signalSource:e.target.value})),
-                className:'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#D9B368] focus:outline-none',
               },
                 React.createElement('option',{value:'snapshot'},'Tara\'s public call (recommended · matches your WR data)'),
                 React.createElement('option',{value:'lock'},'Internal engine lock (legacy · fires earlier, different distribution)'),
@@ -19715,7 +19715,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:0,max:100,step:5,value:autoExecSettings?.minQualityScore||0,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,minQualityScore:Math.max(0,Math.min(100,_num(e.target.value,0)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 // V10.2.2: WARNING about qScore inversion. 755-trade audit showed qScore
@@ -19732,7 +19732,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:0,max:50,step:1,value:autoExecSettings?.minConviction||0,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,minConviction:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 // V10.2.2: same inversion warning as minQualityScore. Conviction =
@@ -19752,7 +19752,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:0,max:60,step:1,value:autoExecSettings?.lockStabilitySec||0,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,lockStabilitySec:Math.max(0,Math.min(60,_num(e.target.value,0)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
               }),
               // V9.17.20: unit hint (replaces the prior generic description)
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -19801,7 +19801,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:1,max:20,step:1,value:autoExecSettings?.entryLadderUndercutCents||2,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderUndercutCents:Math.max(1,Math.min(20,_num(e.target.value,2)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -19813,7 +19813,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:2,max:60,step:1,value:autoExecSettings?.entryLadderStepSec||8,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderStepSec:Math.max(2,Math.min(60,_num(e.target.value,8)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -19825,7 +19825,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:1,max:5,step:1,value:autoExecSettings?.entryLadderMaxSteps||2,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderMaxSteps:Math.max(1,Math.min(5,_num(e.target.value,2)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -19839,8 +19839,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           ),
         ),
         // ── V9.17.5: PATIENT ENTRY ────────────────────────────────────────
-        React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(201,169,97,0.04)',border:'1px solid rgba(201,169,97,0.16)'}},
-          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#C9A961'}},
+        React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(217,179,104,0.04)',border:'1px solid rgba(217,179,104,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#D9B368'}},
             React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Patient entry'),
             React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'wait for value zone'),
           ),
@@ -19861,7 +19861,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:5,max:95,step:1,value:autoExecSettings?.patientEntryMaxCents||55,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,patientEntryMaxCents:Math.max(5,Math.min(95,_num(e.target.value,55)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -19874,7 +19874,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:10,max:600,step:5,value:autoExecSettings?.patientEntryMaxWaitSec||90,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,patientEntryMaxWaitSec:Math.max(10,Math.min(600,_num(e.target.value,90)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -19905,7 +19905,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:0,max:300,step:5,value:autoExecSettings?.timeExitSecLeft||0,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,timeExitSecLeft:Math.max(0,Math.min(300,_num(e.target.value,0)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
               }),
               // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -19939,7 +19939,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:50,max:95,step:5,value:autoExecSettings?.smartExitReverseConviction||70,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitReverseConviction:Math.max(50,Math.min(95,_num(e.target.value,70)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -19951,7 +19951,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:0,max:50,step:1,value:autoExecSettings?.smartExitMinProfitCents??5,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitMinProfitCents:Math.max(0,Math.min(50,_num(e.target.value,5)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -19960,7 +19960,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 })()),
               ),
             ),
-            autoExecSettings?.smartExitsEnabled&&React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#1F1F1F]'},
+            autoExecSettings?.smartExitsEnabled&&React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#1C1C22]'},
               React.createElement('div',null,
                 React.createElement('div',{className:'text-[11px] text-[#EDEDED]/85'},'Extend on momentum'),
                 React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'When tape strong WITH position, raise target by N¢'),
@@ -19972,7 +19972,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('input',{
                 type:'number',min:1,max:20,step:1,value:autoExecSettings?.smartExitExtendCents||5,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitExtendCents:Math.max(1,Math.min(20,_num(e.target.value,5)))})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
               }),
               // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -20010,7 +20010,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               }),
             ),
             // 6 threshold inputs in 2-col grid
-            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'grid grid-cols-2 gap-2 pt-2 border-t border-[#1F1F1F]'},
+            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'grid grid-cols-2 gap-2 pt-2 border-t border-[#1C1C22]'},
               // 1. Peak trigger
               React.createElement('label',{className:'block'},
                 React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Peak trigger ¢'),
@@ -20018,7 +20018,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:5,max:50,step:1,
                   value:autoExecSettings?.smartCashoutPeakTrigger??15,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutPeakTrigger:Math.max(5,Math.min(50,_num(e.target.value,15)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `peak must hit ${autoExecSettings?.smartCashoutPeakTrigger??15}¢ before trail arms`,
@@ -20031,7 +20031,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:25,max:90,step:5,
                   value:autoExecSettings?.smartCashoutTrailFloorPct??50,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutTrailFloorPct:Math.max(25,Math.min(90,_num(e.target.value,50)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `exit if profit < peak × ${autoExecSettings?.smartCashoutTrailFloorPct??50}%`,
@@ -20044,7 +20044,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:10,max:60,step:5,
                   value:autoExecSettings?.smartCashoutLossCutCents??25,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLossCutCents:Math.max(10,Math.min(60,_num(e.target.value,25)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `exit if down ≥${autoExecSettings?.smartCashoutLossCutCents??25}¢ from entry`,
@@ -20057,7 +20057,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:15,max:180,step:15,
                   value:autoExecSettings?.smartCashoutLateWindowSecs??60,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateWindowSecs:Math.max(15,Math.min(180,_num(e.target.value,60)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `last ${autoExecSettings?.smartCashoutLateWindowSecs??60}s of window = late zone`,
@@ -20070,7 +20070,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:1,max:30,step:1,
                   value:autoExecSettings?.smartCashoutLateProfitCents??5,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateProfitCents:Math.max(1,Math.min(30,_num(e.target.value,5)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `in late zone, exit if profit ≥${autoExecSettings?.smartCashoutLateProfitCents??5}¢`,
@@ -20083,14 +20083,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:5,max:50,step:5,
                   value:autoExecSettings?.smartCashoutLateLossCents??15,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateLossCents:Math.max(5,Math.min(50,_num(e.target.value,15)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `in late zone, exit if loss ≥${autoExecSettings?.smartCashoutLateLossCents??15}¢`,
                 ),
               ),
             ),
-            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed pt-2 border-t border-[#1F1F1F]'},
+            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed pt-2 border-t border-[#1C1C22]'},
               `Example: filled at 58¢ → spikes to 88¢ peak (+30¢) → retraces to 72¢ (+14¢, below ${autoExecSettings?.smartCashoutTrailFloorPct??50}% of 30 = ${Math.floor((autoExecSettings?.smartCashoutTrailFloorPct??50)/100*30)}¢) → trail-stop exits at +14¢ instead of waiting for full retrace. Or: filled at 58¢ → drops to 33¢ (-25¢) → loss-cut at -${autoExecSettings?.smartCashoutLossCutCents??25}¢ before going further.`,
             ),
           ),
@@ -20118,9 +20118,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 _sm==='kelly'?'Kelly fraction blended with fixed bet':'(unknown)';
               return React.createElement('div',{
                 className:'px-2 py-2 rounded-lg',
-                style:{background:'rgba(201,169,97,0.06)',border:'1px solid rgba(201,169,97,0.25)'},
+                style:{background:'rgba(217,179,104,0.06)',border:'1px solid rgba(217,179,104,0.25)'},
               },
-                React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-wider mb-0.5',style:{color:'#C9A961'}},'active rule'),
+                React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-wider mb-0.5',style:{color:'#D9B368'}},'active rule'),
                 React.createElement('div',{className:'text-[11px]',style:{color:'rgba(237,237,237,0.95)'}},_activeRule),
                 _overridden&&React.createElement('div',{className:'text-[9px] mt-1 italic',style:{color:'rgba(237,237,237,0.55)'}},
                   `Sizing strategy is overridden by entry mode = ${_em}.`,
@@ -20134,24 +20134,24 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
                 _labelTip('sizing-mode','Sizing strategy','How Tara computes the dollar amount per trade. THREE OPTIONS: (1) Fixed — always uses the manual bet-size from Trading Settings. Predictable, no surprises. Best for paper trading. (2) Scale with conviction — bigger bets on stronger calls, smaller on weaker ones. ⚠ Currently relies on the broken posterior calibration — Tier C item, pending recalibration. (3) Kelly fraction — math-optimal sizing based on edge. Mixed with fixed bet via the Kelly blend slider below. IMPORTANT: this strategy is OVERRIDDEN when Entry mode (below) is set to "contracts" or "%". Dollar mode uses this strategy as-written.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(237,237,237,0.60)'}),
                 (autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')&&React.createElement('div',{
-                  className:'text-[9px] italic',style:{color:'rgba(201,169,97,0.75)'},
+                  className:'text-[9px] italic',style:{color:'rgba(217,179,104,0.75)'},
                 },'(overridden by entry mode below)'),
               ),
               React.createElement('select',{
                 value:autoExecSettings?.sizingMode||'fixed',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,sizingMode:e.target.value})),
                 disabled:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent'),
-                className:'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#C9A961] focus:outline-none',
+                className:'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#D9B368] focus:outline-none',
                 style:{
-                  background:'#15151a',
+                  background:'#121218',
                   color:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?'rgba(237,237,237,0.40)':'#EDEDED',
                   cursor:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?'not-allowed':'pointer',
                   opacity:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?0.55:1,
                 },
               },
-                React.createElement('option',{value:'fixed',style:{background:'#15151a',color:'#EDEDED'}},'Fixed (uses your bet-size, capped at max-bet)'),
-                React.createElement('option',{value:'confidence',style:{background:'#15151a',color:'#EDEDED'}},'Scale with conviction (low/high range) — pending recalibration'),
-                React.createElement('option',{value:'kelly',style:{background:'#15151a',color:'#EDEDED'}},'Kelly fraction blended with fixed bet'),
+                React.createElement('option',{value:'fixed',style:{background:'#121218',color:'#EDEDED'}},'Fixed (uses your bet-size, capped at max-bet)'),
+                React.createElement('option',{value:'confidence',style:{background:'#121218',color:'#EDEDED'}},'Scale with conviction (low/high range) — pending recalibration'),
+                React.createElement('option',{value:'kelly',style:{background:'#121218',color:'#EDEDED'}},'Kelly fraction blended with fixed bet'),
               ),
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1 leading-relaxed'},
                 autoExecSettings?.sizingMode==='confidence'?'Linear ramp: conviction 5pt → low bet, 35pt+ → high bet. ⚠ Inherits the broken posterior signal — pending Tier C recalibration (after 50+ post-V9.18.10 audited trades).':
@@ -20167,7 +20167,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   React.createElement('input',{
                     type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceLowBet||5,
                     onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceLowBet:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
-                    className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                    className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
                   }),
                   React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                     `= $${Number(autoExecSettings?.confidenceLowBet||5).toFixed(0)} dollars stake on weakest qualifying calls`,
@@ -20179,7 +20179,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   React.createElement('input',{
                     type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceHighBet||25,
                     onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceHighBet:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
-                    className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                    className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
                   }),
                   React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                     `= $${Number(autoExecSettings?.confidenceHighBet||25).toFixed(0)} dollars stake on strongest calls (capped by Max bet/trade)`,
@@ -20190,10 +20190,10 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             // V9.18.4: KELLY BLEND DIAL. Only shown when sizingMode='kelly'.
             //   0 = pure fixed bet (your tradingSettings.betSize), 100 = pure Kelly math.
             //   Always floored at fixed bet — you never bet less than your declared stake.
-            autoExecSettings?.sizingMode==='kelly'&&React.createElement('label',{className:'block pt-2 mt-2 border-t border-[#1F1F1F]'},
+            autoExecSettings?.sizingMode==='kelly'&&React.createElement('label',{className:'block pt-2 mt-2 border-t border-[#1C1C22]'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
                 _labelTip('kelly-blend','Kelly blend %','Slider controls how much Kelly math vs. fixed-bet drives the actual stake. 0% = always use your fixed bet, ignore Kelly entirely (safest, predictable). 100% = pure Kelly math, bet size varies wildly with edge (math-optimal but volatile). 50% = halfway between. CRITICAL: bet is always floored at your fixed bet — Kelly can scale UP but never below your declared stake. Start low (25-50%) until you trust Kelly\'s math.'),
-                React.createElement('span',{className:'text-[11px] tabular-nums font-bold',style:{color:'#C9A961',fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
+                React.createElement('span',{className:'text-[11px] tabular-nums font-bold',style:{color:'#D9B368',fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
                   `${Number(autoExecSettings?.kellyBlend||50)}%`,
                 ),
               ),
@@ -20208,17 +20208,17 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               _tipBox('kelly-blend','Slider controls how much Kelly math vs. fixed-bet drives the actual stake. 0% = always use your fixed bet, ignore Kelly entirely (safest, predictable). 100% = pure Kelly math, bet size varies wildly with edge (math-optimal but volatile). 50% = halfway between. CRITICAL: bet is always floored at your fixed bet — Kelly can scale UP but never below your declared stake. Start low (25-50%) until you trust Kelly\'s math.'),
             ),
             // V9.18.4: ENTRY MODE SELECTOR. How to express the stake.
-            React.createElement('div',{className:'pt-2 mt-2 border-t border-[#1F1F1F]'},
+            React.createElement('div',{className:'pt-2 mt-2 border-t border-[#1C1C22]'},
               _labelTip('entry-mode','Entry mode','How the bet amount is EXPRESSED. THREE OPTIONS: (1) Dollar cost — uses the Sizing strategy above (fixed/conviction/Kelly). Most flexible. (2) Fixed contract count — always buy exactly N contracts regardless of price, regardless of sizing strategy. SIMPLE but the dollar cost varies with Kalshi offer price. (3) % of Kalshi balance — sizes as % of current Kalshi account balance. Scales with wins/losses naturally. CRITICAL: "contracts" and "%" modes OVERRIDE the Sizing strategy above — you\'ll see a gray-out indicator. Max bet/trade still caps everything.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(237,237,237,0.60)'}),
               React.createElement('select',{
                 value:autoExecSettings?.entryMode||'dollars',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryMode:e.target.value})),
-                className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#C9A961] focus:outline-none mb-2 mt-1',
-                style:{background:'#15151a',color:'#EDEDED'},
+                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#D9B368] focus:outline-none mb-2 mt-1',
+                style:{background:'#121218',color:'#EDEDED'},
               },
-                React.createElement('option',{value:'dollars',style:{background:'#15151a',color:'#EDEDED'}},'Dollar cost (use sizing strategy above)'),
-                React.createElement('option',{value:'contracts',style:{background:'#15151a',color:'#EDEDED'}},'Fixed contract count'),
-                React.createElement('option',{value:'percent',style:{background:'#15151a',color:'#EDEDED'}},'% of Kalshi balance'),
+                React.createElement('option',{value:'dollars',style:{background:'#121218',color:'#EDEDED'}},'Dollar cost (use sizing strategy above)'),
+                React.createElement('option',{value:'contracts',style:{background:'#121218',color:'#EDEDED'}},'Fixed contract count'),
+                React.createElement('option',{value:'percent',style:{background:'#121218',color:'#EDEDED'}},'% of Kalshi balance'),
               ),
               _tipBox('entry-mode','How the bet amount is EXPRESSED. THREE OPTIONS: (1) Dollar cost — uses the Sizing strategy above (fixed/conviction/Kelly). Most flexible. (2) Fixed contract count — always buy exactly N contracts regardless of price, regardless of sizing strategy. SIMPLE but the dollar cost varies with Kalshi offer price. (3) % of Kalshi balance — sizes as % of current Kalshi account balance. Scales with wins/losses naturally. CRITICAL: "contracts" and "%" modes OVERRIDE the Sizing strategy above — you\'ll see a gray-out indicator. Max bet/trade still caps everything.'),
               autoExecSettings?.entryMode==='contracts'&&React.createElement('label',{className:'block mb-1'},
@@ -20226,7 +20226,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:1,max:500,step:1,value:Number(autoExecSettings?.entryContracts)||5,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryContracts:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `= ${Number(autoExecSettings?.entryContracts)||5} contracts × current cost-per-contract ¢ = total $`,
@@ -20238,7 +20238,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('input',{
                   type:'number',min:1,max:100,step:1,value:Number(autoExecSettings?.entryPercentBalance)||10,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryPercentBalance:Math.max(1,Math.min(100,_num(e.target.value,10)))})),
-                  className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none mt-1',
+                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none mt-1',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `= ${Number(autoExecSettings?.entryPercentBalance)||10}% of your live Kalshi balance per trade`,
@@ -20280,7 +20280,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       // generous spacing. The bracketed note frames it as a separate tool that
       // doesn't fight Tara's auto-exec.
       scalperSettings&&typeof setScalperSettings==='function'&&React.createElement('section',{
-        className:'pt-4 mt-4 border-t border-[#1F1F1F]',
+        className:'pt-4 mt-4 border-t border-[#1C1C22]',
       },
         // V9.19.25: section header redesigned to make this VISUALLY DISTINCT from
         //   Kalshi Auto-Execution. Both used gold before, which made them feel like
@@ -20328,7 +20328,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           React.createElement('div',{className:'px-3 pb-3 pt-1'},
         scalperSettings.enabled&&React.createElement(React.Fragment,null,
           // ── GROUP 1: ENTRY & EXIT (Kalshi cents) ─────────────────────────
-          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1C1C22'}},
             React.createElement('div',{className:'flex items-baseline justify-between mb-2.5'},
               React.createElement('span',{className:'text-[10px] text-[#EDEDED]/55 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'entry & exit'),
               React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',style:{letterSpacing:'0.02em'}},'kalshi cents'),
@@ -20340,7 +20340,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:1,max:99,step:1,value:scalperSettings.entryMinCents||15,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,entryMinCents:parseInt(e.target.value,10)||15})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
               React.createElement('label',{className:'flex flex-col'},
@@ -20349,7 +20349,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:1,max:99,step:1,value:scalperSettings.entryMaxCents||45,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,entryMaxCents:parseInt(e.target.value,10)||45})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
             ),
@@ -20360,7 +20360,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:5,max:80,step:1,value:scalperSettings.targetCents||35,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,targetCents:parseInt(e.target.value,10)||35})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
               React.createElement('label',{className:'flex flex-col'},
@@ -20369,13 +20369,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:5,max:50,step:1,value:scalperSettings.stopCents||15,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,stopCents:parseInt(e.target.value,10)||15})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
             ),
           ),
           // ── GROUP 2: RISK CAPS ───────────────────────────────────────────
-          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1C1C22'}},
             React.createElement('div',{className:'flex items-baseline justify-between mb-2.5'},
               React.createElement('span',{className:'text-[10px] text-[#EDEDED]/55 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'risk caps'),
               React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',style:{letterSpacing:'0.02em'}},'discipline guards'),
@@ -20387,7 +20387,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:1,max:1000,step:1,value:scalperSettings.contractsPerScalp||1,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,contractsPerScalp:parseInt(e.target.value,10)||1})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
               React.createElement('label',{className:'flex flex-col'},
@@ -20396,7 +20396,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:50,max:95,step:5,value:scalperSettings.minConviction||65,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,minConviction:parseInt(e.target.value,10)||65})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
             ),
@@ -20407,7 +20407,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:10,max:5000,step:10,value:scalperSettings.dailyLossCapCents||200,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,dailyLossCapCents:parseInt(e.target.value,10)||200})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
               React.createElement('label',{className:'flex flex-col'},
@@ -20416,13 +20416,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:1,max:30,step:1,value:scalperSettings.maxSuggestionsPerHour||3,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,maxSuggestionsPerHour:parseInt(e.target.value,10)||3})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
             ),
           ),
           // ── GROUP 3: COOLDOWNS & SCHEDULE ────────────────────────────────
-          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1C1C22'}},
             React.createElement('div',{className:'flex items-baseline justify-between mb-2.5'},
               React.createElement('span',{className:'text-[10px] text-[#EDEDED]/55 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'cooldowns & schedule'),
               React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',style:{letterSpacing:'0.02em'}},'minutes'),
@@ -20434,7 +20434,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:0,max:240,step:1,value:scalperSettings.cooldownAfterLossMin??30,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,cooldownAfterLossMin:parseInt(e.target.value,10)||0})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
               React.createElement('label',{className:'flex flex-col'},
@@ -20443,7 +20443,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:0,max:60,step:1,value:scalperSettings.cooldownAfterProfitMin??5,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,cooldownAfterProfitMin:parseInt(e.target.value,10)||0})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
               React.createElement('label',{className:'flex flex-col'},
@@ -20452,11 +20452,11 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   type:'number',min:0,max:60,step:1,value:scalperSettings.cooldownAfterNeutralMin??10,
                   onChange:(e)=>setScalperSettings(prev=>({...prev,cooldownAfterNeutralMin:parseInt(e.target.value,10)||0})),
                   className:'px-2 py-1 rounded-lg text-[12px] tabular-nums',
-                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  style:{background:'rgba(0,0,0,0.40)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 }),
               ),
             ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#1F1F1F]'},
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#1C1C22]'},
               React.createElement('div',{className:'flex flex-col'},
                 React.createElement('span',{className:'text-[11px] text-[#EDEDED]/80',style:{letterSpacing:'0.02em'}},'block weak hours'),
                 React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},'12-17 est skip window'),
@@ -20472,7 +20472,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           // ── GROUP 4: EXECUTION MODE (V9.17.3) ────────────────────────────
           // Auto-exec re-added. Mutually exclusive with Tara's auto-exec —
           // enabling this auto-disables Tara's auto-place-on-lock.
-          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid #1C1C22'}},
             React.createElement('div',{className:'flex items-baseline justify-between mb-2.5'},
               React.createElement('span',{className:'text-[10px] text-[#EDEDED]/55 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'execution'),
               React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',style:{letterSpacing:'0.02em'}},'manual or auto'),
@@ -20498,10 +20498,10 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 className:'ml-2',
               }),
             ),
-            !!scalperSettings.autoExecEnabled&&React.createElement('div',{className:'text-[9px] text-amber-400/70 italic mt-2 pt-2 border-t border-[#1F1F1F]'},
+            !!scalperSettings.autoExecEnabled&&React.createElement('div',{className:'text-[9px] text-amber-400/70 italic mt-2 pt-2 border-t border-[#1C1C22]'},
               'tara auto-exec disabled — scalper auto-exec takes precedence. enable conflict guard below for extra safety.',
             ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mt-2 pt-2 border-t border-[#1F1F1F]'},
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mt-2 pt-2 border-t border-[#1C1C22]'},
               React.createElement('div',{className:'flex flex-col'},
                 React.createElement('span',{className:'text-[11px] text-[#EDEDED]/75',style:{letterSpacing:'0.02em'}},'conflict guard'),
                 React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45',style:{letterSpacing:'0.02em'}},'block scalper auto-exec when tara has a locked position'),
@@ -20521,7 +20521,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       React.createElement('button',{
         onClick:onClose,
         className:'w-full px-4 py-2 rounded-lg text-[11px] uppercase font-bold tracking-wider transition-colors',
-        style:{background:'rgba(201,169,97,0.12)',color:T2_GOLD,border:'1px solid rgba(201,169,97,0.3)'},
+        style:{background:'rgba(217,179,104,0.12)',color:T2_GOLD,border:'1px solid rgba(217,179,104,0.3)'},
       },'Done'),
     ),
   );
@@ -20637,7 +20637,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
   // ── COMPACT DASHBOARD WIDGET ──────────────────────────────────────────
   if(compact){
     if(!_isActive)return null; // compact mode only renders when active
-    const _statusColor=mission.status==='hit'?'#28CC95':mission.status==='busted'?'#FF4D6A':_progressPct>=75?'#28CC95':_progressPct>=40?'#C9A961':_progressPct>=15?'#D4A24C':'#FF4D6A';
+    const _statusColor=mission.status==='hit'?'#28CC95':mission.status==='busted'?'#FF4D6A':_progressPct>=75?'#28CC95':_progressPct>=40?'#D9B368':_progressPct>=15?'#D9B368':'#FF4D6A';
     return React.createElement('div',{className:'rounded-lg border p-2.5 mb-2',style:{background:'rgba(40,204,149,0.04)',borderColor:'rgba(40,204,149,0.20)'}},
       React.createElement('div',{className:'flex items-baseline justify-between mb-1.5'},
         React.createElement('div',{className:'flex items-baseline gap-2'},
@@ -20656,17 +20656,17 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('div',{className:'text-base font-serif font-bold tabular-nums leading-none text-white'},'$',mission.target),
         ),
       ),
-      React.createElement('div',{className:'h-1.5 bg-[#0A0A0A] rounded-lg overflow-hidden mb-1.5'},
+      React.createElement('div',{className:'h-1.5 bg-[#08080B] rounded-lg overflow-hidden mb-1.5'},
         React.createElement('div',{style:{width:`${_progressPct}%`,height:'100%',background:_statusColor,transition:'width 600ms'}}),
       ),
       React.createElement('div',{className:'flex items-baseline justify-between text-[10px]'},
         React.createElement('span',{className:'tabular-nums',style:{color:_statusColor}},_progressPct.toFixed(0),'% to target'),
         _targetProb!=null&&React.createElement('span',{className:'text-[#EDEDED]/55'},
           'odds ',
-          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_targetProb>=0.5?'#28CC95':_targetProb>=0.25?'#D4A24C':'#FF4D6A'}},Math.round(_targetProb*100),'%'),
+          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_targetProb>=0.5?'#28CC95':_targetProb>=0.25?'#D9B368':'#FF4D6A'}},Math.round(_targetProb*100),'%'),
         ),
       ),
-      mission.tradesAttempted>0&&React.createElement('div',{className:'mt-1.5 pt-1.5 border-t border-[#1F1F1F] text-[10px] text-[#EDEDED]/55 flex items-baseline justify-between'},
+      mission.tradesAttempted>0&&React.createElement('div',{className:'mt-1.5 pt-1.5 border-t border-[#1C1C22] text-[10px] text-[#EDEDED]/55 flex items-baseline justify-between'},
         React.createElement('span',null,mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
         mission.bankrollHistory?.length>=2&&_renderSparkline(),
       ),
@@ -20681,7 +20681,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 mt-0.5'},'bankroll → target with math-driven sizing'),
       ),
       React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1 py-0.5 rounded-lg',style:{
-        color:mission.status==='hit'?'#28CC95':mission.status==='busted'?'#FF4D6A':mission.status==='active'?'#D4A24C':'rgba(237,237,237,0.45)',
+        color:mission.status==='hit'?'#28CC95':mission.status==='busted'?'#FF4D6A':mission.status==='active'?'#D9B368':'rgba(237,237,237,0.45)',
         border:`1px solid ${mission.status==='hit'?'rgba(40,204,149,0.4)':mission.status==='busted'?'rgba(255,77,106,0.4)':mission.status==='active'?'rgba(212,162,76,0.4)':'rgba(237,237,237,0.20)'}`,
       }},mission.status||'inactive'),
     ),
@@ -20698,13 +20698,13 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
     ),
     mission.status==='expired'&&React.createElement('div',{className:'p-3 rounded-lg mb-3 flex items-start justify-between gap-2',style:{background:'rgba(212,162,76,0.08)',border:'1px solid rgba(212,162,76,0.30)'}},
       React.createElement('div',null,
-        React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#D4A24C'}},'Mission expired'),
+        React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#D9B368'}},'Mission expired'),
         React.createElement('div',{className:'text-[11px] text-[#EDEDED]/75'},'Final $',mission.currentBankroll.toFixed(2),' · target $',mission.target.toFixed(2),' · ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
       ),
       // V10.4.1a: clear-and-restart button so user can dismiss without hunting for the deep reset
       React.createElement('button',{
         onClick:_resetMission,
-        className:'text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#D4A24C]/40 hover:bg-[#D4A24C]/15 text-[#D4A24C] shrink-0',
+        className:'text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#D9B368]/40 hover:bg-[#D9B368]/15 text-[#D9B368] shrink-0',
         title:'Clear mission state to start fresh',
       },'Clear · Reset'),
     ),
@@ -20722,25 +20722,25 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},_daysRemaining<1?`${_hoursRemaining}h left`:`${_daysRemaining.toFixed(1)} days left`),
         ),
       ),
-      React.createElement('div',{className:'h-2 bg-[#0A0A0A] rounded-lg overflow-hidden mb-2'},
-        React.createElement('div',{style:{width:`${_progressPct}%`,height:'100%',background:_progressPct>=75?'#28CC95':_progressPct>=40?'#C9A961':_progressPct>=15?'#D4A24C':'#FF4D6A',transition:'width 600ms'}}),
+      React.createElement('div',{className:'h-2 bg-[#08080B] rounded-lg overflow-hidden mb-2'},
+        React.createElement('div',{style:{width:`${_progressPct}%`,height:'100%',background:_progressPct>=75?'#28CC95':_progressPct>=40?'#D9B368':_progressPct>=15?'#D9B368':'#FF4D6A',transition:'width 600ms'}}),
       ),
       React.createElement('div',{className:'flex items-baseline justify-between text-[11px] mb-2'},
         React.createElement('span',{className:'tabular-nums text-[#EDEDED]/65'},_progressPct.toFixed(1),'% complete'),
         React.createElement('span',{className:'text-[#EDEDED]/55'},'floor $',mission.floor.toFixed(2)),
       ),
-      _targetProb!=null&&React.createElement('div',{className:'p-2 rounded-lg mb-2',style:{background:'#0D0D0D'}},
+      _targetProb!=null&&React.createElement('div',{className:'p-2 rounded-lg mb-2',style:{background:'#0B0B0F'}},
         React.createElement('div',{className:'flex items-baseline justify-between text-[11px]'},
           React.createElement('span',{className:'text-[#EDEDED]/65'},'estimated probability of hitting target'),
-          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_targetProb>=0.5?'#28CC95':_targetProb>=0.25?'#D4A24C':'#FF4D6A'}},Math.round(_targetProb*100),'%'),
+          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_targetProb>=0.5?'#28CC95':_targetProb>=0.25?'#D9B368':'#FF4D6A'}},Math.round(_targetProb*100),'%'),
         ),
         React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1 leading-relaxed'},'rough estimate — assumes constant edge and trade rate; actual variance is higher'),
         _targetProb<0.25&&React.createElement('div',{className:'text-[10px] text-rose-300/85 mt-1.5 leading-relaxed'},'Target looks unrealistic at current pace. Consider extending the deadline, lowering the target, or accepting that hitting it is unlikely.'),
       ),
-      mission.tradesAttempted>0&&React.createElement('div',{className:'p-2 rounded-lg text-[11px]',style:{background:'#0D0D0D'}},
+      mission.tradesAttempted>0&&React.createElement('div',{className:'p-2 rounded-lg text-[11px]',style:{background:'#0B0B0F'}},
         React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
           React.createElement('span',{className:'text-[#EDEDED]/65'},mission.tradesAttempted,' trades · ',mission.tradesWon,'W ',mission.tradesLost,'L'),
-          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_runWR>=60?'#28CC95':_runWR>=50?'#D4A24C':'#FF4D6A'}},'WR ',_runWR.toFixed(1),'%'),
+          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_runWR>=60?'#28CC95':_runWR>=50?'#D9B368':'#FF4D6A'}},'WR ',_runWR.toFixed(1),'%'),
         ),
         mission.bankrollHistory?.length>=2&&React.createElement('div',{className:'mt-1.5'},_renderSparkline()),
       ),
@@ -20749,7 +20749,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
         React.createElement('button',{
           onClick:()=>setMission(prev=>({...prev,status:'paused'})),
           className:'flex-1 px-2 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider',
-          style:{background:'rgba(212,162,76,0.10)',color:'#D4A24C',border:'1px solid rgba(212,162,76,0.30)'},
+          style:{background:'rgba(212,162,76,0.10)',color:'#D9B368',border:'1px solid rgba(212,162,76,0.30)'},
         },'Pause'),
         React.createElement('button',{
           onClick:()=>_stopMission('expired'),
@@ -20760,7 +20760,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
     ),
     // Paused state
     mission.status==='paused'&&React.createElement('div',{className:'p-3 rounded-lg mb-3',style:{background:'rgba(212,162,76,0.08)',border:'1px solid rgba(212,162,76,0.30)'}},
-      React.createElement('div',{className:'text-[11px] mb-2',style:{color:'#D4A24C'}},'Mission paused. Auto-exec sizing falls back to fixed bet size.'),
+      React.createElement('div',{className:'text-[11px] mb-2',style:{color:'#D9B368'}},'Mission paused. Auto-exec sizing falls back to fixed bet size.'),
       React.createElement('button',{
         onClick:()=>setMission(prev=>({...prev,status:'active'})),
         className:'px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider',
@@ -20778,7 +20778,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('input',{
             type:'number',min:1,max:100000,step:1,value:setup.startBankroll,
             onChange:(e)=>setSetup(prev=>({...prev,startBankroll:Math.max(1,Math.min(100000,_num(e.target.value,25)))})),
-            className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
           }),
           // V9.17.20: unit hint
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -20790,7 +20790,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('input',{
             type:'number',min:2,max:1000000,step:1,value:setup.target,
             onChange:(e)=>setSetup(prev=>({...prev,target:Math.max(2,Math.min(1000000,_num(e.target.value,200)))})),
-            className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
           }),
           // V9.17.20: unit hint with growth multiple
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -20807,7 +20807,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('input',{
             type:'number',min:1,max:365,step:1,value:setup.durationDays,
             onChange:(e)=>setSetup(prev=>({...prev,durationDays:Math.max(1,Math.min(365,_num(e.target.value,7)))})),
-            className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
           }),
           // V9.17.20: unit hint
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
@@ -20819,7 +20819,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('input',{
             type:'number',min:0,max:setup.startBankroll-1,step:1,value:setup.floor,
             onChange:(e)=>setSetup(prev=>({...prev,floor:Math.max(0,Math.min(setup.startBankroll-1,_num(e.target.value,5)))})),
-            className:'w-full bg-transparent border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#D9B368] focus:outline-none',
           }),
           // V9.17.20: unit hint
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
@@ -20836,7 +20836,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('select',{
             value:setup.kellyMult,
             onChange:(e)=>setSetup(prev=>({...prev,kellyMult:Number(e.target.value)})),
-            className:'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm focus:border-[#D9B368] focus:outline-none',
           },
             React.createElement('option',{value:0.1},'0.10× — very conservative'),
             React.createElement('option',{value:0.25},'0.25× — quarter Kelly (recommended)'),
@@ -20853,7 +20853,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
           React.createElement('select',{
             value:setup.maxBetFraction,
             onChange:(e)=>setSetup(prev=>({...prev,maxBetFraction:Number(e.target.value)})),
-            className:'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-2 py-1 text-white text-sm focus:border-[#C9A961] focus:outline-none',
+            className:'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm focus:border-[#D9B368] focus:outline-none',
           },
             React.createElement('option',{value:0.05},'5% per trade — very safe'),
             React.createElement('option',{value:0.10},'10% per trade — safe'),
@@ -20871,7 +20871,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
         ),
       ),
       // Honest preview
-      React.createElement('div',{className:'p-2 rounded-lg mb-3',style:{background:'#0D0D0D',border:'1px solid #1F1F1F'}},
+      React.createElement('div',{className:'p-2 rounded-lg mb-3',style:{background:'#0B0B0F',border:'1px solid #1C1C22'}},
         React.createElement('div',{className:'text-[10px] uppercase tracking-wider text-[#EDEDED]/55 mb-1'},'honest math preview'),
         (()=>{
           if(!setup.startBankroll||!setup.target||setup.target<=setup.startBankroll||!setup.durationDays)return React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45'},'Enter values above to see estimated odds');
@@ -20885,7 +20885,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
             fractionOfBankroll:setup.maxBetFraction*0.6,
             tradesPerDay:8,
           });
-          const _color=_previewProb>=0.5?'#28CC95':_previewProb>=0.25?'#D4A24C':'#FF4D6A';
+          const _color=_previewProb>=0.5?'#28CC95':_previewProb>=0.25?'#D9B368':'#FF4D6A';
           return React.createElement('div',null,
             React.createElement('div',{className:'text-[11px]'},React.createElement('span',{className:'text-[#EDEDED]/65'},_multiplier.toFixed(1),'× growth in ',setup.durationDays,'d → odds: '),React.createElement('span',{className:'font-bold tabular-nums',style:{color:_color}},Math.round(_previewProb*100),'%')),
             _previewProb<0.25&&React.createElement('div',{className:'text-[10px] text-rose-300/85 mt-1 leading-relaxed'},'⚠ This target is aggressive. Even with a 65% win rate, fewer than 1 in 4 paths reach it before the drawdown floor. Consider lowering the target or extending the deadline.'),
@@ -21018,17 +21018,17 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
   const _shCfg=ASSET_CONFIG[_otherAsset]||{};
   const _activeCfg=ASSET_CONFIG[currentAsset]||{};
   const _renderCard=({asset,cfg,dir,conf,phase,regime,kalshiForDir,kalshiYes,price,strike,isActive,committed,onClick,sampleCount,stale})=>{
-    const _color=cfg.color||'#C9A961';
+    const _color=cfg.color||'#D9B368';
     const _dirColor=dir==='UP'?'rgb(40,204,149)':dir==='DOWN'?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.55)';
     return React.createElement('div',{
       onClick:onClick,
       className:`flex-1 min-w-0 rounded-lg overflow-hidden ${onClick?'cursor-pointer hover:bg-white/5':''} transition-colors`,
       style:{
-        border:isActive?`1px solid ${_color}66`:'1px solid #1F1F1F',
+        border:isActive?`1px solid ${_color}66`:'1px solid #1C1C22',
         background:isActive?`${_color}0E`:'rgba(10,10,10,0.40)',
       },
     },
-      React.createElement('div',{className:'px-2.5 py-1 flex items-baseline justify-between gap-1 border-b border-[#1F1F1F]'},
+      React.createElement('div',{className:'px-2.5 py-1 flex items-baseline justify-between gap-1 border-b border-[#1C1C22]'},
         React.createElement('div',{className:'flex items-baseline gap-1.5 min-w-0'},
           React.createElement('span',{className:'text-base leading-none shrink-0',style:{color:_color}},cfg.icon||'?'),
           React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:isActive?_color:'rgba(237,237,237,0.55)'}},cfg.label||asset),
@@ -21073,7 +21073,7 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
         ),
         kalshiForDir!=null&&React.createElement('div',{className:'text-right shrink-0'},
           React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/45'},'kalshi ',dir||''),
-          React.createElement('div',{className:'text-[12px] tabular-nums font-bold',style:{color:kalshiForDir>=70?'rgb(40,204,149)':kalshiForDir>=55?'rgba(201,169,97,0.95)':kalshiForDir<=30?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.65)'}},Math.round(kalshiForDir),'%'),
+          React.createElement('div',{className:'text-[12px] tabular-nums font-bold',style:{color:kalshiForDir>=70?'rgb(40,204,149)':kalshiForDir>=55?'rgba(217,179,104,0.95)':kalshiForDir<=30?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.65)'}},Math.round(kalshiForDir),'%'),
         ),
       ),
     );
@@ -21131,8 +21131,8 @@ function PreWindowPrepCard({timeState,bestWindowsToday,todayData,marketCtx}){
   return React.createElement('div',{
     className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
     style:{
-      border:'1px solid rgba(201,169,97,0.30)',
-      background:'rgba(201,169,97,0.04)',
+      border:'1px solid rgba(217,179,104,0.30)',
+      background:'rgba(217,179,104,0.04)',
     },
   },
     React.createElement('div',{className:'flex items-baseline justify-between gap-2 flex-wrap'},
@@ -21140,7 +21140,7 @@ function PreWindowPrepCard({timeState,bestWindowsToday,todayData,marketCtx}){
         React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:T2_GOLD}},'Next window in'),
         React.createElement('span',{className:'text-[11px] tabular-nums font-bold text-white'},_secLeft,'s'),
         _bestEntry&&React.createElement('span',{className:'text-[10px] text-[#EDEDED]/65'},'· this hour historical: ',_bestEntry.wr,'% (',_bestEntry.total,' trades)'),
-        todayData?.streak>=2&&React.createElement('span',{className:'text-[10px]',style:{color:todayData.streakType==='hot'?'rgba(40,204,149,0.85)':'rgba(201,169,97,0.85)'}},
+        todayData?.streak>=2&&React.createElement('span',{className:'text-[10px]',style:{color:todayData.streakType==='hot'?'rgba(40,204,149,0.85)':'rgba(217,179,104,0.85)'}},
           '· today: ',todayData.streak,todayData.streakType==='hot'?'W':'L',' streak',
         ),
         _isMacroSoon&&React.createElement('span',{className:'text-[10px] font-bold',style:{color:'rgba(255,77,106,0.85)'}},'· ⚠ macro event imminent'),
@@ -21252,7 +21252,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   const _deltaColor=_delta7d==null?'rgba(237,237,237,0.5)':
     _delta7d>=10?'rgb(40,204,149)':
     _delta7d>=-5?'rgba(237,237,237,0.7)':
-    _delta7d>=-12?'rgba(201,169,97,0.85)':
+    _delta7d>=-12?'rgba(217,179,104,0.85)':
     'rgb(255,77,106)';
   const _deltaLabel=_delta7d==null?null:
     _delta7d>=10?'hot':
@@ -21263,7 +21263,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   // WR color helper (shared)
   const _wrColor=(w,total)=>{
     if(w==null||total<5)return'rgba(237,237,237,0.4)';
-    return w>=70?'rgb(40,204,149)':w>=55?'rgba(237,237,237,0.85)':w>=45?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
+    return w>=70?'rgb(40,204,149)':w>=55?'rgba(237,237,237,0.85)':w>=45?'rgba(217,179,104,0.85)':'rgb(255,77,106)';
   };
 
   // ZONE 2 insight — single line, no dismiss button (just doesn't render when nothing applies)
@@ -21275,21 +21275,21 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   const _bigWR=_bigTotal>0?(_eb['big-edge'].wins/_bigTotal):0;
   if(strongTilt){insight=`Tilt: ${streak} losses in a row — step away for 15-30m`;insightColor='rgb(255,77,106)';}
   else if(heater){insight=`Heater: ${streak}-win streak — trust read, don't oversize`;insightColor='rgb(40,204,149)';}
-  else if(_tightTotal>=8&&_tightWR<0.5&&_bigTotal>=5&&_bigWR>0.65){insight=`TIGHT edges ${Math.round(_tightWR*100)}% · BIG edges ${Math.round(_bigWR*100)}% — wait for clear edge`;insightColor='rgba(201,169,97,0.9)';}
+  else if(_tightTotal>=8&&_tightWR<0.5&&_bigTotal>=5&&_bigWR>0.65){insight=`TIGHT edges ${Math.round(_tightWR*100)}% · BIG edges ${Math.round(_bigWR*100)}% — wait for clear edge`;insightColor='rgba(217,179,104,0.9)';}
   else if(bestWindowsToday?.nextBest&&bestWindowsToday.nextBest.minsUntil<120){insight=`Best ${bestWindowsToday.dayName} hour (${String(bestWindowsToday.nextBest.hour).padStart(2,'0')}:00) in ${bestWindowsToday.nextBest.minsUntil}m · ${bestWindowsToday.nextBest.wr}% WR`;insightColor='rgba(40,204,149,0.85)';}
-  else if(_delta7d!=null&&_delta7d<=-12){insight=`Today running ${Math.abs(_delta7d).toFixed(0)}pp under 7d — regime may not fit current weights`;insightColor='rgba(201,169,97,0.85)';}
+  else if(_delta7d!=null&&_delta7d<=-12){insight=`Today running ${Math.abs(_delta7d).toFixed(0)}pp under 7d — regime may not fit current weights`;insightColor='rgba(217,179,104,0.85)';}
 
   // Edge bucket micro-bars for Zone 2
   const _edgeBars=edgeBuckets?[
     {key:'big-edge',label:'BIG',color:'rgb(40,204,149)'},
     {key:'good-edge',label:'GOOD',color:'rgba(40,204,149,0.7)'},
-    {key:'tight',label:'TIGHT',color:'rgba(201,169,97,0.85)'},
+    {key:'tight',label:'TIGHT',color:'rgba(217,179,104,0.85)'},
     {key:'late',label:'LATE',color:'rgba(255,77,106,0.85)'},
   ]:[];
 
   return React.createElement('div',{
     className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
-    style:{border:'1px solid #1F1F1F',background:'rgba(237,237,237,0.015)'},
+    style:{border:'1px solid #1C1C22',background:'rgba(237,237,237,0.015)'},
   },
     // ── ZONE 1: Header + today summary (always visible) ──
     React.createElement('div',{
@@ -21337,13 +21337,13 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
       },insight),
     ),
     // ── ZONE 3: Expandable detail (collapsed by default) ──
-    expanded&&React.createElement('div',{className:'border-t border-[#1F1F1F] px-3 sm:px-4 py-3 space-y-3'},
+    expanded&&React.createElement('div',{className:'border-t border-[#1C1C22] px-3 sm:px-4 py-3 space-y-3'},
       // WR by recency — 3 compact cards
       wrLifetime&&React.createElement('div',null,
         React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#EDEDED]/40 mb-1'},'WR by recency'),
         React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
           [{label:'7d',d:wr7d},{label:'30d',d:wr30d},{label:'all',d:wrLifetime}].map(({label,d})=>(
-            React.createElement('div',{key:label,className:'p-1.5 rounded-lg min-w-0',style:{background:'#141414',border:'1px solid #1F1F1F'}},
+            React.createElement('div',{key:label,className:'p-1.5 rounded-lg min-w-0',style:{background:'#0E0E12',border:'1px solid #1C1C22'}},
               React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/40 mb-0.5'},label),
               React.createElement('div',{className:'flex items-baseline gap-1 flex-wrap'},
                 React.createElement('span',{className:'text-sm font-bold tabular-nums',style:{color:_wrColor(d?.wr,d?.total||0)}},d?.wr==null?'—':`${d.wr}%`),
@@ -21360,7 +21360,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
           [
             {key:'big-edge',label:'BIG',sub:'+15+',color:'rgb(40,204,149)'},
             {key:'good-edge',label:'GOOD',sub:'+5/15',color:'rgba(40,204,149,0.75)'},
-            {key:'tight',label:'TIGHT',sub:'±5',color:'rgba(201,169,97,0.85)'},
+            {key:'tight',label:'TIGHT',sub:'±5',color:'rgba(217,179,104,0.85)'},
             {key:'late',label:'LATE',sub:'<-5',color:'rgba(255,77,106,0.85)'},
           ].map(({key,label,sub,color})=>{
             const b=edgeBuckets[key]||{wins:0,losses:0};
@@ -21397,7 +21397,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
         React.createElement(VolatilitySparkline,{tickHistoryRef,height:28}),
       ),
       // Best windows hint
-      bestWindowsToday&&bestWindowsToday.best&&bestWindowsToday.best.length>0&&React.createElement('div',{className:'pt-1.5 border-t border-[#1F1F1F]'},
+      bestWindowsToday&&bestWindowsToday.best&&bestWindowsToday.best.length>0&&React.createElement('div',{className:'pt-1.5 border-t border-[#1C1C22]'},
         React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
           React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/40'},`Best ${bestWindowsToday.dayName} hours`),
           React.createElement('span',{className:'text-[9px] text-[#EDEDED]/30'},'historical ≥3'),
@@ -21520,11 +21520,11 @@ const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
   } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000&&displayError){
     _health='error';_color='rgb(255,77,106)';_bg='rgba(255,77,106,0.06)';_border='rgba(255,77,106,0.30)';_label='SYNC ERR';_dotPulse=true;
   } else if(status.state==='writing'&&displayWriting){
-    _health='writing';_color='rgba(201,169,97,0.95)';_bg='rgba(201,169,97,0.06)';_border='rgba(201,169,97,0.25)';_label='SYNCING';_dotPulse=true;
+    _health='writing';_color='rgba(217,179,104,0.95)';_bg='rgba(217,179,104,0.06)';_border='rgba(217,179,104,0.25)';_label='SYNCING';_dotPulse=true;
   } else if(status.listeners>0&&_lastOkAgo!=null&&_lastOkAgo<60000){
     _health='healthy';_color='rgba(40,204,149,0.95)';_bg='rgba(40,204,149,0.06)';_border='rgba(40,204,149,0.20)';_label='SYNCED';
   } else {
-    _health='stale';_color='rgba(201,169,97,0.85)';_bg='rgba(201,169,97,0.04)';_border='rgba(201,169,97,0.20)';_label='SYNC IDLE';
+    _health='stale';_color='rgba(217,179,104,0.85)';_bg='rgba(217,179,104,0.04)';_border='rgba(217,179,104,0.20)';_label='SYNC IDLE';
   }
   const _title=[
     `Cloud sync: ${_health}`,
@@ -21556,7 +21556,7 @@ function MovementRiskPill({movementRisk}){
     _color='rgb(255,77,106)';_bg='rgba(255,77,106,0.12)';_border='rgba(255,77,106,0.45)';
     _label='RISK · EXTREME';_pulse=true;
   } else if(level==='ELEVATED'){
-    _color='rgba(201,169,97,0.95)';_bg='rgba(201,169,97,0.08)';_border='rgba(201,169,97,0.32)';
+    _color='rgba(217,179,104,0.95)';_bg='rgba(217,179,104,0.08)';_border='rgba(217,179,104,0.32)';
     _label='RISK · ELEVATED';
   } else if(level==='NORMAL'){
     _color='rgba(237,237,237,0.7)';_bg='rgba(237,237,237,0.04)';_border='rgba(237,237,237,0.10)';
@@ -21591,9 +21591,9 @@ const TodayPnLPill=React.memo(function TodayPnLPill({todayData,onClick}){
   if(!todayData||(todayData.wins+todayData.losses)===0)return null;
   const{wins,losses,wr,resolved,dollarPnL}=todayData;
   const _net=wins-losses;
-  const _color=_net>=2?'rgba(40,204,149,0.95)':_net>=0?'rgba(201,169,97,0.85)':'rgba(255,77,106,0.85)';
-  const _bg=_net>=2?'rgba(40,204,149,0.08)':_net>=0?'rgba(201,169,97,0.06)':'rgba(255,77,106,0.06)';
-  const _border=_net>=2?'rgba(40,204,149,0.25)':_net>=0?'rgba(201,169,97,0.22)':'rgba(255,77,106,0.25)';
+  const _color=_net>=2?'rgba(40,204,149,0.95)':_net>=0?'rgba(217,179,104,0.85)':'rgba(255,77,106,0.85)';
+  const _bg=_net>=2?'rgba(40,204,149,0.08)':_net>=0?'rgba(217,179,104,0.06)':'rgba(255,77,106,0.06)';
+  const _border=_net>=2?'rgba(40,204,149,0.25)':_net>=0?'rgba(217,179,104,0.22)':'rgba(255,77,106,0.25)';
   const _dollarLabel=dollarPnL!=null?(dollarPnL>=0?'+$':'-$')+Math.abs(dollarPnL).toFixed(2):null;
   return React.createElement('div',{
     className:'flex items-baseline gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEDED]/3':''),
@@ -21624,7 +21624,7 @@ const StreakTiltPill=React.memo(function StreakTiltPill({todayData}){
     _bg='rgba(40,204,149,0.08)';_border='rgba(40,204,149,0.30)';
   } else if(streak>=2){
     _label=`${streak}${streakType==='hot'?'W':'L'}`;_icon=streakType==='hot'?'↗':'↘';
-    _color=streakType==='hot'?'rgba(40,204,149,0.85)':'rgba(201,169,97,0.85)';
+    _color=streakType==='hot'?'rgba(40,204,149,0.85)':'rgba(217,179,104,0.85)';
     _bg='rgba(237,237,237,0.04)';_border='rgba(237,237,237,0.10)';
   } else return null;
   // Tooltip explains the cooldown on tilt states
@@ -21686,7 +21686,7 @@ function DailyPnLCurve({todayCalls,height=40}){
   const _y=(c)=>h-((c-minC)/range)*h;
   const _pathD='M '+points.map((p,i)=>`${_x(i).toFixed(1)} ${_y(p.cum).toFixed(1)}`).join(' L ');
   const _last=points[points.length-1].cum;
-  const _color=_last>0?'rgb(40,204,149)':_last<0?'rgb(255,77,106)':'rgba(201,169,97,0.85)';
+  const _color=_last>0?'rgb(40,204,149)':_last<0?'rgb(255,77,106)':'rgba(217,179,104,0.85)';
   // Zero baseline if range crosses zero
   const _zeroY=minC<=0&&maxC>=0?_y(0):null;
   return React.createElement('div',{className:'relative',style:{height:h}},
@@ -21740,7 +21740,7 @@ function VolatilitySparkline({tickHistoryRef,height=30}){
   const _avgVol=points.reduce((s,p)=>s+p.vol,0)/points.length;
   const _spike=_curVol>_avgVol*1.5;
   const _calm=_curVol<_avgVol*0.6;
-  const _color=_spike?'rgba(255,77,106,0.9)':_calm?'rgba(147,197,253,0.85)':'rgba(201,169,97,0.85)';
+  const _color=_spike?'rgba(255,77,106,0.9)':_calm?'rgba(147,197,253,0.85)':'rgba(217,179,104,0.85)';
   const _label=_spike?'EXPANDING':_calm?'COMPRESSING':'STEADY';
   return React.createElement('div',{className:'relative',style:{height:h}},
     React.createElement('svg',{viewBox:`0 0 ${w} ${h}`,preserveAspectRatio:'none',style:{width:'100%',height:h,display:'block'}},
@@ -21821,7 +21821,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
       const stats=_phaseStats[phaseKey];
       const N=stats?(stats.W+stats.L):0;
       const wr=N>=5?stats.W/N:null;
-      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(201,169,97,0.85)',tierBg='rgba(201,169,97,0.05)',tierBorder='rgba(201,169,97,0.20)';
+      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(217,179,104,0.85)',tierBg='rgba(217,179,104,0.05)',tierBorder='rgba(217,179,104,0.20)';
       let reasonBits=[];
       const _isDeadzone=prof?.deadzoneWarning===true;
       const _liqLow=prof?.liquidity==='LOW';
@@ -21903,17 +21903,17 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
   // Preserve insertion order
   const _sessionOrder=Object.keys(_upcomingBySession);
 
-  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#0A0A0A',border:'1px solid #1F1F1F'}},
+  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#08080B',border:'1px solid #1C1C22'}},
     // Header
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},'Today\'s Schedule'),
+      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(217,179,104,0.85)'}},'Today\'s Schedule'),
       React.createElement('div',{className:'flex items-center gap-2'},
         React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/35'},_resolvedFmt.toUpperCase()),
         onOpenFullSchedule&&React.createElement('button',{
           onClick:onOpenFullSchedule,
           title:'Open full schedule',
           className:'text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5',
-          style:{color:'rgba(201,169,97,0.85)',borderColor:'rgba(201,169,97,0.30)'},
+          style:{color:'rgba(217,179,104,0.85)',borderColor:'rgba(217,179,104,0.30)'},
         },'⊕')
       )
     ),
@@ -21943,7 +21943,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
           ),
           React.createElement('div',{className:'space-y-1'},
             grp.rows.map((s,i)=>(
-              React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] min-w-0',style:{background:'#141414',border:`1px solid ${s.tierBorder}`}},
+              React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] min-w-0',style:{background:'#0E0E12',border:`1px solid ${s.tierBorder}`}},
                 React.createElement('span',{className:'text-[10px] shrink-0'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
                 React.createElement('span',{className:'tabular-nums text-[#EDEDED]/55 shrink-0',style:{minWidth:'92px'}},`${_fmtTime(s.startsAt)}–${_fmtTime(s.endsAt)}`),
                 React.createElement('span',{className:'font-bold uppercase tracking-wider shrink-0',style:{color:s.tierColor,fontSize:'9px',minWidth:'66px'}},s.tierLabel),
@@ -21997,7 +21997,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
       const stats=_phaseStats[phaseKey];
       const N=stats?(stats.W+stats.L):0;
       const wr=N>=5?stats.W/N:null;
-      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(201,169,97,0.85)',tierBg='rgba(201,169,97,0.05)',tierBorder='rgba(201,169,97,0.20)';
+      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(217,179,104,0.85)',tierBg='rgba(217,179,104,0.05)',tierBorder='rgba(217,179,104,0.20)';
       const _isDeadzone=prof?.deadzoneWarning===true;
       const _liqLow=prof?.liquidity==='LOW';
       const _volComp=prof?.vol==='COMPRESSING';
@@ -22058,14 +22058,14 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
   },
     React.createElement('div',{
       className:'w-full max-w-3xl rounded-xl my-auto',
-      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#101014',border:'1px solid rgba(217,179,104,0.20)',boxShadow:'0 0 40px rgba(217,179,104,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
       // Header
-      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid #1F1F1F'}},
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid #1C1C22'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Trading Schedule'),
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},`${currentAsset} · Next 24h · ${_resolvedFmt.toUpperCase()}`)
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(217,179,104,0.85)'}},`${currentAsset} · Next 24h · ${_resolvedFmt.toUpperCase()}`)
         ),
         React.createElement('button',{
           onClick:onClose,
@@ -22108,7 +22108,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
               ),
               React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 leading-snug mb-1'},s.profile?.character||''),
               React.createElement('div',{className:'flex items-baseline gap-3 text-[10px] flex-wrap'},
-                s.wr!=null?React.createElement('span',{className:'tabular-nums',style:{color:s.wr>=0.60?'rgba(40,204,149,0.85)':s.wr<0.50?'rgba(255,77,106,0.85)':'rgba(201,169,97,0.85)'}},`Your WR: ${Math.round(s.wr*100)}% (${s.W}W/${s.L}L)`):React.createElement('span',{className:'text-[#EDEDED]/35'},`No prior data yet`),
+                s.wr!=null?React.createElement('span',{className:'tabular-nums',style:{color:s.wr>=0.60?'rgba(40,204,149,0.85)':s.wr<0.50?'rgba(255,77,106,0.85)':'rgba(217,179,104,0.85)'}},`Your WR: ${Math.round(s.wr*100)}% (${s.W}W/${s.L}L)`):React.createElement('span',{className:'text-[#EDEDED]/35'},`No prior data yet`),
                 s.profile?.liquidity&&React.createElement('span',{className:'text-[#EDEDED]/45'},`liq: ${s.profile.liquidity}`),
                 s.profile?.vol&&React.createElement('span',{className:'text-[#EDEDED]/45'},`vol: ${s.profile.vol}`),
                 s.profile?.coinFlipRisk&&React.createElement('span',{className:'text-[#EDEDED]/45'},`coin-flip: ${s.profile.coinFlipRisk}`)
@@ -22219,10 +22219,10 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           _tone='good';_label=`✓ ${_curSession} is profitable`;_color='rgba(40,204,149,0.85)';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You're making money — trade normal size, normal selectivity.`;
         } else if(_wr>=50){
-          _tone='neutral';_label=`◇ ${_curSession} is breakeven`;_color='rgba(201,169,97,0.85)';
+          _tone='neutral';_label=`◇ ${_curSession} is breakeven`;_color='rgba(217,179,104,0.85)';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). Just barely breakeven — go smaller, only take strong setups.`;
         } else if(_wr>=40){
-          _tone='warning';_label=`⚠ ${_curSession} is unprofitable`;_color='rgba(201,169,97,0.95)';
+          _tone='warning';_label=`⚠ ${_curSession} is unprofitable`;_color='rgba(217,179,104,0.95)';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You're losing money in this session — half size or skip unless the setup is great.`;
         } else {
           _tone='bad';_label=`✗ ${_curSession} is your weakness`;_color='rgba(255,77,106,0.95)';
@@ -22235,11 +22235,11 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
   const _criticalCount=ctx.cautions.filter(c=>c.severity==='critical').length;
   const _warningCount=ctx.cautions.filter(c=>c.severity==='warning').length;
   // Top-level border tint by severity
-  const _borderColor=_criticalCount>0?'rgba(255,77,106,0.35)':_warningCount>0?'rgba(201,169,97,0.30)':'rgba(237,237,237,0.10)';
+  const _borderColor=_criticalCount>0?'rgba(255,77,106,0.35)':_warningCount>0?'rgba(217,179,104,0.30)':'rgba(237,237,237,0.10)';
   const _bgGradient=_criticalCount>0
     ?'rgba(255,77,106,0.05)'
     :_warningCount>0
-    ?'rgba(201,169,97,0.04)'
+    ?'rgba(217,179,104,0.04)'
     :'rgba(237,237,237,0.02)';
   // Format the countdown to next phase
   const _nextLabel=ctx.nextPhase.minutesUntil<60
@@ -22274,8 +22274,8 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           const _liqMap={EXTREME:'PEAK ACTIVITY',HIGH:'BUSY',MED:'MODERATE',LOW:'QUIET'};
           const _liqLabel=_liqMap[ctx.phase.liquidity]||ctx.phase.liquidity;
           return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',style:{
-            color:ctx.phase.liquidity==='EXTREME'?'rgb(40,204,149)':ctx.phase.liquidity==='HIGH'?'rgb(40,204,149)':ctx.phase.liquidity==='MED'?'rgba(201,169,97,0.85)':'rgba(255,77,106,0.7)',
-            background:'#141414',
+            color:ctx.phase.liquidity==='EXTREME'?'rgb(40,204,149)':ctx.phase.liquidity==='HIGH'?'rgb(40,204,149)':ctx.phase.liquidity==='MED'?'rgba(217,179,104,0.85)':'rgba(255,77,106,0.7)',
+            background:'#0E0E12',
           },title:`Liquidity: ${ctx.phase.liquidity}`},_liqLabel);
         })(),
         (()=>{
@@ -22283,7 +22283,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           const _volLabel=_volMap[ctx.phase.vol]||ctx.phase.vol.toLowerCase();
           return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg hidden sm:inline-block',style:{
             color:ctx.phase.vol==='EXPANDING'?'rgba(255,77,106,0.85)':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(237,237,237,0.55)',
-            background:'#141414',
+            background:'#0E0E12',
           },title:`Volatility: ${ctx.phase.vol}`},_volLabel);
         })(),
         // V9.1.2: "Tara sees" plain-language pill — shows what direction Tara
@@ -22294,8 +22294,8 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
             color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(40,204,149)'
               :analysis.regime==='TRENDING DOWN'?'rgba(255,77,106,0.95)'
               :'rgba(237,237,237,0.65)',
-            background:'#141414',
-            border:'1px solid #1F1F1F',
+            background:'#0E0E12',
+            border:'1px solid #1C1C22',
           },
           title:`Tara's read: ${regimeToPlainLabel(analysis.regime)}`,
         },`tara: ${regimeToShortPlain(analysis.regime)}`),
@@ -22332,7 +22332,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           style:{
             color:_sessionAdvice.color,
             background:_sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(40,204,149,0.06)'
-              :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(201,169,97,0.06)'
+              :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(217,179,104,0.06)'
               :'rgba(255,77,106,0.08)',
             border:'1px solid '+_sessionAdvice.color.replace('0.95','0.30').replace('0.85','0.30'),
           },
@@ -22340,7 +22340,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         },`you · ${_sessionAdvice.wr}%`),
         // Top caution if present (collapsed view)
         !expanded&&_topCaution&&React.createElement('span',{className:'text-[10px] truncate min-w-0',style:{
-          color:_topCaution.severity==='critical'?'rgba(255,77,106,0.95)':_topCaution.severity==='warning'?'rgba(201,169,97,0.85)':'rgba(237,237,237,0.55)',
+          color:_topCaution.severity==='critical'?'rgba(255,77,106,0.95)':_topCaution.severity==='warning'?'rgba(217,179,104,0.85)':'rgba(237,237,237,0.55)',
         }},_topCaution.severity==='critical'?'⚠ ':_topCaution.severity==='warning'?'⚠ ':'· ',_topCaution.text),
       ),
       // Right: next transition countdown + expand chevron
@@ -22355,7 +22355,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
       ),
     ),
     // Expanded detail panel
-    expanded&&React.createElement('div',{className:'border-t border-[#1F1F1F] px-3 sm:px-4 py-3 space-y-2.5 text-[11px]'},
+    expanded&&React.createElement('div',{className:'border-t border-[#1C1C22] px-3 sm:px-4 py-3 space-y-2.5 text-[11px]'},
       // V9.13: ADAPTIVE SCHEDULE STRIP — 24-hour heatmap of recommended trade
       //   activity, with current adaptive dial reasoning. Always shown at top of
       //   expanded panel so user can see at-a-glance whether they're in a green
@@ -22368,10 +22368,10 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           todaySessionN:(typeof _todaySessionWR==='object'&&_todaySessionWR)?_todaySessionWR.n:null,
         });
         const _statusColor=_adaptive.status==='TRADE'?'rgba(40,204,149,0.95)'
-          :_adaptive.status==='OBSERVE'?'rgba(201,169,97,0.95)'
+          :_adaptive.status==='OBSERVE'?'rgba(217,179,104,0.95)'
           :'rgba(255,77,106,0.95)';
         const _statusBg=_adaptive.status==='TRADE'?'rgba(40,204,149,0.08)'
-          :_adaptive.status==='OBSERVE'?'rgba(201,169,97,0.08)'
+          :_adaptive.status==='OBSERVE'?'rgba(217,179,104,0.08)'
           :'rgba(255,77,106,0.08)';
         return React.createElement('div',{
           className:'px-2.5 py-2.5 rounded-lg',
@@ -22397,7 +22397,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
               const _slot=TARA_SCHEDULE_BY_EST_HOUR[h]||{status:'OBSERVE',dial:50,wr:60,note:''};
               const _isNow=h===_adaptive.hour;
               const _bg=_slot.status==='TRADE'?'rgba(40,204,149,0.55)'
-                :_slot.status==='OBSERVE'?'rgba(201,169,97,0.50)'
+                :_slot.status==='OBSERVE'?'rgba(217,179,104,0.50)'
                 :'rgba(255,77,106,0.45)';
               return React.createElement('div',{
                 key:h,
@@ -22449,11 +22449,11 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         className:'flex items-baseline gap-2 px-2.5 py-2 rounded-lg',
         style:{
           background:_sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(40,204,149,0.06)'
-            :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(201,169,97,0.06)'
+            :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(217,179,104,0.06)'
             :'rgba(255,77,106,0.08)',
           border:'1px solid '+(
             _sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(40,204,149,0.30)'
-            :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(201,169,97,0.30)'
+            :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(217,179,104,0.30)'
             :'rgba(255,77,106,0.30)'),
         },
       },
@@ -22466,10 +22466,10 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         ),
       ),
       // V8.7: Coin flip risk pill
-      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pb-1 border-b border-[#1F1F1F]'},
+      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pb-1 border-b border-[#1C1C22]'},
         React.createElement('span',{className:'text-[8px] uppercase tracking-[0.14em] font-bold text-[#EDEDED]/30'},'Coin-flip risk'),
         React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider',style:{
-          color:ctx.phase.coinFlipRisk==='LOW'?'rgb(40,204,149)':ctx.phase.coinFlipRisk==='MEDIUM'?'rgba(201,169,97,0.95)':'rgba(255,77,106,0.95)',
+          color:ctx.phase.coinFlipRisk==='LOW'?'rgb(40,204,149)':ctx.phase.coinFlipRisk==='MEDIUM'?'rgba(217,179,104,0.95)':'rgba(255,77,106,0.95)',
         }},ctx.phase.coinFlipRisk||'?'),
       ),
       // V8.7: Expected movement
@@ -22488,7 +22488,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         React.createElement('span',{className:'text-[#EDEDED]/75 leading-relaxed italic'},ctx.phase.whatTaraDoes),
       ),
       // Character description (legacy field — still useful as one-liner)
-      React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#1F1F1F]'},
+      React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#1C1C22]'},
         React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/30 shrink-0 mt-0.5'},'Character'),
         React.createElement('span',{className:'text-[#EDEDED]/55 leading-relaxed'},ctx.phase.character),
       ),
@@ -22503,16 +22503,16 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         React.createElement('div',{className:'flex-1 space-y-1'},
           ctx.cautions.map((c,i)=>React.createElement('div',{key:i,className:'flex items-baseline gap-1.5'},
             React.createElement('span',{className:'shrink-0',style:{
-              color:c.severity==='critical'?'rgba(255,77,106,0.95)':c.severity==='warning'?'rgba(201,169,97,0.85)':'rgba(237,237,237,0.4)',
+              color:c.severity==='critical'?'rgba(255,77,106,0.95)':c.severity==='warning'?'rgba(217,179,104,0.85)':'rgba(237,237,237,0.4)',
             }},c.severity==='critical'?'⚠':c.severity==='warning'?'!':'·'),
             React.createElement('span',{style:{
-              color:c.severity==='critical'?'rgba(255,77,106,0.85)':c.severity==='warning'?'rgba(201,169,97,0.75)':'rgba(237,237,237,0.6)',
+              color:c.severity==='critical'?'rgba(255,77,106,0.85)':c.severity==='warning'?'rgba(217,179,104,0.75)':'rgba(237,237,237,0.6)',
             }},c.text),
           )),
         ),
       ),
       // Macro event detail if active
-      ctx.macro.state!=='CLEAR'&&ctx.macro.event&&React.createElement('div',{className:'flex items-baseline gap-2 pt-1 border-t border-[#1F1F1F]'},
+      ctx.macro.state!=='CLEAR'&&ctx.macro.event&&React.createElement('div',{className:'flex items-baseline gap-2 pt-1 border-t border-[#1C1C22]'},
         React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgba(255,77,106,0.85)'}},'Macro'),
         React.createElement('span',{style:{color:'rgba(255,77,106,0.85)'}},
           ctx.macro.event.name,' · ',ctx.macro.event.impact,' impact · state: ',ctx.macro.state,
@@ -22555,7 +22555,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         }
         if(!_bestRange||_bestWr<0.55)return null;
         const _wrPct=Math.round(_bestWr*100);
-        return React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#1F1F1F]'},
+        return React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#1C1C22]'},
           React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgb(40,204,149)'}},'Entry timing'),
           React.createElement('span',{className:'text-[#EDEDED]/75 leading-relaxed'},
             `Best entry window: minutes ${_bestRange} (${_wrPct}% WR over ${_bestN} trades). Entries before minute ${_bestRange.split('-')[0]} tend to lock on noise; after minute ${_bestRange.split('-')[1]} tends to chase.`
@@ -22563,7 +22563,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         );
       })(),
       // Footer: dominant session + day rating
-      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pt-1.5 border-t border-[#1F1F1F] text-[9px] text-[#EDEDED]/35 uppercase tracking-wider'},
+      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pt-1.5 border-t border-[#1C1C22] text-[9px] text-[#EDEDED]/35 uppercase tracking-wider'},
         React.createElement('span',null,ctx.dayName,' · ',ctx.sessions.dominant,' DOMINANT · DAY×SESS RATING ',ctx.sessions.dsRating),
         React.createElement('span',null,'ALL TIMES UTC'),
       ),
@@ -22582,11 +22582,11 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
   },[taraCallLog,windowType]);
   const totalAcrossWindows=Array.isArray(taraCallLog)?taraCallLog.length:0;
   const _learnTotal=taraLearnings?.totalResolved||0;
-  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(40,204,149,0.95)'},LOSS:{bg:'rgba(255,77,106,0.18)',fg:'rgba(255,77,106,0.95)'},SITOUT:{bg:'rgba(201,169,97,0.16)',fg:'rgba(201,169,97,0.85)'},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
+  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(40,204,149,0.95)'},LOSS:{bg:'rgba(255,77,106,0.18)',fg:'rgba(255,77,106,0.95)'},SITOUT:{bg:'rgba(217,179,104,0.16)',fg:'rgba(217,179,104,0.85)'},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
   const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
   const _fmtTime=(ms)=>_fmtTimeTz(ms,timeFormat,{hour:'2-digit',minute:'2-digit'});
   return React.createElement(React.Fragment,null,
-    React.createElement('div',{className:'border-t border-[#1F1F1F] pt-2.5 mt-2.5'},
+    React.createElement('div',{className:'border-t border-[#1C1C22] pt-2.5 mt-2.5'},
       React.createElement('div',{className:'flex justify-between items-baseline mb-1.5 gap-2'},
         React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold'},'Tara\'s Memory'),
         React.createElement('div',{className:'flex items-center gap-2'},
@@ -22669,7 +22669,7 @@ function TaraLearningsModal({learnings,onClose}){
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
           const [regime,dir]=k.split('|');
           const arrow=dir==='UP'?'▲':'▼';
-          return React.createElement('div',{key:k,className:'px-2 py-2 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]'},
+          return React.createElement('div',{key:k,className:'px-2 py-2 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]'},
             React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-0.5'},
               React.createElement('span',{className:'text-[11px] font-bold tracking-wide text-[#EDEDED]/85 truncate flex items-baseline gap-1.5'},
                 React.createElement('span',{className:dir==='UP'?'text-emerald-400':'text-rose-400'},arrow),
@@ -22699,7 +22699,7 @@ function TaraLearningsModal({learnings,onClose}){
           const _adjLabel=adj<0?`${Math.abs(Math.round(adj*100))}% faster lock`:adj>0?`${Math.round(adj*100)}% slower`:'no change';
           const _adjColor=adj<0?'text-emerald-400/85':adj>0?'text-amber-400/80':'text-[#EDEDED]/35';
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
-          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]'},
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] font-bold tracking-wide text-[#EDEDED]/85 truncate'},k),
             React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
               React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
@@ -22728,7 +22728,7 @@ function TaraLearningsModal({learnings,onClose}){
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
           const _label=k==='structural-led'?'◈ Structural-led':k==='super-confluence'?'★ Super-confluence':k==='confluence'?'★ Confluence':k==='tape-led'?'⚡ Tape-led (fast)':k==='rising-confluence'?'↗ Rising (early entry)':'Single-signal';
           const _color=k==='structural-led'?{color:'#C4B5FD'}:k==='super-confluence'||k==='confluence'?{color:T2_GOLD}:k==='tape-led'?{color:'#7DD3FC'}:k==='rising-confluence'?{color:'#A6E3A1'}:{color:'rgba(237,237,237,0.85)'};
-          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]'},
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] font-bold tracking-wide truncate',style:_color},_label),
             React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
               React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
@@ -22754,7 +22754,7 @@ function TaraLearningsModal({learnings,onClose}){
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
           const _label=k==='big-edge'?'BIG EDGE (≥+15pt)':k==='good-edge'?'GOOD EDGE (+5..+15)':k==='tight'?'TIGHT (-5..+5)':'LATE ENTRY (≤-5)';
           const _color=k==='big-edge'?{color:'#86EFAC'}:k==='good-edge'?{color:'rgba(40,204,149,0.7)'}:k==='tight'?{color:'rgba(237,237,237,0.65)'}:{color:'rgba(212,162,76,0.85)'};
-          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]'},
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] font-bold tracking-wide truncate',style:_color},_label),
             React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
               React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
@@ -22791,9 +22791,9 @@ function TaraLearningsModal({learnings,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#171717] border border-[#2A2A2A] rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
+      className:'bg-[#101014] border border-[#2A2A34] rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
       onClick:(e)=>e.stopPropagation(),
-      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
+      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(217,179,104,0.06)'},
     },
       React.createElement('div',{className:'flex justify-between items-baseline mb-4'},
         React.createElement('div',null,
@@ -22803,7 +22803,7 @@ function TaraLearningsModal({learnings,onClose}){
         React.createElement('button',{onClick:onClose,className:'text-[#EDEDED]/40 hover:text-white text-xl leading-none'},'×'),
       ),
       total<5
-        ? React.createElement('div',{className:'p-4 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F] text-[12px] text-[#EDEDED]/65 leading-relaxed'},
+        ? React.createElement('div',{className:'p-4 rounded-lg bg-[#08080B] border border-[#1C1C22] text-[12px] text-[#EDEDED]/65 leading-relaxed'},
             'Tara is gathering data. After 5 resolved UP/DOWN calls she\'ll start adapting based on what\'s actually been working — locking faster on proven regime+direction combos, dampening confidence on combos that\'ve been losing, but never withdrawing into more sit-outs.',
             React.createElement('div',{className:'mt-2 text-[10px] text-[#EDEDED]/40'},`Currently at ${total}/5.`),
           )
@@ -22815,7 +22815,7 @@ function TaraLearningsModal({learnings,onClose}){
             _renderContextBucket('By Regime',data.byRegime),
             _renderContextBucket('By Direction',data.byDirection),
             _renderContextBucket('By Session',data.bySession),
-            React.createElement('div',{className:'mt-4 p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F] text-[10px] text-[#EDEDED]/55 leading-relaxed'},
+            React.createElement('div',{className:'mt-4 p-3 rounded-lg bg-[#08080B] border border-[#1C1C22] text-[10px] text-[#EDEDED]/55 leading-relaxed'},
               React.createElement('div',{className:'mb-1.5'},React.createElement('span',{className:'font-bold text-[#EDEDED]/75'},'How she learns: '),'Tara picks BETTER, doesn\'t call LESS. Default learning adjusts speed and displayed confidence per regime+direction combo. Combos with ≥75% win rate get 20% faster lock + confidence boost. Combos with <40% get 20% slower lock + dampened confidence — but she still calls them. Floors stay fixed except for an emergency safety valve (only triggers if a regime drops below 25% over 15+ trades).'),
               React.createElement('div',null,'The shared call log syncs across devices, so every device sees the same Tara — and contributes to the same training set.'),
             ),
@@ -22867,8 +22867,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     };
   },[taraCallLog,filter,assetFilter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
-  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(40,204,149,0.95)'}:r==='LOSS'?{color:'rgba(255,77,106,0.95)'}:r==='SITOUT'?{color:'rgba(201,169,97,0.85)'}:{color:'rgba(237,237,237,0.4)'};
-  const _dirStyle=(d)=>d==='UP'?{color:'rgba(40,204,149,0.85)'}:d==='DOWN'?{color:'rgba(255,77,106,0.85)'}:{color:'rgba(201,169,97,0.7)'};
+  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(40,204,149,0.95)'}:r==='LOSS'?{color:'rgba(255,77,106,0.95)'}:r==='SITOUT'?{color:'rgba(217,179,104,0.85)'}:{color:'rgba(237,237,237,0.4)'};
+  const _dirStyle=(d)=>d==='UP'?{color:'rgba(40,204,149,0.85)'}:d==='DOWN'?{color:'rgba(255,77,106,0.85)'}:{color:'rgba(217,179,104,0.7)'};
   // V5.7.5: derive window period (e.g. "09:00–09:15") from windowId. windowId encodes the
   //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
   // V6.5.3: All time displays in this modal honor the parent's useLocalTime toggle.
@@ -22896,7 +22896,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     return'$'+_n.toLocaleString(undefined,{minimumFractionDigits:_decimals,maximumFractionDigits:_decimals});
   };
   return React.createElement('div',{
-    className:'fixed inset-0 z-50 bg-[#0A0A0A] backdrop-blur-md overflow-y-auto overflow-x-hidden',
+    className:'fixed inset-0 z-50 bg-[#08080B] backdrop-blur-md overflow-y-auto overflow-x-hidden',
     onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
   },
     React.createElement('div',{className:'max-w-[900px] mx-auto px-2 sm:px-4 py-3 sm:py-8 w-full min-w-0'},
@@ -23519,7 +23519,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             },
             className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
-              background:'rgba(201,169,97,0.10)',
+              background:'rgba(217,179,104,0.10)',
               color:T2_GOLD,
               border:'1px solid '+T2_GOLD_BORDER,
             },
@@ -23732,30 +23732,30 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             },
             title:'Download call log as CSV for spreadsheet analysis',
           },'↓ Export CSV'),
-          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'#141414',color:'rgba(237,237,237,0.5)',border:'1px solid #1F1F1F'},title:'All times shown in this view honor the time format toggle in the header'},_resolvedFmt.toUpperCase()),
+          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'#0E0E12',color:'rgba(237,237,237,0.5)',border:'1px solid #1C1C22'},title:'All times shown in this view honor the time format toggle in the header'},_resolvedFmt.toUpperCase()),
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#EDEDED]/5 text-[#EDEDED]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
       ),
       React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
-        React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           // V13.4.166: say which window these totals cover. The log is capped to the
           //   cloud window, so an unqualified "Total calls" read as a lifetime count.
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},`Calls · ${_TARA_RECORD_WINDOW_LABEL}`),
           React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums',style:{fontFamily:'"IBM Plex Mono",monospace'}},counts.total),
         ),
-        React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Win rate'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(40,204,149)':_wr>=50?'#fff':'rgb(255,77,106)',fontFamily:'"IBM Plex Mono",monospace'}},_wr!==null?`${_wr}%`:'—'),
         ),
-        React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Wins'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(40,204,149)',fontFamily:'"IBM Plex Mono",monospace'}},counts.wins),
         ),
-        React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Losses'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(255,77,106)',fontFamily:'"IBM Plex Mono",monospace'}},counts.losses),
         ),
-        React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Sat out'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD,fontFamily:'"IBM Plex Mono",monospace'}},counts.sitouts),
         ),
@@ -23765,12 +23765,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
       //   localStorage being cleared.
       _SB_PAUSED&&React.createElement('div',{
         className:'mb-4 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap',
-        style:{background:'rgba(201,169,97,0.07)',border:'1px solid rgba(201,169,97,0.25)'},
+        style:{background:'rgba(217,179,104,0.07)',border:'1px solid rgba(217,179,104,0.25)'},
       },
         React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
           React.createElement('span',{className:'text-base shrink-0'},'💾'),
           React.createElement('div',{className:'min-w-0'},
-            React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-[0.14em]',style:{color:'rgba(201,169,97,0.95)'}},'LOCAL MODE — Cloud sync paused until ~Jun 18'),
+            React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-[0.14em]',style:{color:'rgba(217,179,104,0.95)'}},'LOCAL MODE — Cloud sync paused until ~Jun 18'),
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 mt-0.5'},'Data lives in this browser only. Export JSON daily to avoid data loss.'),
           ),
         ),
@@ -23803,7 +23803,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             }catch(e){alert('Backup failed: '+(e.message||String(e)));}
           },
           className:'shrink-0 px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
-          style:{background:'rgba(201,169,97,0.15)',color:'rgba(201,169,97,0.95)',border:'1px solid rgba(201,169,97,0.35)'},
+          style:{background:'rgba(217,179,104,0.15)',color:'rgba(217,179,104,0.95)',border:'1px solid rgba(217,179,104,0.35)'},
           title:`Backup all ${taraCallLog.length} entries to JSON file`,
         },'💾 Backup Now'),
       ),
@@ -23820,9 +23820,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         const _noMatches=_isReconcile&&(reconcileResult.matchedEntries||0)===0&&(reconcileResult.checkedAgainst||0)>0;
         const _isWarn=reconcileResult.issues.length>0||_fetchedNothing||_noMatches;
         const _isError=!!reconcileResult.error;
-        const _bg=_isError?'rgba(255,77,106,0.06)':_isWarn?'rgba(201,169,97,0.06)':'rgba(40,204,149,0.06)';
-        const _border=_isError?'rgba(255,77,106,0.20)':_isWarn?'rgba(201,169,97,0.20)':'rgba(40,204,149,0.20)';
-        const _headerColor=_isError?'rgba(255,77,106,0.85)':_isWarn?'rgba(201,169,97,0.85)':'rgba(40,204,149,0.85)';
+        const _bg=_isError?'rgba(255,77,106,0.06)':_isWarn?'rgba(217,179,104,0.06)':'rgba(40,204,149,0.06)';
+        const _border=_isError?'rgba(255,77,106,0.20)':_isWarn?'rgba(217,179,104,0.20)':'rgba(40,204,149,0.20)';
+        const _headerColor=_isError?'rgba(255,77,106,0.85)':_isWarn?'rgba(217,179,104,0.85)':'rgba(40,204,149,0.85)';
         return React.createElement('div',{
         className:'mb-5 p-4 rounded-xl',
         style:{background:_bg,border:`1px solid ${_border}`},
@@ -23918,7 +23918,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='pending-resolve'&&i.kind!=='missing-fields'),pendingResolved:0}:null);
               },
               className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wider font-bold',
-              style:{background:'rgba(201,169,97,0.15)',color:'#C9A961',border:'1px solid rgba(201,169,97,0.40)'},
+              style:{background:'rgba(217,179,104,0.15)',color:'#D9B368',border:'1px solid rgba(217,179,104,0.40)'},
             },`Apply all ${_pending.length} pending`));
           }
           if(_mismatches.length>0){
@@ -23942,7 +23942,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='sitout-had-fill')}:null);
               },
               className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wider font-bold',
-              style:{background:'rgba(201,169,97,0.15)',color:'#C9A961',border:'1px solid rgba(201,169,97,0.40)'},
+              style:{background:'rgba(217,179,104,0.15)',color:'#D9B368',border:'1px solid rgba(217,179,104,0.40)'},
             },`Apply all ${_sitoutFills.length} recovered trades`));
           }
           // V10.7.43: bulk delete unverifiable entries (missing strike or closingPrice).
@@ -23973,15 +23973,15 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           // V9.17.15: color per kind. Uncertain kinds get amber tint to signal "review needed",
           //   confident kinds (pending-resolve, kalshi-mismatch) get neutral with green apply.
           const _isUncertain=_iss.kind==='strike-uncertain'||_iss.kind==='closing-disagrees'||_iss.kind==='sitout-had-fill';
-          const _cardBg=_isUncertain?'rgba(201,169,97,0.06)':'rgba(10,10,10,0.5)';
-          const _cardBorder=_isUncertain?'rgba(201,169,97,0.20)':'rgba(237,237,237,0.06)';
+          const _cardBg=_isUncertain?'rgba(217,179,104,0.06)':'rgba(10,10,10,0.5)';
+          const _cardBorder=_isUncertain?'rgba(217,179,104,0.20)':'rgba(237,237,237,0.06)';
           return React.createElement('div',{
             key:_iss.entryId,
             className:'px-3 py-2 rounded-lg text-[11px] flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between',
             style:{background:_cardBg,border:`1px solid ${_cardBorder}`},
           },[
             React.createElement('div',{key:'detail',className:'flex flex-col gap-0.5 min-w-0 flex-1'},[
-              React.createElement('div',{key:'when',className:'text-[9px] uppercase tracking-wider',style:{color:_isUncertain?'rgba(201,169,97,0.85)':'rgba(237,237,237,0.45)'}},_when+' · '+_iss.kind+(_isUncertain?' · review':'')),
+              React.createElement('div',{key:'when',className:'text-[9px] uppercase tracking-wider',style:{color:_isUncertain?'rgba(217,179,104,0.85)':'rgba(237,237,237,0.45)'}},_when+' · '+_iss.kind+(_isUncertain?' · review':'')),
               React.createElement('div',{key:'d',className:'leading-snug',style:{color:'#EDEDED',wordBreak:'break-word'}},_iss.detail),
             ]),
             React.createElement('div',{key:'actions',className:'flex items-center gap-1.5 shrink-0'},[
@@ -24006,7 +24006,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 },
                 className:'px-2.5 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold',
                 style:_isUncertain
-                  ?{background:'rgba(201,169,97,0.15)',color:'#C9A961',border:'1px solid rgba(201,169,97,0.40)'}
+                  ?{background:'rgba(217,179,104,0.15)',color:'#D9B368',border:'1px solid rgba(217,179,104,0.40)'}
                   :{background:'rgba(40,204,149,0.15)',color:'rgb(40,204,149)',border:'1px solid rgba(40,204,149,0.35)'},
               },`Apply → ${_iss.suggested}`):null,
               React.createElement('button',{
@@ -24025,7 +24025,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         reconcileResult.kind==='reconcile'&&Array.isArray(reconcileResult.unmatchedDetails)&&reconcileResult.unmatchedDetails.length>0?React.createElement('details',{
           key:'unmatched',
           className:'mt-3 px-3 py-2 rounded-lg text-[10px]',
-          style:{background:'#0D0D0D',border:'1px solid #1F1F1F',color:'rgba(237,237,237,0.65)'},
+          style:{background:'#0B0B0F',border:'1px solid #1C1C22',color:'rgba(237,237,237,0.65)'},
         },[
           React.createElement('summary',{key:'sum',className:'cursor-pointer uppercase tracking-wider',style:{color:'rgba(237,237,237,0.55)'}},
             `${reconcileResult.unmatchedDetails.length} pending entr${reconcileResult.unmatchedDetails.length===1?'y':'ies'} couldn't be matched — show why`,
@@ -24045,7 +24045,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         reconcileResult.kind==='reconcile'&&reconcileResult.diag&&reconcileResult.issues.length===0?React.createElement('div',{
           key:'diag',
           className:'mt-2 px-3 py-2 rounded-lg text-[10px]',
-          style:{background:'#0D0D0D',border:'1px solid #1F1F1F',color:'rgba(237,237,237,0.55)'},
+          style:{background:'#0B0B0F',border:'1px solid #1C1C22',color:'rgba(237,237,237,0.55)'},
         },[
           React.createElement('div',{key:'tt',className:'uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.4)'}},'Fetch diagnostic'),
           React.createElement('div',{key:'st',className:'tabular-nums leading-relaxed',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
@@ -24089,7 +24089,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           return`${x.toFixed(1)},${y.toFixed(1)}`;
         }).join(' ');
         const _zeroY=_svgH-(((-_minPnl)/_range)*_svgH);
-        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#171717] border border-[#1F1F1F]'},
+        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#101014] border border-[#1C1C22]'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold'},'P&L Summary'),
             React.createElement('span',{className:'text-[10px] tabular-nums text-[#EDEDED]/50'},`${_withBets.length} trades with bet amounts`)
@@ -24135,7 +24135,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         const _bucketize=(e)=>e.isStructuralLed?'structural':e.isSuperConfluent?'super':e.isConfluent?'confluence':e.isTapeLed?'tape':e.isRisingConfluence?'rising':e.isUserForced?'forced':'single';
         const _tiers=['super','confluence','structural','tape','rising','forced','single'];
         const _tierLabels={super:'★ Super',confluence:'★ Confluence',structural:'◈ Structural',tape:'⚡ Tape-led',rising:'↗ Rising',forced:'⚙ Forced',single:'· Single'};
-        const _tierColors={super:T2_GOLD,confluence:T2_GOLD,structural:'#C4B5FD',tape:'#7DD3FC',rising:'#A6E3A1',forced:'rgba(201,169,97,0.7)',single:'rgba(237,237,237,0.5)'};
+        const _tierColors={super:T2_GOLD,confluence:T2_GOLD,structural:'#C4B5FD',tape:'#7DD3FC',rising:'#A6E3A1',forced:'rgba(217,179,104,0.7)',single:'rgba(237,237,237,0.5)'};
         const _stats={};
         _tiers.forEach(t=>{_stats[t]={wins:0,losses:0};});
         _arr.forEach(e=>{
@@ -24145,7 +24145,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         });
         const _activeTiers=_tiers.filter(t=>_stats[t].wins+_stats[t].losses>0);
         if(_activeTiers.length===0)return null;
-        return React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] mb-4'},
+        return React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] mb-4'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold'},'Win rate by tier'),
             React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/30'},filter==='15m'?'15m only':filter==='5m'?'5m only':'all windows'),
@@ -24154,7 +24154,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             _activeTiers.map(t=>{
               const s=_stats[t];const total=s.wins+s.losses;const wr=total>0?Math.round((s.wins/total)*100):0;
               const _wrColor=wr>=70?'rgb(40,204,149)':wr>=55?'#fff':'rgb(255,77,106)';
-              return React.createElement('div',{key:t,className:'rounded-lg p-2',style:{background:'#141414',border:'1px solid #1F1F1F'}},
+              return React.createElement('div',{key:t,className:'rounded-lg p-2',style:{background:'#0E0E12',border:'1px solid #1C1C22'}},
                 React.createElement('div',{className:'text-[8px] uppercase tracking-[0.14em] font-bold mb-1',style:{color:_tierColors[t]}},_tierLabels[t]),
                 React.createElement('div',{className:'flex items-baseline gap-1.5'},
                   React.createElement('span',{className:'text-base font-bold tabular-nums',style:{color:_wrColor}},`${wr}%`),
@@ -24175,7 +24175,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             key:k,
             onClick:()=>setAssetFilter(k),
             className:'px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg transition-colors',
-            style:assetFilter===k?{background:'rgba(237,237,237,0.10)',color,border:`1px solid ${color}`}:{border:'1px solid #1F1F1F',color:'rgba(237,237,237,0.40)'},
+            style:assetFilter===k?{background:'rgba(237,237,237,0.10)',color,border:`1px solid ${color}`}:{border:'1px solid #1C1C22',color:'rgba(237,237,237,0.40)'},
           },label)
         )),
       ),
@@ -24185,7 +24185,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             key:f,
             onClick:()=>setFilter(f),
             className:'px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg transition-colors '+(filter===f?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70'),
-            style:filter===f?{background:'rgba(201,169,97,0.12)',color:T2_GOLD,border:'1px solid rgba(201,169,97,0.3)'}:{border:'1px solid #1F1F1F'},
+            style:filter===f?{background:'rgba(217,179,104,0.12)',color:T2_GOLD,border:'1px solid rgba(217,179,104,0.3)'}:{border:'1px solid #1C1C22'},
           },f==='calendar'?'📅 calendar':f)
         )),
       ),
@@ -24213,7 +24213,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             // Sort newest first
             const days=Array.from(byDay.entries()).map(([k,v])=>({key:k,...v})).sort((a,b)=>b.date-a.date);
             if(days.length===0){
-              return React.createElement('div',{className:'bg-[#171717] border border-[#1F1F1F] rounded-xl p-8 text-center text-[#EDEDED]/40 italic'},'No data yet.');
+              return React.createElement('div',{className:'bg-[#101014] border border-[#1C1C22] rounded-xl p-8 text-center text-[#EDEDED]/40 italic'},'No data yet.');
             }
             return React.createElement('div',{className:'space-y-3 max-h-[65vh] overflow-y-auto pr-1'},
               days.map(day=>{
@@ -24235,7 +24235,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   else if(e.result==='SITOUT')hourBins[h].sitouts++;
                 });
                 const _maxHourTotal=Math.max(1,...hourBins.map(b=>b.total));
-                return React.createElement('div',{key:day.key,className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4'},
+                return React.createElement('div',{key:day.key,className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4'},
                   // Day header
                   React.createElement('div',{className:'flex items-baseline justify-between mb-3 flex-wrap gap-2'},
                     React.createElement('div',{className:'flex items-baseline gap-3'},
@@ -24254,7 +24254,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     hourBins.map((b,h)=>{
                       const _pct=b.total/_maxHourTotal;
                       const _hWr=(b.wins+b.losses)>0?b.wins/(b.wins+b.losses):null;
-                      const _bgColor=b.total===0?'rgba(237,237,237,0.04)':_hWr==null?'rgba(201,169,97,0.20)':_hWr>=0.7?'rgba(40,204,149,0.45)':_hWr>=0.5?'rgba(201,169,97,0.45)':'rgba(255,77,106,0.45)';
+                      const _bgColor=b.total===0?'rgba(237,237,237,0.04)':_hWr==null?'rgba(217,179,104,0.20)':_hWr>=0.7?'rgba(40,204,149,0.45)':_hWr>=0.5?'rgba(217,179,104,0.45)':'rgba(255,77,106,0.45)';
                       const _hHeight=Math.max(8,_pct*32);
                       return React.createElement('div',{
                         key:h,
@@ -24278,7 +24278,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     )),
                   ),
                   // Per-call mini-list (collapsed to most recent 5 by default)
-                  React.createElement('div',{className:'mt-2 pt-2 border-t border-[#1F1F1F] space-y-1'},
+                  React.createElement('div',{className:'mt-2 pt-2 border-t border-[#1C1C22] space-y-1'},
                     _entries.slice().reverse().slice(0,5).map(e=>{
                       const _t=new Date(e.time||e.id).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false}); // V10.9.26
                       const _per=_periodFromWindowId(e.windowId,e.windowType);
@@ -24299,7 +24299,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               }),
             );
           })()
-        : React.createElement('div',{className:'bg-[#171717] border border-[#1F1F1F] rounded-xl overflow-hidden'},
+        : React.createElement('div',{className:'bg-[#101014] border border-[#1C1C22] rounded-xl overflow-hidden'},
         filtered.length===0
           ? React.createElement('div',{className:'p-8 text-center text-[#EDEDED]/40 italic'},'No calls match this filter yet.')
           : (()=>{
@@ -24331,14 +24331,14 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   const _sitouts=_entries.filter(e=>e.result==='SITOUT').length;
                   const _resolved=_wins+_losses;
                   const _wr=_resolved>0?Math.round((_wins/_resolved)*100):null;
-                  const _wrColor=_wr==null?'rgba(237,237,237,0.4)':_wr>=70?'rgb(40,204,149)':_wr>=55?'rgba(237,237,237,0.85)':_wr>=45?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
+                  const _wrColor=_wr==null?'rgba(237,237,237,0.4)':_wr>=70?'rgb(40,204,149)':_wr>=55?'rgba(237,237,237,0.85)':_wr>=45?'rgba(217,179,104,0.85)':'rgb(255,77,106)';
                   return React.createElement('div',{key:_dayKey},
                     // Sticky day header
                     React.createElement('div',{
                       className:'sticky top-0 z-10 px-3 sm:px-4 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md',
                       style:{
-                        background:'#0A0A0A',
-                        borderBottom:'1px solid #1F1F1F',
+                        background:'#08080B',
+                        borderBottom:'1px solid #1C1C22',
                         borderTop:'1px solid rgba(237,237,237,0.04)',
                       },
                     },
@@ -24368,7 +24368,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                           React.createElement('div',{className:'flex items-center justify-between gap-3 mb-2'},
                             React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
                               React.createElement('span',{className:'tabular-nums text-[11px] text-[#EDEDED]/65 font-bold shrink-0'},_timeLabel),
-                              React.createElement('span',{className:'tabular-nums text-[9px] text-[#EDEDED]/30 shrink-0 px-1.5 py-0.5 rounded-lg',style:{background:'#141414'}},(e.windowType||'').toUpperCase()),
+                              React.createElement('span',{className:'tabular-nums text-[9px] text-[#EDEDED]/30 shrink-0 px-1.5 py-0.5 rounded-lg',style:{background:'#0E0E12'}},(e.windowType||'').toUpperCase()),
                               _period&&React.createElement('span',{className:'tabular-nums text-[10px] text-[#EDEDED]/55 shrink-0',style:T2_MONO_STYLE},_period),
                               // Phase / session badge
                               _phaseProfile&&React.createElement('span',{
@@ -24402,8 +24402,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                         className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider transition-colors',
                                         style:{
                                           color:opt==='UP'?'rgb(40,204,149)':opt==='DOWN'?'rgb(255,77,106)':T2_GOLD,
-                                          background:e.dir===opt?(opt==='UP'?'rgba(40,204,149,0.18)':opt==='DOWN'?'rgba(255,77,106,0.18)':'rgba(201,169,97,0.18)'):'rgba(237,237,237,0.04)',
-                                          border:e.dir===opt?'1px solid currentColor':'1px solid #1F1F1F',
+                                          background:e.dir===opt?(opt==='UP'?'rgba(40,204,149,0.18)':opt==='DOWN'?'rgba(255,77,106,0.18)':'rgba(217,179,104,0.18)'):'rgba(237,237,237,0.04)',
+                                          border:e.dir===opt?'1px solid currentColor':'1px solid #1C1C22',
                                         },
                                       },opt==='SIT_OUT'?'sit':opt.toLowerCase())
                                     )),
@@ -24417,8 +24417,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                         className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tabular-nums tracking-wider transition-colors',
                                         style:{
                                           color:opt==='WIN'?'rgb(40,204,149)':opt==='LOSS'?'rgb(255,77,106)':T2_GOLD,
-                                          background:e.result===opt?(opt==='WIN'?'rgba(40,204,149,0.18)':opt==='LOSS'?'rgba(255,77,106,0.18)':'rgba(201,169,97,0.18)'):'rgba(237,237,237,0.04)',
-                                          border:e.result===opt?'1px solid currentColor':'1px solid #1F1F1F',
+                                          background:e.result===opt?(opt==='WIN'?'rgba(40,204,149,0.18)':opt==='LOSS'?'rgba(255,77,106,0.18)':'rgba(217,179,104,0.18)'):'rgba(237,237,237,0.04)',
+                                          border:e.result===opt?'1px solid currentColor':'1px solid #1C1C22',
                                         },
                                       },opt)
                                     )),
@@ -24427,7 +24427,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                 )
                               : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
                                   e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',title:'Manually edited'},'✎'),
-                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded-lg shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(40,204,149,0.10)':e.result==='LOSS'?'rgba(255,77,106,0.10)':e.result==='SITOUT'?'rgba(201,169,97,0.10)':e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(237,237,237,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
+                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded-lg shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(40,204,149,0.10)':e.result==='LOSS'?'rgba(255,77,106,0.10)':e.result==='SITOUT'?'rgba(217,179,104,0.10)':e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(237,237,237,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
                                   onEditEntry&&React.createElement('button',{
                                     onClick:()=>setEditingId(e.id),
                                     className:'p-1 rounded-lg text-[#EDEDED]/30 hover:text-[#EDEDED]/70 hover:bg-[#EDEDED]/5 transition-colors',
@@ -24442,7 +24442,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                             e.confidence>0&&React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55 tabular-nums shrink-0'},Math.min(99,Math.round(e.confidence)),'% conf'),
                             e.posterior!=null&&e.dir!=='SIT_OUT'&&e.dir!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40 tabular-nums shrink-0'},'· post ',Math.round(e.posterior),'%'),
                             // Show caution note if present (V7.8 commits)
-                            e.caution&&React.createElement('span',{className:'text-[10px] shrink-0',style:{color:'rgba(201,169,97,0.7)'}},'· ',e.caution),
+                            e.caution&&React.createElement('span',{className:'text-[10px] shrink-0',style:{color:'rgba(217,179,104,0.7)'}},'· ',e.caution),
                           ),
                           // Strike → Close + gap + meta footer
                           (_strikeFmt||e.regime||e.tier)&&React.createElement('div',{className:'flex items-center justify-between gap-2 text-[10px] text-[#EDEDED]/55 flex-wrap'},
@@ -24490,7 +24490,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
+    <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#1C1C22] shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
       <T2Stamp code="PROJ · 042"/>
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
@@ -24672,8 +24672,8 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
 
   return(
     <div className={'fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-3 sm:p-6'} onClick={onClose}>
-      <div className={'bg-[#0A0A0A] border border-[#2A2A2A] rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto'} onClick={e=>e.stopPropagation()}>
-        <div className="sticky top-0 bg-[#0A0A0A] backdrop-blur border-b border-[#1F1F1F] px-5 py-4 flex items-center justify-between">
+      <div className={'bg-[#08080B] border border-[#2A2A34] rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto'} onClick={e=>e.stopPropagation()}>
+        <div className="sticky top-0 bg-[#08080B] backdrop-blur border-b border-[#1C1C22] px-5 py-4 flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold" style={{color:T2_GOLD}}>Tara · Brain</div>
             <h2 className="font-serif text-2xl text-white tracking-tight">What she's thinking</h2>
@@ -24697,7 +24697,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
             const isCall=_effectiveCall==='UP'||_effectiveCall==='DOWN';
             const callColor=_effectiveCall==='UP'?'text-emerald-300':_effectiveCall==='DOWN'?'text-rose-300':'text-amber-300/85';
             const borderClr=_effectiveCall==='UP'?'rgba(52,211,153,0.4)':_effectiveCall==='DOWN'?'rgba(255,77,106,0.4)':T2_GOLD_BORDER;
-            const bgClr=_effectiveCall==='UP'?'rgba(52,211,153,0.06)':_effectiveCall==='DOWN'?'rgba(255,77,106,0.06)':'rgba(201,169,97,0.04)';
+            const bgClr=_effectiveCall==='UP'?'rgba(52,211,153,0.06)':_effectiveCall==='DOWN'?'rgba(255,77,106,0.06)':'rgba(217,179,104,0.04)';
             const callLabel=_effectiveCall==='SIT_OUT'?'SCANNING':_effectiveCall;
             const arrow=_effectiveCall==='UP'?'▲':_effectiveCall==='DOWN'?'▼':'—';
             // V9.1.6: Confidence display — use snapshot's posterior when locked,
@@ -24785,10 +24785,10 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
             const _h=analysis.historicalAnalogs;
             const _wr=_h.analogWR;
             // Color: green if analogs strongly winning, amber if mixed, rose if losing
-            const _wrColor=_wr>=70?'rgba(40,204,149,0.95)':_wr>=55?'rgba(201,169,97,0.95)':_wr>=40?'rgba(201,169,97,0.85)':'rgba(255,77,106,0.95)';
-            const _wrBg=_wr>=70?'rgba(40,204,149,0.06)':_wr>=55?'rgba(201,169,97,0.06)':'rgba(255,77,106,0.06)';
+            const _wrColor=_wr>=70?'rgba(40,204,149,0.95)':_wr>=55?'rgba(217,179,104,0.95)':_wr>=40?'rgba(217,179,104,0.85)':'rgba(255,77,106,0.95)';
+            const _wrBg=_wr>=70?'rgba(40,204,149,0.06)':_wr>=55?'rgba(217,179,104,0.06)':'rgba(255,77,106,0.06)';
             const _confLabel=_h.analogConfidence==='high'?'HIGH match':_h.analogConfidence==='medium'?'MEDIUM match':'LOW match';
-            const _confColor=_h.analogConfidence==='high'?'rgba(40,204,149,0.85)':_h.analogConfidence==='medium'?'rgba(201,169,97,0.85)':'rgba(237,237,237,0.55)';
+            const _confColor=_h.analogConfidence==='high'?'rgba(40,204,149,0.85)':_h.analogConfidence==='medium'?'rgba(217,179,104,0.85)':'rgba(237,237,237,0.55)';
             // Compare analog WR vs current posterior — flag disagreement
             const _post=analysis.rawProbAbove||50;
             const _postConfidence=analysis.lockInfo?.dir==='DOWN'?(100-_post):_post;
@@ -24807,7 +24807,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
                       <div className="text-[10px] text-[#EDEDED]/55">historical WR</div>
                     </div>
                     {_disagreement>=15&&(
-                      <div className="ml-auto text-[10px] text-right" style={{color:'rgba(201,169,97,0.85)'}}>
+                      <div className="ml-auto text-[10px] text-right" style={{color:'rgba(217,179,104,0.85)'}}>
                         <div className="uppercase tracking-wide font-bold">⚠ disagreement</div>
                         <div className="text-[#EDEDED]/65">posterior {_postConfidence.toFixed(0)}% · analogs {_wr.toFixed(0)}%</div>
                       </div>
@@ -24978,7 +24978,7 @@ function WindowClockPanel({taraCallLog}){
   };
   const tone=(t)=>t==='good'?{c:'#28CC95',b:'rgba(40,204,149,0.30)',g:'rgba(40,204,149,0.10)'}
     :t==='bad'?{c:'#FF4D6A',b:'rgba(255,77,106,0.30)',g:'rgba(255,77,106,0.10)'}
-    :t==='warn'?{c:'#C9A961',b:'rgba(201,169,97,0.30)',g:'rgba(201,169,97,0.10)'}
+    :t==='warn'?{c:'#D9B368',b:'rgba(217,179,104,0.30)',g:'rgba(217,179,104,0.10)'}
     :t==='mid'?{c:'rgba(237,237,237,0.65)',b:'rgba(237,237,237,0.12)',g:'rgba(237,237,237,0.04)'}
     :{c:'rgba(237,237,237,0.28)',b:'rgba(237,237,237,0.08)',g:'transparent'};
 
@@ -24988,12 +24988,12 @@ function WindowClockPanel({taraCallLog}){
   const maxAbs=Math.max(10,...judged.map(r=>Math.abs(r.evc||0)));
 
   return (
-    <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-4 sm:p-5 mb-5">
+    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-4 sm:p-5 mb-5">
       <div className="text-xs uppercase tracking-[0.22em] font-bold mb-1" style={{color:T2_GOLD}}>
         Window Clock <span className="text-[10px] tracking-wider text-[#EDEDED]/30 ml-1 font-normal normal-case">your local time · every window, not just traded ones</span>
       </div>
       <div className="text-[11px] text-[#EDEDED]/45 mb-3 leading-relaxed">
-        Which hours behave normally and which do not. Most 15-minute windows finish close to the strike anyway{basePin!=null?' (about '+Math.round(basePin)+'% of them)':''} — that is just how this market is, so an hour is only flagged <span style={{color:'#C9A961'}}>sticks to the line</span> when it does it markedly more than that, which makes those windows closer to a coin flip than the signal suggests.
+        Which hours behave normally and which do not. Most 15-minute windows finish close to the strike anyway{basePin!=null?' (about '+Math.round(basePin)+'% of them)':''} — that is just how this market is, so an hour is only flagged <span style={{color:'#D9B368'}}>sticks to the line</span> when it does it markedly more than that, which makes those windows closer to a coin flip than the signal suggests.
       </div>
       {judged.length===0?(
         <div className="text-xs text-[#EDEDED]/40 italic py-4 text-center">Not enough finished trades yet to rate any hour.</div>
@@ -25202,18 +25202,18 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
   // ── Heatmap cell color helper ──
   const cellColor=(wr,n)=>{
     if(wr==null||n===0)return {bg:'rgba(237,237,237,0.04)',border:'rgba(237,237,237,0.08)',color:'rgba(237,237,237,0.3)'};
-    if(wr>=70)return {bg:'rgba(40,204,149,0.10)',border:'rgba(40,204,149,0.30)',color:'#7fa189'};
+    if(wr>=70)return {bg:'rgba(40,204,149,0.10)',border:'rgba(40,204,149,0.30)',color:'#6FA98C'};
     if(wr>=55)return {bg:'rgba(40,204,149,0.06)',border:'rgba(40,204,149,0.18)',color:'rgba(40,204,149,0.85)'};
     if(wr>=45)return {bg:'rgba(237,237,237,0.04)',border:'rgba(237,237,237,0.10)',color:'rgba(237,237,237,0.6)'};
     if(wr>=30)return {bg:'rgba(201,125,74,0.10)',border:'rgba(201,125,74,0.30)',color:'#C97D4A'};
-    return {bg:'rgba(255,77,106,0.10)',border:'rgba(255,77,106,0.30)',color:'#b26558'};
+    return {bg:'rgba(255,77,106,0.10)',border:'rgba(255,77,106,0.30)',color:'#C06A72'};
   };
 
   // ── Selected-hour drill view ──
   const drillTrades=selectedHour!=null?(hourly[selectedHour]?.trades||[]).slice().sort((a,b)=>b.id-a.id):null;
 
   return(
-    <div className="fixed inset-0 z-50 bg-[#0A0A0A] backdrop-blur-md overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose();}}>
+    <div className="fixed inset-0 z-50 bg-[#08080B] backdrop-blur-md overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="max-w-[1200px] mx-auto px-4 py-6 sm:py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -25228,7 +25228,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Tab toggle */}
-        <div className="flex gap-1 mb-5 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
+        <div className="flex gap-1 mb-5 p-1 rounded-lg bg-[#101014] w-fit border border-[#1C1C22]">
           {['today','week','all'].map(t=>(
             <button key={t} onClick={()=>{setTab(t);setSelectedHour(null);}} className={'px-4 py-1.5 text-xs uppercase font-bold tracking-wider rounded-lg transition-colors '+(tab===t?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===t?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>
               {t==='today'?'Today':t==='week'?'7 Days':'All Time'}
@@ -25238,19 +25238,19 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 
         {/* Top stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5">
-          <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="ALL · 001"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Trades</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{trades.length}</div>
             <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">resolved</div>
           </div>
-          <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="ACC · 002"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Accuracy</div>
             <div className={'text-2xl sm:text-3xl font-bold '+(wr>=60?'text-emerald-400':wr>=50?'text-white':'text-rose-400')} style={T2_MONO_STYLE}>{trades.length>0?wr.toFixed(0):'—'}%</div>
             <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{wins}W · {losses}L</div>
           </div>
-          <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="STR · 003"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Streak</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{(()=>{
@@ -25260,9 +25260,9 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
               for(const t of sorted){if(t.result===lastResult)streak++;else break;}
               return streak;
             })()}</div>
-            <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#7fa189':'#b26558'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
+            <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#6FA98C':'#C06A72'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
           </div>
-          <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="LIFE · 004"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Lifetime</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{((scorecards?.['15m']?.wins||0)/Math.max(1,(scorecards?.['15m']?.wins||0)+(scorecards?.['15m']?.losses||0))*100).toFixed(0)}%</div>
@@ -25271,15 +25271,15 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Insights surface */}
-        <div className="bg-[#171717] border border-[#1F1F1F] rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#101014] border border-[#1C1C22] rounded-xl p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="INS · 005"/>
           <div className="text-xs uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>Insights</div>
           <div className="space-y-2">
             {insights.map((i,idx)=>{
-              const color=i.kind==='positive'?'#7fa189':i.kind==='negative'?T2_COPPER:'rgba(237,237,237,0.7)';
-              const dot=i.kind==='positive'?'#7fa189':i.kind==='negative'?T2_COPPER:T2_GOLD;
+              const color=i.kind==='positive'?'#6FA98C':i.kind==='negative'?T2_COPPER:'rgba(237,237,237,0.7)';
+              const dot=i.kind==='positive'?'#6FA98C':i.kind==='negative'?T2_COPPER:T2_GOLD;
               return(
-                <div key={idx} className="flex items-start gap-3 p-2 rounded-lg bg-[#0D0D0D] border border-[#1F1F1F]">
+                <div key={idx} className="flex items-start gap-3 p-2 rounded-lg bg-[#0B0B0F] border border-[#1C1C22]">
                   <span className="inline-block w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{background:dot}}></span>
                   <span className="text-[12px] sm:text-[13px] leading-relaxed" style={{color}}>{i.text}</span>
                 </div>
@@ -25291,7 +25291,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         <WindowClockPanel taraCallLog={taraCallLog}/>
 
         {/* Hourly heatmap */}
-        <div className="bg-[#171717] border border-[#1F1F1F] rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#101014] border border-[#1C1C22] rounded-xl p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="HOUR · 006"/>
           <div className="flex items-baseline justify-between mb-3">
             <div className="text-xs uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Hourly Breakdown <span className="text-[10px] tracking-wider text-[#EDEDED]/30 ml-1 font-normal normal-case">LOCAL · tap to drill</span></div>
@@ -25345,7 +25345,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
                   const _strikeFmt=t.strike?'$'+Math.round(t.strike).toLocaleString():null;
                   const _closeFmt=t.closingPrice?'$'+Math.round(t.closingPrice).toLocaleString():null;
                   return(
-                    <div key={i} className="px-2 py-1.5 rounded-lg text-[11px] hover:bg-[#0D0D0D]">
+                    <div key={i} className="px-2 py-1.5 rounded-lg text-[11px] hover:bg-[#0B0B0F]">
                       {/* Top row: time · period · direction · stats · result */}
                       <div className="flex items-center gap-2 sm:gap-3">
                         <span className="text-[#EDEDED]/50 w-16 shrink-0" style={T2_MONO_STYLE}>{ts}</span>
@@ -25400,13 +25400,13 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 // Cohort row card — used inside StatsView
 function CohortCard({title,stamp,rows}){
   return(
-    <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
       <T2Stamp code={stamp}/>
       <div className="text-[10px] uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>{title}</div>
       {rows.length===0&&<div className="text-[11px] text-[#EDEDED]/30 italic">No data</div>}
       {rows.map(r=>{
         const wr=r.wr;
-        const barColor=wr>=60?'#7fa189':wr>=50?'rgba(40,204,149,0.5)':wr>=40?T2_COPPER:'#b26558';
+        const barColor=wr>=60?'#6FA98C':wr>=50?'rgba(40,204,149,0.5)':wr>=40?T2_COPPER:'#C06A72';
         return(
           <div key={r.key} className="flex items-center gap-2 mb-1.5 last:mb-0 text-[11px]">
             <span className="text-[#EDEDED]/65 w-32 sm:w-40 shrink-0 truncate">{r.key}</span>
@@ -25462,8 +25462,8 @@ function TapeStrip({tapeWindows,whaleLog}){
     if(v>=1e3)return '$'+(v/1e3).toFixed(0)+'K';
     return '$'+v;
   };
-  const buyColor='#7fa189';
-  const sellColor='#b26558';
+  const buyColor='#6FA98C';
+  const sellColor='#C06A72';
   // Trend indicator — only compute when the headline window AND at least 2 others
   // are above their floors. Otherwise we're inferring acceleration from noise.
   const _trend=(()=>{
@@ -25540,14 +25540,14 @@ function TapeStrip({tapeWindows,whaleLog}){
     );
   };
   return(
-    <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
       <T2Stamp code="TAPE · 030"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
           <span className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/50 font-bold">Tape</span>
           {/* V6.3.2: Quality badge — 3-light at-a-glance trustworthiness indicator. */}
           {_quality.level!=='thin'&&(()=>{
-            const _color=_quality.level==='high'?'#7fa189':_quality.level==='medium'?'#d4a24c':'#b26558';
+            const _color=_quality.level==='high'?'#6FA98C':_quality.level==='medium'?'#D9B368':'#C06A72';
             const _label=_quality.level==='high'?'STRONG':_quality.level==='medium'?'MIXED':'WEAK';
             const _checks=[_quality.windowsAgree,_quality.volMeaningful,_quality.whalesAlign];
             const _tooltip=[
@@ -25561,7 +25561,7 @@ function TapeStrip({tapeWindows,whaleLog}){
                   {_checks.map((c,i)=>React.createElement('span',{
                     key:i,
                     className:'w-1.5 h-1.5 rounded-full',
-                    style:{background:c===true?_color:c===false?'#b26558':'rgba(237,237,237,0.18)'},
+                    style:{background:c===true?_color:c===false?'#C06A72':'rgba(237,237,237,0.18)'},
                   }))}
                 </span>
                 <span className="text-[10px] font-bold tracking-wider" style={{color:_color}}>{_label}</span>
@@ -25674,8 +25674,8 @@ function DepthStrip({orderBook,targetMargin}){
     if(v>=1e3)return '$'+(v/1e3).toFixed(0)+'K';
     return '$'+v;
   };
-  const bidColor='#7fa189';
-  const askColor='#b26558';
+  const bidColor='#6FA98C';
+  const askColor='#C06A72';
   // Quality: do TIGHT and STD agree directionally with meaningful strength?
   const _quality=(()=>{
     const _stdTot=hlBids+hlAsks;
@@ -25721,13 +25721,13 @@ function DepthStrip({orderBook,targetMargin}){
     );
   };
   return(
-    <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
       <T2Stamp code="DOM · BAND"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
           <span className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/50 font-bold">Depth</span>
           {_quality.level!=='thin'&&(()=>{
-            const _color=_quality.level==='high'?'#7fa189':_quality.level==='medium'?'#d4a24c':'#b26558';
+            const _color=_quality.level==='high'?'#6FA98C':_quality.level==='medium'?'#D9B368':'#C06A72';
             const _label=_quality.level==='high'?'STRONG':_quality.level==='medium'?'MIXED':'WEAK';
             const _checks=[_quality.bandsAgree,_quality.volMeaningful,_quality.tightConfirms];
             const _tooltip=[
@@ -25758,7 +25758,7 @@ function DepthStrip({orderBook,targetMargin}){
         <span className="text-[11px] sm:text-xs tabular-nums text-[#EDEDED]/55">{hlAboveFloor?dominantPct.toFixed(1)+'%':'—'}</span>
         <span className="text-[11px] sm:text-xs font-bold tabular-nums" style={{color:askColor}}>ASK {fmtUSD(hlAsks)}</span>
       </div>
-      <div className="w-full h-1.5 bg-[#0A0A0A] rounded-full overflow-hidden flex relative mb-2">
+      <div className="w-full h-1.5 bg-[#08080B] rounded-full overflow-hidden flex relative mb-2">
         <div style={{width:`${hlBidPct}%`,background:bidColor,opacity:hlAboveFloor?0.85:0.30}} className="h-full transition-all duration-300"></div>
         <div style={{width:`${100-hlBidPct}%`,background:askColor,opacity:hlAboveFloor?0.85:0.30}} className="h-full transition-all duration-300"></div>
       </div>
@@ -25819,7 +25819,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
       const{score,direction,category}=scoreNewsImpact(item.title);
       if(score<6)continue; // subthreshold
       // Color/icon by direction
-      const _color=direction==='down'?'#b26558':direction==='up'?'#7fa189':'#d4a24c';
+      const _color=direction==='down'?'#C06A72':direction==='up'?'#6FA98C':'#D9B368';
       const _icon=direction==='down'?'📰▼':direction==='up'?'📰▲':category==='macro'?'🏛':category==='regulatory'?'⚖':category==='security'?'⚠':'📰';
       const _catLabel=category?category.toUpperCase():'NEWS';
       pushToast(
@@ -25954,7 +25954,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
           <span className={'text-[9px] text-[#EDEDED]/30 italic'}>{loading?'loading...':err?'macro only':'30s refresh'}</span>
           {/* V9.1.2: Expand to full news view */}
           {news.length>0&&(
-            <button onClick={()=>setExpandOpen(true)} title="Expand news feed" className="text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5" style={{color:'rgba(201,169,97,0.85)',borderColor:'rgba(201,169,97,0.30)'}}>⊕</button>
+            <button onClick={()=>setExpandOpen(true)} title="Expand news feed" className="text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5" style={{color:'rgba(217,179,104,0.85)',borderColor:'rgba(217,179,104,0.30)'}}>⊕</button>
           )}
         </div>
       </div>
@@ -25965,7 +25965,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
           {macroEvents.map((e,i)=>{
             const isImminent=Math.abs(e.minutesUntil)<=15;
             const isNow=e.minutesUntil<=0&&Math.abs(e.minutesUntil)<=2;
-            const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300 animate-pulse':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#0A0A0A] border-[#1F1F1F] text-[#EDEDED]/60';
+            const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300 animate-pulse':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#08080B] border-[#1C1C22] text-[#EDEDED]/60';
             const label=e.minutesUntil>0?`in ${e.minutesUntil}m`:`${Math.abs(e.minutesUntil)}m ago`;
             return(<div key={i} className={'p-1.5 rounded-lg border text-[10px] flex justify-between '+cls}>
               <span className="font-bold">{e.name}</span>
@@ -26107,13 +26107,13 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
   },
     React.createElement('div',{
       className:'w-full max-w-lg rounded-xl my-auto max-h-[90vh] overflow-y-auto',
-      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#101014',border:'1px solid rgba(217,179,104,0.20)',boxShadow:'0 0 40px rgba(217,179,104,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
-      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid #1F1F1F',background:'#171717'}},
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid #1C1C22',background:'#101014'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Sync'),
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},'cross-device')
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(217,179,104,0.85)'}},'cross-device')
         ),
         React.createElement('button',{
           onClick:onClose,
@@ -26126,7 +26126,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         //   secondary-device guard it drove. Tara is one shared live decision; every
         //   device shows the same lock at the same time via first-write-wins on
         //   state/currentLock_<asset>_<windowType>. Nothing to designate any more.
-        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#141414',border:'1px solid rgba(40,204,149,0.30)'}},
+        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#0E0E12',border:'1px solid rgba(40,204,149,0.30)'}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(237,237,237,0.55)'}},'Trading device'),
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.14em] font-bold',style:{color:'rgba(40,204,149,0.85)'}},'ALL DEVICES LIVE'),
@@ -26141,14 +26141,14 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         // V9.2.0: SIDE-BY-SIDE diagnostic — shared (cloud) vs local (this device only).
         //   Tara's calls + memory are SHARED across all devices/users via Firestore.
         //   Personal scorecard is LOCAL to this device only — not synced.
-        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#141414',border:`1px solid ${_hasDrift?'rgba(255,77,106,0.30)':'rgba(237,237,237,0.08)'}`}},
+        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#0E0E12',border:`1px solid ${_hasDrift?'rgba(255,77,106,0.30)':'rgba(237,237,237,0.08)'}`}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:_hasDrift?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.55)'}},_hasDrift?'⚠ DRIFT DETECTED':'Sync diagnostic'),
             React.createElement('button',{
               onClick:_runDiag,
               disabled:diagLoading,
               className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5 disabled:opacity-50',
-              style:{color:'rgba(201,169,97,0.85)',borderColor:'rgba(201,169,97,0.30)'},
+              style:{color:'rgba(217,179,104,0.85)',borderColor:'rgba(217,179,104,0.30)'},
             },diagLoading?'reading…':'↻ refresh')
           ),
           // === SHARED SECTION (cloud-synced) ===
@@ -26196,17 +26196,17 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
               )
             ),
             // Drift hint
-            _hasDrift?React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid #1F1F1F'}},
+            _hasDrift?React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid #1C1C22'}},
               `Cloud is ahead of this device by ${_logDrift} windows - another device logged windows this one hasn't pulled. Press Force Resync from Cloud to merge them in. (Don't Save as baseline here - this device is the one that's behind.)`
-            ):(_expectedCapGap?React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-[#EDEDED]/45 leading-snug',style:{borderTop:'1px solid #1F1F1F'}},
+            ):(_expectedCapGap?React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-[#EDEDED]/45 leading-snug',style:{borderTop:'1px solid #1C1C22'}},
               `Cloud keeps the most recent ${_TARA_CLOUD_LOG_CAP} windows; this device holds the full ${_localLog}. That gap is the egress cap working as designed - not drift, and nothing is lost (full history lives here and in your exports). Avoid Save as baseline, which would re-upload the full log and undo the egress cut.`
             ):null)
           ),
           // === LOCAL-ONLY SECTION ===
-          React.createElement('div',{className:'pt-3',style:{borderTop:'1px solid #1F1F1F'}},
+          React.createElement('div',{className:'pt-3',style:{borderTop:'1px solid #1C1C22'}},
             React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
               React.createElement('span',{className:'text-[10px]'},'⌂'),
-              React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},'Personal scorecard'),
+              React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(217,179,104,0.85)'}},'Personal scorecard'),
               React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40'},'this device only · never synced')
             ),
             React.createElement('div',{className:'text-[11px] tabular-nums text-[#EDEDED]/80'},
@@ -26214,7 +26214,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
             )
           ),
           // Baseline cloud info
-          cloudDiag?.baseline&&React.createElement('div',{className:'mt-3 pt-2 text-[10px] text-[#EDEDED]/55 leading-snug',style:{borderTop:'1px solid #1F1F1F'}},
+          cloudDiag?.baseline&&React.createElement('div',{className:'mt-3 pt-2 text-[10px] text-[#EDEDED]/55 leading-snug',style:{borderTop:'1px solid #1C1C22'}},
             'Cloud baseline: ',cloudDiag.baseline.dataLogCount,' entries from ',cloudDiag.baseline.sourceDevice,' on ',new Date(cloudDiag.baseline.savedAt).toLocaleString()
           ),
           // V9.10.9: Baseline drift warning — fires when this device last synced a
@@ -26261,7 +26261,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
           ),
           React.createElement('div',{className:'text-[11px] text-[#EDEDED]/65 leading-snug'},
             'Mark THIS device as the canonical truth. Pushes this device\u2019s log, scorecards, P&L, and learnings to ',
-            React.createElement('code',{className:'text-[10px] bg-[#0A0A0A] px-1'},'baseline/canonical'),
+            React.createElement('code',{className:'text-[10px] bg-[#08080B] px-1'},'baseline/canonical'),
             '. Other devices can then "Apply Baseline" to receive this exact state.'
           )
         ),
@@ -26302,7 +26302,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         React.createElement('button',{
           onClick:onCleanup,
           className:'w-full text-left p-3 rounded-lg transition-colors hover:bg-rose-500/10',
-          style:{background:'#141414',border:'1px solid #1F1F1F'},
+          style:{background:'#0E0E12',border:'1px solid #1C1C22'},
         },
           React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
             React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold text-[#EDEDED]/55'},'🧹 Clean Up Log'),
@@ -26312,7 +26312,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
           )
         ),
         // V9.2.3: HEALTH DASHBOARD
-        healthData&&React.createElement('div',{className:'p-3 rounded-lg',style:{background:'#141414',border:'1px solid #1F1F1F'}},
+        healthData&&React.createElement('div',{className:'p-3 rounded-lg',style:{background:'#0E0E12',border:'1px solid #1C1C22'}},
           React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold text-[#EDEDED]/45 mb-2'},'System Health'),
           React.createElement('div',{className:'space-y-1.5 text-[11px]'},
             // Coinbase feed
@@ -26528,11 +26528,11 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
   },
     React.createElement('div',{
       className:'w-full max-w-4xl mx-2 my-4 sm:my-8 rounded-xl',
-      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 60px rgba(201,169,97,0.10)'},
+      style:{background:'#101014',border:'1px solid rgba(217,179,104,0.20)',boxShadow:'0 0 60px rgba(217,179,104,0.10)'},
       onClick:e=>e.stopPropagation(),
     },
       // Header
-      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#171717',borderBottom:'1px solid #1F1F1F'}},
+      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#101014',borderBottom:'1px solid #1C1C22'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Analytics'),
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:T2_GOLD}},`${resolved.length} resolved · ${_wrPct}% WR`),
@@ -26586,14 +26586,14 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
             'regime mix: ',signalEV.regimes.map(([r,c])=>`${r} ${Math.round(100*c/signalEV.n)}%`).join(' · ')
           ),
           signalEV.rows.length===0||signalEV.n<20
-            ?React.createElement('div',{className:'text-[11px] text-[#EDEDED]/45 italic p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+            ?React.createElement('div',{className:'text-[11px] text-[#EDEDED]/45 italic p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
               signalEV.n===0
                 ?'No signal data yet — signalScoresAtLock stamps on each new lock. Check back after more windows resolve.'
                 :`Only ${signalEV.n} trade${signalEV.n===1?'':'s'} carry signal data so far — too few to judge any signal. Needs ~20+ to show a first read, ~200+ to be trustworthy.`)
-            :React.createElement('div',{className:'overflow-x-auto rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+            :React.createElement('div',{className:'overflow-x-auto rounded-lg bg-[#08080B] border border-[#1C1C22]'},
               React.createElement('table',{className:'w-full text-[10px] tabular-nums',style:{minWidth:560}},
                 React.createElement('thead',null,
-                  React.createElement('tr',{style:{borderBottom:'1px solid #1F1F1F'}},
+                  React.createElement('tr',{style:{borderBottom:'1px solid #1C1C22'}},
                     React.createElement('th',{className:'text-left text-[#EDEDED]/40 px-2 py-1.5 font-bold'},'signal'),
                     React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'n·agree'),
                     React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'WR'),
@@ -26658,11 +26658,11 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
         React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-4'},
           ['BTC'].map(asset=>{
             const d=pnlByAsset[asset];
-            if(!d||d.trades===0)return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+            if(!d||d.trades===0)return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
               React.createElement('div',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} P&L`),
               React.createElement('div',{className:'text-[11px] text-[#EDEDED]/40 italic mt-1'},'No trades with bet amounts yet')
             );
-            return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+            return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
                 React.createElement('span',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} · ${d.trades} trades`),
                 React.createElement('span',{className:'text-sm font-bold tabular-nums',style:{color:d.pnl>=0?'rgb(40,204,149)':'rgb(255,77,106)'}},`${d.pnl>=0?'+':''}$${d.pnl.toFixed(2)}`)
@@ -26677,8 +26677,8 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
           React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-2'},
             regimeDir.map((r,i)=>{
               const wrPct=Math.round(r.wr*100);
-              const color=wrPct>=65?'rgb(40,204,149)':wrPct>=50?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
-              return React.createElement('div',{key:i,className:'flex items-center justify-between p-2 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+              const color=wrPct>=65?'rgb(40,204,149)':wrPct>=50?'rgba(217,179,104,0.85)':'rgb(255,77,106)';
+              return React.createElement('div',{key:i,className:'flex items-center justify-between p-2 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
                 React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
                   React.createElement('span',{className:'text-[10px] font-bold',style:{color:r.dir==='UP'?'rgb(40,204,149)':'rgb(255,77,106)'}},r.dir==='UP'?'▲':'▼'),
                   React.createElement('span',{className:'text-[11px] text-[#EDEDED]/70 truncate'},r.regime)
@@ -26701,7 +26701,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
               const _labels={LATE_REVERSAL:'Late reversal — was winning, flipped',MID_REVERSAL:'Mid-window fade',EARLY_PEAK:'Early peak, sustained loss',WRONG_FROM_START:'Never above water',WHALE_SPIKE:'Contrary whale spike',MACRO_SHOCK:'Macro event shock',UNKNOWN:'Unclassified'};
               return React.createElement('div',{key:i,className:'flex items-center gap-3 text-[11px]'},
                 React.createElement('span',{className:'text-[#EDEDED]/50 w-32 shrink-0 truncate'},_labels[pat]||pat),
-                React.createElement('div',{className:'flex-1 h-2 bg-[#0A0A0A] rounded-full overflow-hidden'},
+                React.createElement('div',{className:'flex-1 h-2 bg-[#08080B] rounded-full overflow-hidden'},
                   React.createElement('div',{className:'h-full rounded-full transition-all',style:{width:`${pct}%`,background:'rgba(255,77,106,0.6)'}})
                 ),
                 React.createElement('span',{className:'text-[#EDEDED]/40 tabular-nums w-16 text-right'},`${n} (${pct.toFixed(0)}%)`)
@@ -26712,7 +26712,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
         // ═══ ML MODEL STATUS ═══
         mlInfo?React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold mb-3',style:{color:'rgba(176,176,176,0.85)'}},'ML Model · Feature Importance'),
-          React.createElement('div',{className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+          React.createElement('div',{className:'p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'},
             React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
               React.createElement('span',{className:'text-[11px] text-[#EDEDED]/70'},`Logistic regression · ${mlInfo.nTrades} training samples · ${(mlInfo.accuracy*100).toFixed(1)}% accuracy`),
               React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40'},`Trained ${_fmtTimeTz(new Date(mlInfo.trainedAt),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false})}`)
@@ -26723,7 +26723,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
                 const barPct=maxW>0?(f.absWeight/maxW)*100:0;
                 return React.createElement('div',{key:i,className:'flex items-center gap-2 text-[11px]'},
                   React.createElement('span',{className:'text-[#EDEDED]/60 w-28 shrink-0 truncate'},f.name),
-                  React.createElement('div',{className:'flex-1 h-1.5 bg-[#0A0A0A] rounded-full overflow-hidden'},
+                  React.createElement('div',{className:'flex-1 h-1.5 bg-[#08080B] rounded-full overflow-hidden'},
                     React.createElement('div',{className:'h-full rounded-full',style:{width:`${barPct}%`,background:f.weight>=0?'rgb(40,204,149)':'rgb(255,77,106)'}})
                   ),
                   React.createElement('span',{className:'tabular-nums w-14 text-right',style:{color:f.weight>=0?'rgb(40,204,149)':'rgb(255,77,106)',fontSize:'10px'}},`${f.weight>=0?'+':''}${f.weight.toFixed(3)}`)
@@ -26731,7 +26731,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
               })
             )
           )
-        ):React.createElement('div',{className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F] text-[11px] text-[#EDEDED]/40'},
+        ):React.createElement('div',{className:'p-3 rounded-lg bg-[#08080B] border border-[#1C1C22] text-[11px] text-[#EDEDED]/40'},
           `ML model needs ≥${TARA_ML_MIN_TRADES} resolved trades with signal data. Currently: ${resolved.filter(e=>e.signalScoresAtLock).length}.`
         ),
       )
@@ -26752,13 +26752,13 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
   },
     React.createElement('div',{
       className:'w-full max-w-2xl rounded-xl my-auto',
-      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#101014',border:'1px solid rgba(217,179,104,0.20)',boxShadow:'0 0 40px rgba(217,179,104,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
-      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid #1F1F1F'}},
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid #1C1C22'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'News Feed'),
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},`${news.length} stories`)
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(217,179,104,0.85)'}},`${news.length} stories`)
         ),
         React.createElement('button',{
           onClick:onClose,
@@ -26773,7 +26773,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
             macroEvents.map((e,i)=>{
               const isImminent=Math.abs(e.minutesUntil)<=15;
               const isNow=e.minutesUntil<=0&&Math.abs(e.minutesUntil)<=2;
-              const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#0A0A0A] border-[#1F1F1F] text-[#EDEDED]/70';
+              const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#08080B] border-[#1C1C22] text-[#EDEDED]/70';
               const label=e.minutesUntil>0?`in ${e.minutesUntil}m`:`${Math.abs(e.minutesUntil)}m ago`;
               return React.createElement('div',{key:i,className:'p-2 rounded-lg border text-[11px] flex justify-between '+cls},
                 React.createElement('span',{className:'font-bold'},e.name),
@@ -26801,7 +26801,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
               key:i,
               href:n.url,target:'_blank',rel:'noopener noreferrer',
               className:'block p-3 rounded-lg hover:bg-[#161616] transition-colors',
-              style:{background:'#141414',border:'1px solid #1F1F1F'},
+              style:{background:'#0E0E12',border:'1px solid #1C1C22'},
             },
               React.createElement('div',{className:'flex items-start gap-3'},
                 React.createElement('div',{className:'shrink-0 w-8 text-center',title:impactLabel},
@@ -26851,19 +26851,19 @@ function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
           the "Funding" label. Two tiles give ~205px and read cleanly everywhere,
           including the full-width mobile card. */}
       <div className="grid grid-cols-2 gap-2 mb-2">
-        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+        <div className={'p-1.5 rounded-lg bg-[#08080B] min-w-0'}>
           <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
           <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
         </div>
-        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+        <div className={'p-1.5 rounded-lg bg-[#08080B] min-w-0'}>
           <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>OI 5m</div>
           <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
         </div>
-        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+        <div className={'p-1.5 rounded-lg bg-[#08080B] min-w-0'}>
           <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Funding</div>
           <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
         </div>
-        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+        <div className={'p-1.5 rounded-lg bg-[#08080B] min-w-0'}>
           <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>L/S</div>
           <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
         </div>
@@ -26898,7 +26898,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   // v13.4.153: tape/bloomberg/whale derivations moved with the Live Feeds card.
 
   return(
-    <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
+    <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#1C1C22] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
       <T2Stamp code="SCR · 008"/>
       {/* V13.4.148: Trade Coach + Hourly ladder relocated here from the middle column
           so everything read during a live window sits in one place, no scrolling.
@@ -26945,7 +26945,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
               {entries.map(e=>(
                 <div key={e.k} className="flex items-center gap-2 text-[10px]">
                   <span className={'text-[#EDEDED]/50 w-16 shrink-0'}>{e.label}</span>
-                  <div className="flex-1 relative h-3 bg-[#0A0A0A] rounded-lg overflow-hidden">
+                  <div className="flex-1 relative h-3 bg-[#08080B] rounded-lg overflow-hidden">
                     {/* center line at 50% */}
                     <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
                     {/* bar */}
@@ -26960,7 +26960,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
               {/* FGT row — primary signal, separated with gold-tinted divider (V2.1) */}
               <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-0.5" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
                 <span className={'w-16 shrink-0 font-bold'} style={{color:T2_GOLD}}>FGT {fgtAbsDisplay}/4</span>
-                <div className="flex-1 relative h-3 bg-[#0A0A0A] rounded-lg overflow-hidden">
+                <div className="flex-1 relative h-3 bg-[#08080B] rounded-lg overflow-hidden">
                   <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
                   <div className={'absolute top-0 bottom-0 '+(fgtContribution>0?'bg-emerald-400':fgtContribution<0?'bg-rose-400':'bg-[#EDEDED]/15')} style={{
                     left:fgtContribution>=0?'50%':`calc(50% - ${(Math.abs(fgtContribution)/maxAbs)*50}%)`,
@@ -27088,7 +27088,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
 function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource}){
   return(
-    <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
+    <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#1C1C22] shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
         <span className={'text-xs uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold'}>Live Chart</span>
         <div className="flex gap-1">
@@ -27195,7 +27195,7 @@ function SportsInPlay({grid}){
       <div className="mt-2 text-[#EDEDED]/50 text-[11px] leading-relaxed">At a price of {Math.round(p*100)}c you are risking <span style={{color:T2_GOLD}}>{risk.toFixed(1)} to win 1</span> on the remaining move. Price is your own expected value either way, so holding and selling have the same EV — what changes is the shape. Kalshi's fee is 0.07·p·(1−p), so the exit is cheapest exactly when the position is already won.</div>
     </div>);
   }
-  const sel='bg-[#0F0F0F] border border-[#2A2A2A] rounded px-2 py-1 text-[11px] text-white';
+  const sel='bg-[#0F0F0F] border border-[#2A2A34] rounded px-2 py-1 text-[11px] text-white';
   return(
     <div className="bg-[#101010] border border-[#232323] rounded-lg p-3 mt-1.5">
       <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -27511,7 +27511,7 @@ function SportsView({onClose}){
   const setAllDays=open=>{const m={};grouped.forEach(d=>{m[d.key]=open;});setDateOverrides(m);};
 
   const rec=data&&data.record;
-  const card='bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] relative';
+  const card='bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] relative';
 
   return(
     <div className="w-full min-h-0">
@@ -27571,7 +27571,7 @@ function SportsView({onClose}){
             const started=(data.upcoming||[]).filter(r=>sportsHasStarted(r.start,nowMs)).length;
             return(
               <div className="rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed flex flex-wrap items-center gap-x-2 gap-y-1"
-                style={{borderColor:stale?'rgba(255,77,106,0.3)':'#1F1F1F',background:stale?'rgba(255,77,106,0.05)':'#111'}}>
+                style={{borderColor:stale?'rgba(255,77,106,0.3)':'#1C1C22',background:stale?'rgba(255,77,106,0.05)':'#111'}}>
                 <span className="font-bold" style={{color:stale?SPORTS_RED:'#EDEDED'}}>
                   Snapshot · {ageMin<1?'just now':ageMin<60?ageMin+' min old':(ageMin/60).toFixed(1)+' h old'}
                 </span>
@@ -27619,7 +27619,7 @@ function SportsView({onClose}){
                 </div>
                 {r.needed&&!r.clears&&(
                   <div className="mt-2">
-                    <div className="bar" style={{height:6,background:'#1F1F1F',borderRadius:4,overflow:'hidden'}}>
+                    <div className="bar" style={{height:6,background:'#1C1C22',borderRadius:4,overflow:'hidden'}}>
                       <div style={{width:pct+'%',height:'100%',background:T2_GOLD}}/>
                     </div>
                     <div className="text-[11px] text-[#EDEDED]/45 mt-1">
@@ -27646,13 +27646,13 @@ function SportsView({onClose}){
           {data.totals&&data.totals.paper_record&&(()=>{
             const p=data.totals.paper_record;
             if(!p.n)return(
-              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-2.5 mb-3 text-[11px] text-[#EDEDED]/45">
+              <div className="rounded-xl border border-[#1C1C22] bg-[#111] p-2.5 mb-3 text-[11px] text-[#EDEDED]/45">
                 <span className="uppercase tracking-[0.16em] font-bold" style={{color:T2_GOLD}}>Totals lane</span>
                 <span className="ml-2">{p.open} pick{p.open===1?'':'s'} recorded, none settled yet — paper only.</span>
               </div>
             );
             return(
-              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 mb-3">
+              <div className="rounded-xl border border-[#1C1C22] bg-[#111] p-3 mb-3">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1.5">
                   <span className="text-[11px] uppercase tracking-[0.16em] font-bold" style={{color:T2_GOLD}}>
                     Totals lane · paper record
@@ -27683,7 +27683,7 @@ function SportsView({onClose}){
             const e=data.edge_lab;
             const pct=Math.min(100,Math.round(100*(e.settled||0)/(e.target||150)));
             return(
-              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 mb-3">
+              <div className="rounded-xl border border-[#1C1C22] bg-[#111] p-3 mb-3">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
                   <span className="text-[11px] uppercase tracking-[0.16em] font-bold text-[#7DB8FF]">
                     Edge lab · Kalshi vs bookmaker
@@ -27721,7 +27721,7 @@ function SportsView({onClose}){
                   </div>
                 ):(
                   <div className="mt-2">
-                    <div style={{height:6,background:'#1F1F1F',borderRadius:4,overflow:'hidden'}}>
+                    <div style={{height:6,background:'#1C1C22',borderRadius:4,overflow:'hidden'}}>
                       <div style={{width:pct+'%',height:'100%',background:'#7DB8FF'}}/>
                     </div>
                     <div className="text-[11px] text-[#EDEDED]/40 mt-1 leading-relaxed">
@@ -27736,7 +27736,7 @@ function SportsView({onClose}){
 
           {data.verdict&&(
             <div className="rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed"
-              style={{borderColor:data.verdict.significant_worse?'rgba(255,77,106,0.35)':'#1F1F1F',
+              style={{borderColor:data.verdict.significant_worse?'rgba(255,77,106,0.35)':'#1C1C22',
                       background:data.verdict.significant_worse?'rgba(255,77,106,0.06)':'#111'}}>
               <span className="font-bold" style={{color:data.verdict.significant_worse?SPORTS_RED:'#EDEDED'}}>
                 {data.verdict.headline}
@@ -27746,19 +27746,19 @@ function SportsView({onClose}){
           )}
 
           {rec&&rec.n<100&&(
-            <div className="rounded-xl border border-[#2A2A2A] border-l-2 bg-[#141414] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:T2_GOLD}}>
+            <div className="rounded-xl border border-[#2A2A34] border-l-2 bg-[#0E0E12] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:T2_GOLD}}>
               <span className="text-white font-bold">{rec.n} settled predictions is far too few to conclude anything.</span> Separating a real 2% edge from noise takes on the order of 1,000 bets. This is bookkeeping, not evidence. Log loss against the market is the number that will eventually matter; win rate never will.
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-1 mb-4">
-            <div className="flex gap-1 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
+            <div className="flex gap-1 p-1 rounded-lg bg-[#101014] w-fit border border-[#1C1C22]">
               {[['board','Board'],['record','Record']].map(([id,lab])=>(
                 <button key={id} onClick={()=>setTab(id)} className={'px-3 py-1.5 text-xs uppercase font-bold tracking-wider rounded-lg transition-colors '+(tab===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
               ))}
             </div>
             {tab==='board'&&(
-              <div className="flex gap-1 ml-1 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
+              <div className="flex gap-1 ml-1 p-1 rounded-lg bg-[#101014] w-fit border border-[#1C1C22]">
                 {[['high','High conviction'],['all','All'],['tracked','Tracked']].map(([id,lab])=>(
                   <button key={id} onClick={()=>setFilter(id)} className={'px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg transition-colors '+(filter===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={filter===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
                 ))}
@@ -27784,8 +27784,8 @@ function SportsView({onClose}){
               <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">By strategy</div>
               <div className="space-y-1">
                 {data.by_strategy.map((s,i)=>(
-                  <div key={i} className="flex items-center gap-2 text-[12px] bg-[#141414] border rounded-lg px-3 py-2"
-                    style={{borderColor:s.current?T2_GOLD_BORDER:'#1F1F1F'}}>
+                  <div key={i} className="flex items-center gap-2 text-[12px] bg-[#0E0E12] border rounded-lg px-3 py-2"
+                    style={{borderColor:s.current?T2_GOLD_BORDER:'#1C1C22'}}>
                     <span className="flex-1" style={{color:s.current?'#fff':'rgba(237,237,237,0.45)'}}>
                       {s.label}
                     </span>
@@ -27811,7 +27811,7 @@ function SportsView({onClose}){
               <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">By league</div>
               <div className="space-y-1">
                 {data.by_league.map((b,i)=>(
-                  <div key={i} className="flex items-center gap-2 text-[12px] bg-[#141414] border border-[#1F1F1F] rounded-lg px-3 py-2">
+                  <div key={i} className="flex items-center gap-2 text-[12px] bg-[#0E0E12] border border-[#1C1C22] rounded-lg px-3 py-2">
                     <span className="w-5">{SPORT_EMOJI[b.sport]||'•'}</span>
                     <span className="flex-1 text-white/80">{b.label}</span>
                     <span className="text-white font-bold" style={T2_MONO_STYLE}>{b.wins}–{b.losses}</span>
@@ -27827,11 +27827,11 @@ function SportsView({onClose}){
               put as you click between them. */}
           {sportCounts.length>1&&(
             <div className="flex flex-wrap items-center gap-1 mb-4">
-              <button onClick={()=>setSportFilter('all')} className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors" style={sportFilter==='all'?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
+              <button onClick={()=>setSportFilter('all')} className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors" style={sportFilter==='all'?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1C1C22'}}>
                 All <span className="opacity-60">{tabRows.length}</span>
               </button>
               {sportCounts.map(([k,v])=>(
-                <button key={k} onClick={()=>setSportFilter(k)} className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors flex items-center gap-1" style={sportFilter===k?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
+                <button key={k} onClick={()=>setSportFilter(k)} className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors flex items-center gap-1" style={sportFilter===k?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1C1C22'}}>
                   <span className="text-[12px] leading-none">{SPORT_EMOJI[k]||'•'}</span>
                   <span className="hidden sm:inline">{v.label}</span>
                   <span className="opacity-60">{v.n}</span>
@@ -27839,8 +27839,8 @@ function SportsView({onClose}){
               ))}
               {grouped.length>1&&(
                 <span className="ml-auto flex gap-1">
-                  <button onClick={()=>setAllDays(true)} className="px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded-lg border border-[#1F1F1F] text-[#EDEDED]/35 hover:text-[#EDEDED]/70">Expand all</button>
-                  <button onClick={()=>setAllDays(false)} className="px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded-lg border border-[#1F1F1F] text-[#EDEDED]/35 hover:text-[#EDEDED]/70">Collapse</button>
+                  <button onClick={()=>setAllDays(true)} className="px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded-lg border border-[#1C1C22] text-[#EDEDED]/35 hover:text-[#EDEDED]/70">Expand all</button>
+                  <button onClick={()=>setAllDays(false)} className="px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded-lg border border-[#1C1C22] text-[#EDEDED]/35 hover:text-[#EDEDED]/70">Collapse</button>
                 </span>
               )}
             </div>
@@ -27852,7 +27852,7 @@ function SportsView({onClose}){
             const open=isDayOpen(day.key,di);
             return(
               <div key={day.key} className="mb-2.5">
-                <button onClick={()=>toggleDay(day.key,open)} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#141414] border border-[#1F1F1F] hover:border-[#2A2A2A] transition-colors text-left">
+                <button onClick={()=>toggleDay(day.key,open)} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#0E0E12] border border-[#1C1C22] hover:border-[#2A2A34] transition-colors text-left">
                   <span className="text-[10px] w-3 shrink-0" style={{color:T2_GOLD}}>{open?'▾':'▸'}</span>
                   <span className="text-[13px] font-bold text-white tracking-tight">{sportsDateLabel(day.dateKey)}</span>
                   <span className="text-[10px] uppercase tracking-wider text-[#EDEDED]/35">{day.n} {day.n===1?'pick':'picks'}</span>
@@ -27875,7 +27875,7 @@ function SportsView({onClose}){
                         {s.leagues.map(l=>(
                           <div key={l.league} className="mb-1.5">
                             <div className="text-[9.5px] font-bold uppercase tracking-[0.1em] text-[#EDEDED]/35 pl-2 my-1" style={{borderLeft:'2px solid '+T2_GOLD_BORDER}}>{l.league} · {l.rows.length}</div>
-                            <div className="bg-[#141414] border border-[#1F1F1F] rounded-xl px-3">
+                            <div className="bg-[#0E0E12] border border-[#1C1C22] rounded-xl px-3">
                               {l.rows.map((r,i)=><SportsRow key={(r.id||r.match)+'-'+i} r={r} grid={data.inplay_grid} showResult={tab==='record'}/>)}
                             </div>
                           </div>
@@ -27888,7 +27888,7 @@ function SportsView({onClose}){
             );
           })}
 
-          <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
+          <div className="rounded-xl border border-[#1C1C22] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
             Every chip is one number: how far the model sits from the market on that pick. <span className="font-bold" style={{color:'#7CA6E8'}}>Matches market</span> means within 3 points — that is where the model has tracked the closing line, and it is the <b className="text-white/70">absence of an edge</b>, not the presence of one. After Kalshi's ~1.7c fee near 50c, a matching position is negative EV. <span className="font-bold" style={{color:T2_GOLD}}>Off by 3–7</span> is shown but never tallied. <span className="text-white/70 font-bold">Off by 8+</span> backtested at 1.0373 log loss against the market's 0.9641 — that is the model being wrong, not an edge worth taking.</div>
 
           {data.disclosures&&data.disclosures.length>0&&(
@@ -27920,7 +27920,7 @@ const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setS
     <div className="md:hidden flex gap-1 mb-2 shrink-0">
       {tabs.map(t=>{
         const active=mobileTab===t.id;
-        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#C9A961] border-[#C9A961]/40':'text-[#EDEDED]/40 border-[#1F1F1F]');
+        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#D9B368] border-[#D9B368]/40':'text-[#EDEDED]/40 border-[#1C1C22]');
         const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}:{boxShadow:'0 2px 6px rgba(0,0,0,0.25)'};
         return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
       })}
@@ -28388,8 +28388,8 @@ function SpikeAlertOverlay({alert,dismiss,toggleSound,soundEnabled,requestNotify
     _bg=favorable?'rgba(40,204,149,0.10)':'rgba(255,77,106,0.10)';
     _verdict=favorable?'🚀 YOUR CALL WINNING — RIDE IT':'⚠️ MOVING AGAINST YOU — CONSIDER EXIT';
   }else{
-    _color='rgba(201,169,97,0.95)'; // brand gold — neutral attention
-    _bg='rgba(201,169,97,0.10)';
+    _color='rgba(217,179,104,0.95)'; // brand gold — neutral attention
+    _bg='rgba(217,179,104,0.10)';
     _verdict=dir==='PUMP'?'🚀 SUDDEN PUMP — scan for entry':'🔻 SUDDEN DUMP — scan for entry';
   }
   const _showNotifyButton=notifyPerm==='default';
@@ -28655,7 +28655,7 @@ function SmartMoneyStrip({signals,lockDir}){
   const _consensusSide=_allUp?'UP':(_allDown?'DOWN':null);
   return React.createElement('div',{className:'mb-2'},
     React.createElement('div',{className:'flex items-center gap-1.5 mb-1 px-1'},
-      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},
+      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(217,179,104,0.85)'}},
         'Smart Money'
       ),
       _activeCount>0&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40'},
@@ -28683,9 +28683,9 @@ function SmartMoneyStrip({signals,lockDir}){
             _bg=aligned?'rgba(40,204,149,0.08)':'rgba(255,77,106,0.08)';
             _border=aligned?'rgba(40,204,149,0.40)':'rgba(255,77,106,0.40)';
           }else{
-            _color='rgba(201,169,97,0.95)';
-            _bg='rgba(201,169,97,0.08)';
-            _border='rgba(201,169,97,0.35)';
+            _color='rgba(217,179,104,0.95)';
+            _bg='rgba(217,179,104,0.08)';
+            _border='rgba(217,179,104,0.35)';
           }
         }else{
           _color='rgba(237,237,237,0.30)';
@@ -28716,7 +28716,7 @@ function SmartMoneyStrip({signals,lockDir}){
     ),
     expanded&&React.createElement('div',{
       className:'mt-1.5 px-2 py-1.5 rounded-lg text-[10px] leading-relaxed',
-      style:{background:'#0A0A0A',border:'1px solid #1F1F1F',color:'rgba(237,237,237,0.75)'},
+      style:{background:'#08080B',border:'1px solid #1C1C22',color:'rgba(237,237,237,0.75)'},
     },
       _detectors.find(d=>d.key===expanded)?.signal.detected
         ?_detectors.find(d=>d.key===expanded).signal.reason
@@ -28774,9 +28774,9 @@ function TaraToastStack({toasts,onDismiss}){
     'data-tara-toast':'1',
     className:'pointer-events-auto rounded-lg backdrop-blur-md px-4 py-3 cursor-pointer transition-opacity',
     style:{
-      background:'#0A0A0A',
-      border:`1px solid ${t.color||'#C9A961'}66`,
-      boxShadow:`0 4px 20px ${t.color||'#C9A961'}22, 0 1px 0 rgba(255,255,255,0.04) inset`,
+      background:'#08080B',
+      border:`1px solid ${t.color||'#D9B368'}66`,
+      boxShadow:`0 4px 20px ${t.color||'#D9B368'}22, 0 1px 0 rgba(255,255,255,0.04) inset`,
     },
     onClick:()=>{
       // V9.8.19: if toast carries a URL, open in new tab on click. Always dismiss
@@ -28788,8 +28788,8 @@ function TaraToastStack({toasts,onDismiss}){
   },[
     React.createElement('div',{key:'r1',className:'flex items-center gap-2'},[
       React.createElement('span',{key:'icon',style:{fontSize:'15px',lineHeight:1}},t.icon||'⚡'),
-      React.createElement('span',{key:'title',className:'text-[13px] font-bold tracking-wide flex-1',style:{color:t.color||'#C9A961'}},t.title),
-      t.url?React.createElement('span',{key:'open',className:'text-[10px] opacity-60',style:{color:t.color||'#C9A961'}},'↗'):null,
+      React.createElement('span',{key:'title',className:'text-[13px] font-bold tracking-wide flex-1',style:{color:t.color||'#D9B368'}},t.title),
+      t.url?React.createElement('span',{key:'open',className:'text-[10px] opacity-60',style:{color:t.color||'#D9B368'}},'↗'):null,
     ].filter(Boolean)),
     t.body?React.createElement('div',{key:'body',className:'text-[11px] mt-1 leading-snug',style:{color:'rgba(237,237,237,0.78)'}},t.body):null,
   ].filter(Boolean))));
@@ -28968,27 +28968,27 @@ const buildDayContext=(dayHourPerf,now)=>{
     // Activity-WR coupling
     if(_isTopRanked&&_highVol){
       dayMode='aggressive';
-      dayAdviceColor='#7fa189';
+      dayAdviceColor='#6FA98C';
       dayHeadline=`Strong day · ${_wrPct}% WR with ${_atr.toFixed(0)}bps avg vol`;
       dayAdvice=`${todayLong}s have been your edge. Take aggressive sizing, hold marginal locks longer.`;
     }else if(_isTopRanked){
       dayMode='prime';
-      dayAdviceColor='#7fa189';
+      dayAdviceColor='#6FA98C';
       dayHeadline=`Top WR day · ${_wrPct}% (rank ${todayRank}/${totalRanked})`;
       dayAdvice=`Lean in on confluent setups. Volatility is ${_lowVol?'compressed':'normal'}, so trust signal quality over breakout chasing.`;
     }else if(_isBottomRanked&&_lowVol){
       dayMode='defensive';
-      dayAdviceColor='#b26558';
+      dayAdviceColor='#C06A72';
       dayHeadline=`Tough day · ${_wrPct}% WR, ${_atr?_atr.toFixed(0)+'bps':'low'} vol${_winGap&&_lossGap?` · wins ${_winGap.toFixed(0)}bps / losses ${_lossGap.toFixed(0)}bps`:''}`;
       dayAdvice=`Marginal moves, narrow edge. Only enter on confluence+ tier. Skip single-signal setups.`;
     }else if(_isBottomRanked){
       dayMode='selective';
-      dayAdviceColor='#d4a24c';
+      dayAdviceColor='#D9B368';
       dayHeadline=`Below-avg day · ${_wrPct}% WR (rank ${todayRank}/${totalRanked})`;
       dayAdvice=`Be picky. Skip weak-conviction locks; the day's distribution doesn't favor marginal entries.`;
     }else if(_lowVol){
       dayMode='selective';
-      dayAdviceColor='#d4a24c';
+      dayAdviceColor='#D9B368';
       dayHeadline=`Compressed vol · ${_atr.toFixed(0)}bps avg`;
       dayAdvice=`Range-bound conditions. Watch for false breakouts. Wait for clean structural setups.`;
     }else{
@@ -28998,11 +28998,11 @@ const buildDayContext=(dayHourPerf,now)=>{
       dayAdvice=`No special bias. Trade your usual selectivity.`;
     }
   }else if(holiday){
-    dayMode='selective';dayAdviceColor='#d4a24c';
+    dayMode='selective';dayAdviceColor='#D9B368';
     dayHeadline=`Holiday · light flow expected`;
     dayAdvice=`Institutional flow lighter than usual on ${holiday}. Reduce sizing, expect choppy execution.`;
   }else if(isWeekend){
-    dayMode='selective';dayAdviceColor='#d4a24c';
+    dayMode='selective';dayAdviceColor='#D9B368';
     dayHeadline=`Weekend · marginal moves typical`;
     dayAdvice=`Crypto-only flow without traditional finance. Smaller moves, tighter ranges. Be patient with entries.`;
   }else{
@@ -29024,13 +29024,13 @@ function DayAwareScheduleHeader({dayContext}){
   const[expanded,setExpanded]=React.useState(false);
   if(!dayContext)return null;
   const{todayLong,isWeekend,holiday,todayEntry,todayRank,totalRanked,activityLabel,upcomingBest,upcomingWorst,dayMode,dayHeadline,dayAdvice,dayAdviceColor,dayRanking,todayBest,todayWorst}=dayContext;
-  const _activityColor=activityLabel==='active'?'#7fa189':activityLabel==='quiet'?'#94a3b8':activityLabel==='average'?'#C9A961':'#94a3b8';
+  const _activityColor=activityLabel==='active'?'#6FA98C':activityLabel==='quiet'?'#94a3b8':activityLabel==='average'?'#D9B368':'#94a3b8';
   // V9.9.2: mode-driven container tint. Visual reinforces the advice without
   //   needing to read it — green-bordered = aggressive day, rose-bordered = defensive.
-  const _modeColor=dayMode==='aggressive'||dayMode==='prime'?'#7fa189':
-                    dayMode==='defensive'?'#b26558':
-                    dayMode==='selective'?'#d4a24c':
-                    'rgba(201,169,97,0.5)';
+  const _modeColor=dayMode==='aggressive'||dayMode==='prime'?'#6FA98C':
+                    dayMode==='defensive'?'#C06A72':
+                    dayMode==='selective'?'#D9B368':
+                    'rgba(217,179,104,0.5)';
   const _modeLabel=dayMode==='aggressive'?'AGGRESSIVE':dayMode==='prime'?'PRIME':dayMode==='defensive'?'DEFENSIVE':dayMode==='selective'?'SELECTIVE':'NORMAL';
   return React.createElement('div',{
     className:'flex flex-col gap-1.5 px-3 py-2 rounded-lg mb-2 min-w-0 overflow-hidden',
@@ -29061,7 +29061,7 @@ function DayAwareScheduleHeader({dayContext}){
     // Row 3: dayAdvice (the actionable text)
     dayAdvice?React.createElement('div',{key:'adv',className:'text-[10px] leading-snug',style:{color:'rgba(237,237,237,0.7)'}},dayAdvice):null,
     // Row 4: holiday warning (separate so it stays visible even if collapsed)
-    holiday?React.createElement('div',{key:'hol',className:'text-[10px] flex items-center gap-1.5',style:{color:'#d4a24c'}},[
+    holiday?React.createElement('div',{key:'hol',className:'text-[10px] flex items-center gap-1.5',style:{color:'#D9B368'}},[
       React.createElement('span',{key:'i',style:{fontSize:'10px'}},'🇺🇸'),
       React.createElement('span',{key:'t'},`${holiday} — institutional flow may be lighter than usual`),
     ]):null,
@@ -29076,7 +29076,7 @@ function DayAwareScheduleHeader({dayContext}){
     expanded?React.createElement('div',{
       key:'detail',
       className:'flex flex-col gap-2 mt-1 pt-2 text-[10px]',
-      style:{borderTop:'1px solid #1F1F1F',color:'rgba(237,237,237,0.75)'},
+      style:{borderTop:'1px solid #1C1C22',color:'rgba(237,237,237,0.75)'},
     },[
       // Day ranking
       dayRanking&&dayRanking.length>=3?React.createElement('div',{key:'rank',className:'flex flex-col gap-0.5'},[
@@ -29084,7 +29084,7 @@ function DayAwareScheduleHeader({dayContext}){
         ...dayRanking.map(d=>React.createElement('div',{
           key:d.dayIdx,
           className:'flex items-center justify-between gap-2 min-w-0',
-          style:d.dayIdx===dayContext.todayIdx?{color:'#C9A961',fontWeight:'600'}:undefined,
+          style:d.dayIdx===dayContext.todayIdx?{color:'#D9B368',fontWeight:'600'}:undefined,
         },[
           React.createElement('span',{key:'n',className:'truncate'},`${d.dayIdx===dayContext.todayIdx?'▸ ':'  '}${d.name}`),
           React.createElement('span',{key:'s',className:'shrink-0 font-mono',style:{fontSize:'9px',opacity:0.85}},`${(d.wr*100).toFixed(0)}% · n=${d.n}${d.avgAtr?` · ${d.avgAtr.toFixed(0)}bps`:''}`),
@@ -29313,7 +29313,7 @@ function ReversalRiskChip({reversalRisk,className}){
   const[expanded,setExpanded]=React.useState(false);
   if(!reversalRisk||reversalRisk.flag==='NONE')return null;
   const isExpected=reversalRisk.flag==='EXPECTED';
-  const _color=isExpected?'#b26558':'#d4a24c';
+  const _color=isExpected?'#C06A72':'#D9B368';
   const _label=isExpected?'REVERSAL EXPECTED':'REVERSAL WATCH';
   const _icon=isExpected?'⚠':'⚡';
   const _firedSignals=(reversalRisk.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight);
@@ -29346,7 +29346,7 @@ function ReversalRiskChip({reversalRisk,className}){
     expanded?React.createElement('div',{
       key:'details',
       className:'flex flex-col gap-1 px-2.5 py-2 rounded-lg text-[10px]',
-      style:{background:'#0A0A0A',border:`1px solid ${_color}33`,color:'rgba(237,237,237,0.85)'},
+      style:{background:'#08080B',border:`1px solid ${_color}33`,color:'rgba(237,237,237,0.85)'},
     },_firedSignals.length===0?[
       React.createElement('span',{key:'none',style:{opacity:0.6}},'No specific risk factors fired (defensive flag).'),
     ]:[
@@ -29427,7 +29427,7 @@ function ReversalForecastSVG({reversalRisk,dir,currentPrice,strikePrice,atrBps,t
     // EXPECTED — prominent bend, ends past strike on the WRONG side
     pathD=`M ${xStart} ${yNow} C ${tToX(0.25)} ${priceToY(strikePrice+_favSign*_peakOffset*0.5)} ${xPeak} ${_yPeak} ${tToX(0.65)} ${yStrike} S ${xEnd} ${yClose} ${xEnd} ${yClose}`;
   }
-  const _flagColor=flag==='EXPECTED'?'#b26558':flag==='WATCH'?'#d4a24c':'#7fa189';
+  const _flagColor=flag==='EXPECTED'?'#C06A72':flag==='WATCH'?'#D9B368':'#6FA98C';
   // Confidence band — wider transparent stroke under main path
   const _bandWidth=Math.max(8,Math.min(22,(atrBps||10)*0.5));
   // Time remaining display
@@ -29443,9 +29443,9 @@ function ReversalForecastSVG({reversalRisk,dir,currentPrice,strikePrice,atrBps,t
     // Background panel
     React.createElement('rect',{key:'bg',x:0,y:0,width:W,height:H,rx:6,fill:'rgba(10,10,10,0.45)'}),
     // Strike line (dashed gold horizontal)
-    React.createElement('line',{key:'strike',x1:PAD_X,y1:yStrike,x2:W-PAD_X,y2:yStrike,stroke:'#C9A961',strokeWidth:1,strokeDasharray:'4 3',opacity:0.55}),
+    React.createElement('line',{key:'strike',x1:PAD_X,y1:yStrike,x2:W-PAD_X,y2:yStrike,stroke:'#D9B368',strokeWidth:1,strokeDasharray:'4 3',opacity:0.55}),
     // Strike label (right side)
-    React.createElement('text',{key:'sl',x:W-PAD_X-2,y:yStrike-4,textAnchor:'end',fontSize:9,fill:'#C9A961',opacity:0.9},`Strike $${Math.round(strikePrice).toLocaleString()}`),
+    React.createElement('text',{key:'sl',x:W-PAD_X-2,y:yStrike-4,textAnchor:'end',fontSize:9,fill:'#D9B368',opacity:0.9},`Strike $${Math.round(strikePrice).toLocaleString()}`),
     // Confidence band (faint wide stroke under main path)
     React.createElement('path',{key:'band',d:pathD,stroke:_flagColor,strokeWidth:_bandWidth,strokeLinecap:'round',strokeLinejoin:'round',fill:'none',opacity:0.10}),
     // Predicted path (main stroke)
@@ -29847,16 +29847,16 @@ function ScalperAdvisorPanel({
   // ── SHARED "tara's advisor" HEADER ─────────────────────────────────────
   const _readDirColor=_dir==='UP'?'rgb(40,204,149)':_dir==='DOWN'?'rgba(255,77,106,0.92)':'#EDEDED';
   const _readArrow=_dir==='UP'?'▲':_dir==='DOWN'?'▼':'·';
-  const _headerEl=React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-3 border-b border-[#1F1F1F]'},
+  const _headerEl=React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-3 border-b border-[#1C1C22]'},
     React.createElement('div',{className:'flex items-baseline gap-2'},
-      React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#C9A961',letterSpacing:'0.02em',textTransform:'none'}},'tara\'s advisor'),
+      React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#D9B368',letterSpacing:'0.02em',textTransform:'none'}},'tara\'s advisor'),
       React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em',textTransform:'none'}},'short-horizon scalp'),
     ),
     _stats.n>0&&React.createElement('span',{className:'text-[10px] tabular-nums text-[#EDEDED]/40',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
       `today ${_stats.wins}w·${_stats.losses}l · ${_stats.netCents>=0?'+':''}${_stats.netCents}¢`),
   );
   // Sub-header: current engine read line (always-on)
-  const _readLineEl=React.createElement('div',{className:'flex items-baseline gap-2 mb-3 pb-2 border-b border-[#1F1F1F]'},
+  const _readLineEl=React.createElement('div',{className:'flex items-baseline gap-2 mb-3 pb-2 border-b border-[#1C1C22]'},
     React.createElement('span',{className:'text-[9px] uppercase text-[#EDEDED]/35',style:{letterSpacing:'0.06em'}},'reads'),
     React.createElement('span',{className:'text-base font-medium tabular-nums',style:{color:_readDirColor,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
       `${_readArrow} ${_dir?_dir.toLowerCase():'flat'}`),
@@ -30072,13 +30072,13 @@ function ScalperAdvisorPanel({
   //   she's scanning), not just after she locks. Now defined here and
   //   called at the top of every return path.
   // ─────────────────────────────────────────────────────────────────────────
-  const _renderPredictorHeader=()=>React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#1F1F1F]'},
+  const _renderPredictorHeader=()=>React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#1C1C22]'},
     // Title row: "Predictor"
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:'#C9A961'}},'predictor'),
+      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:'#D9B368'}},'predictor'),
     ),
     // Row 1: AUTO / MANUAL toggle
-    React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #1F1F1F'}},
+    React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #1C1C22'}},
       (()=>{
         const _isAuto=!!autoExecSettings?.enabled;
         const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
@@ -30088,7 +30088,7 @@ function ScalperAdvisorPanel({
             className:_btnBase,
             style:_isAuto
               ?{background:'rgba(40,204,149,0.16)',color:'rgb(40,204,149)',borderRight:'1px solid rgba(40,204,149,0.30)'}
-              :{background:'#141414',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1F1F1F'},
+              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1C1C22'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:true}));},
             title:'auto-exec ON: place orders automatically when Tara locks',
           },'auto'),
@@ -30096,8 +30096,8 @@ function ScalperAdvisorPanel({
             key:'manual',
             className:_btnBase,
             style:!_isAuto
-              ?{background:'rgba(201,169,97,0.16)',color:'#C9A961'}
-              :{background:'#141414',color:'rgba(237,237,237,0.45)'},
+              ?{background:'rgba(217,179,104,0.16)',color:'#D9B368'}
+              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:false}));},
             title:'manual only: Tara still locks but no orders fire automatically',
           },'manual'),
@@ -30105,7 +30105,7 @@ function ScalperAdvisorPanel({
       })(),
     ),
     // Row 2: Tara's Call / Tara's Trade toggle
-    React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #1F1F1F'}},
+    React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #1C1C22'}},
       (()=>{
         const _src=autoExecSettings?.signalSource||'snapshot';
         const _isCall=_src==='snapshot';
@@ -30115,8 +30115,8 @@ function ScalperAdvisorPanel({
             key:'call',
             className:_btnBase,
             style:_isCall
-              ?{background:'rgba(201,169,97,0.16)',color:'#C9A961',borderRight:'1px solid rgba(201,169,97,0.30)'}
-              :{background:'#141414',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1F1F1F'},
+              ?{background:'rgba(217,179,104,0.16)',color:'#D9B368',borderRight:'1px solid rgba(217,179,104,0.30)'}
+              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1C1C22'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'snapshot'}));},
             title:"use Tara's settled call (snapshot) — public read, 67% WR baseline",
           },"tara's call"),
@@ -30125,7 +30125,7 @@ function ScalperAdvisorPanel({
             className:_btnBase,
             style:!_isCall
               ?{background:'rgba(40,204,149,0.16)',color:'rgb(40,204,149)'}
-              :{background:'#141414',color:'rgba(237,237,237,0.45)'},
+              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'lock'}));},
             title:"use Tara's engine lock — fires earlier, may diverge from snapshot. real 'Tara's Trade' model is phase 4 work.",
           },[
@@ -30211,7 +30211,7 @@ function ScalperAdvisorPanel({
           setAutoExecSettings(prev=>({...prev,...preset}));
         };
         const _btnStyleActive={background:'rgba(40,204,149,0.14)',color:'rgb(40,204,149)',border:'1px solid rgba(40,204,149,0.32)'};
-        const _btnStyleIdle={background:'rgba(237,237,237,0.04)',color:'rgba(237,237,237,0.55)',border:'1px solid #1F1F1F'};
+        const _btnStyleIdle={background:'rgba(237,237,237,0.04)',color:'rgba(237,237,237,0.55)',border:'1px solid #1C1C22'};
         return React.createElement('div',{className:'flex gap-1 flex-1'},
           React.createElement('button',{
             key:'patient',
@@ -30276,7 +30276,7 @@ function ScalperAdvisorPanel({
           :_todayManual.length>0&&_todayAuto.length===0
             ?'(all manual)'
             :'';
-      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#1F1F1F] text-[10px] tabular-nums flex flex-wrap items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
+      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#1C1C22] text-[10px] tabular-nums flex flex-wrap items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
         React.createElement('span',{style:{color:'rgba(237,237,237,0.40)'}},'today'),
         React.createElement('span',{style:{color:'rgba(237,237,237,0.55)'}},'·'),
         React.createElement('span',{style:{color:'rgba(237,237,237,0.55)'}},'P&L'),
@@ -30298,7 +30298,7 @@ function ScalperAdvisorPanel({
     const _sideColor=showEntryPrompt==='LONG_YES'?'rgb(40,204,149)':'rgba(255,77,106,0.92)';
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid #1F1F1F'},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #1C1C22'},
     },
       _renderPredictorHeader(),
       React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
@@ -30315,7 +30315,7 @@ function ScalperAdvisorPanel({
             type:'number',min:1,max:99,step:1,value:entryPriceInput,
             onChange:(e)=>setEntryPriceInput(e.target.value),
             className:'w-full px-3 py-2 rounded-lg text-base tabular-nums',
-            style:{background:'rgba(0,0,0,0.35)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+            style:{background:'rgba(0,0,0,0.35)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
             autoFocus:true,
           }),
         ),
@@ -30325,7 +30325,7 @@ function ScalperAdvisorPanel({
             type:'number',min:1,max:1000,step:1,value:entryContractsInput,
             onChange:(e)=>setEntryContractsInput(e.target.value),
             className:'w-full px-3 py-2 rounded-lg text-base tabular-nums',
-            style:{background:'rgba(0,0,0,0.35)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+            style:{background:'rgba(0,0,0,0.35)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
           }),
         ),
       ),
@@ -30341,11 +30341,11 @@ function ScalperAdvisorPanel({
   if(showExitPrompt&&scalperPosition){
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid rgba(201,169,97,0.30)'},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid rgba(217,179,104,0.30)'},
     },
       _renderPredictorHeader(),
       React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
-        React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#C9A961',letterSpacing:'0.02em',textTransform:'none'}},'confirm exit'),
+        React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#D9B368',letterSpacing:'0.02em',textTransform:'none'}},'confirm exit'),
         React.createElement('button',{onClick:()=>setShowExitPrompt(false),className:'text-[10px] text-[#EDEDED]/45 hover:text-[#EDEDED]/75'},'cancel'),
       ),
       React.createElement('p',{className:'text-[12px] text-[#EDEDED]/65 mb-3 leading-relaxed'},
@@ -30357,14 +30357,14 @@ function ScalperAdvisorPanel({
           type:'number',min:0,max:100,step:1,value:exitPriceInput,
           onChange:(e)=>setExitPriceInput(e.target.value),
           className:'w-full px-3 py-2 rounded-lg text-base tabular-nums',
-          style:{background:'rgba(0,0,0,0.35)',border:'1px solid #1F1F1F',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+          style:{background:'rgba(0,0,0,0.35)',border:'1px solid #1C1C22',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
           autoFocus:true,
         }),
       ),
       React.createElement('button',{
         onClick:_onConfirmExit,
         className:'w-full py-2.5 rounded-lg text-[12px] font-bold',
-        style:{background:'rgba(201,169,97,0.15)',color:'#C9A961',border:'1px solid rgba(201,169,97,0.45)',letterSpacing:'0.02em',textTransform:'none'},
+        style:{background:'rgba(217,179,104,0.15)',color:'#D9B368',border:'1px solid rgba(217,179,104,0.45)',letterSpacing:'0.02em',textTransform:'none'},
       },'confirm exit'),
     );
   }
@@ -30390,17 +30390,17 @@ function ScalperAdvisorPanel({
     } else if(scalperRead?.dir&&((scalperPosition.side==='LONG_YES'&&scalperRead.dir==='DOWN')||(scalperPosition.side==='LONG_NO'&&scalperRead.dir==='UP'))&&_conviction>=70){
       _rec='consider exit';
       _recDetail=`Tape reversed against you (${_conviction}% conviction ${scalperRead.dir}). Consider closing.`;
-      _recColor='rgba(201,169,97,0.92)';
+      _recColor='rgba(217,179,104,0.92)';
     }
     const _holdSec=Math.round((Date.now()-scalperPosition.entryTime)/1000);
     if(_holdSec>=120&&Math.abs(_unrealizedPerContract)<3){
       _rec='close neutral';
       _recDetail=`Position stale (${Math.floor(_holdSec/60)}m ${_holdSec%60}s) with no progress.`;
-      _recColor='rgba(201,169,97,0.85)';
+      _recColor='rgba(217,179,104,0.85)';
     }
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_recColor.replace('0.92','0.25').replace('0.85','0.25').replace('rgb(','rgba(').replace(')',',0.25)')},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid '+_recColor.replace('0.92','0.25').replace('0.85','0.25').replace('rgb(','rgba(').replace(')',',0.25)')},
     },
       _renderPredictorHeader(),
       _topEl,
@@ -30410,12 +30410,12 @@ function ScalperAdvisorPanel({
           React.createElement('span',{className:'text-base tabular-nums font-medium',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `${scalperPosition.side==='LONG_YES'?'long yes':'long no'} @ ${scalperPosition.entryCents.toFixed(0)}¢ × ${scalperPosition.contracts}`),
         ),
-        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#1F1F1F]'},
+        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#1C1C22]'},
           React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45',style:{letterSpacing:'0.02em'}},'unrealized'),
           React.createElement('span',{className:'text-base tabular-nums font-medium',style:{color:_color,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `${_unrealizedPerContract>=0?'+':''}${_unrealizedPerContract.toFixed(0)}¢/ct · ${_unrealizedTotal>=0?'+':''}${_unrealizedTotal.toFixed(0)}¢`),
         ),
-        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#1F1F1F]'},
+        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#1C1C22]'},
           React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45',style:{letterSpacing:'0.02em'}},'hold'),
           React.createElement('span',{className:'text-[12px] tabular-nums text-[#EDEDED]/65',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `${Math.floor(_holdSec/60)}m ${_holdSec%60}s · target ${scalperPosition.suggestedTargetCents}¢ · stop ${scalperPosition.suggestedStopCents}¢`),
@@ -30429,7 +30429,7 @@ function ScalperAdvisorPanel({
       React.createElement('button',{
         onClick:_onIntendSell,
         className:'w-full py-2.5 rounded-lg text-[12px] font-bold',
-        style:{background:'rgba(201,169,97,0.10)',color:'#C9A961',border:'1px solid rgba(201,169,97,0.40)',letterSpacing:'0.02em',textTransform:'none'},
+        style:{background:'rgba(217,179,104,0.10)',color:'#D9B368',border:'1px solid rgba(217,179,104,0.40)',letterSpacing:'0.02em',textTransform:'none'},
       },'i sold · enter fill price'),
     );
   }
@@ -30444,7 +30444,7 @@ function ScalperAdvisorPanel({
     const _sideLabel=_suggestedSide==='LONG_YES'?'long yes':'long no';
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_sideColor.replace('rgb(','rgba(').replace(')',',0.30)').replace('0.92','0.30')},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid '+_sideColor.replace('rgb(','rgba(').replace(')',',0.30)').replace('0.92','0.30')},
     },
       _renderPredictorHeader(),
       _topEl,
@@ -30465,7 +30465,7 @@ function ScalperAdvisorPanel({
         React.createElement('button',{
           onClick:_onDismiss,
           className:'px-4 py-2.5 rounded-lg text-[11px] text-[#EDEDED]/55 hover:text-[#EDEDED]/85',
-          style:{background:'rgba(0,0,0,0.20)',border:'1px solid #1F1F1F',letterSpacing:'0.02em',textTransform:'none'},
+          style:{background:'rgba(0,0,0,0.20)',border:'1px solid #1C1C22',letterSpacing:'0.02em',textTransform:'none'},
         },'dismiss'),
       ),
     );
@@ -30481,20 +30481,20 @@ function ScalperAdvisorPanel({
     // Scalper status mini-note that appears at the bottom
     let _scalperNote=null;
     if(_state==='DISABLED'){
-      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#1F1F1F]'},
+      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#1C1C22]'},
         React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},'scalper off'),
         React.createElement('button',{
           onClick:()=>setShowTradingSettings(true),
           className:'text-[10px] underline underline-offset-2',
-          style:{color:'#C9A961',letterSpacing:'0.02em',textTransform:'none'},
+          style:{color:'#D9B368',letterSpacing:'0.02em',textTransform:'none'},
         },'enable scalper'),
       );
     } else if(_state==='BLOCKED'){
-      _scalperNote=React.createElement('div',{className:'pt-2 mt-2 border-t border-[#1F1F1F]'},
+      _scalperNote=React.createElement('div',{className:'pt-2 mt-2 border-t border-[#1C1C22]'},
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},`scalper paused · ${_elig.blockReason}`),
       );
     } else if(_state==='IDLE'){
-      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#1F1F1F]'},
+      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#1C1C22]'},
         React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},'scalper watching'),
         React.createElement('span',{className:'text-[10px] tabular-nums text-[#EDEDED]/35',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
           `${(scalperSettings.maxSuggestionsPerHour||3)-_scalperGetHourlyCount(scalperLog,scalperSuggestionsRef)}/${scalperSettings.maxSuggestionsPerHour||3} left this hour`),
@@ -30502,13 +30502,13 @@ function ScalperAdvisorPanel({
     }
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_taraDirColor.replace('rgb(','rgba(').replace(')',',0.25)').replace('0.92','0.25')},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid '+_taraDirColor.replace('rgb(','rgba(').replace(')',',0.25)').replace('0.92','0.25')},
     },
       _renderPredictorHeader(),
       // Header: "this round" + window label + LOCKED badge
-      React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-2 border-b border-[#1F1F1F]'},
+      React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-2 border-b border-[#1C1C22]'},
         React.createElement('div',{className:'flex flex-col'},
-          React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#C9A961',letterSpacing:'0.02em',textTransform:'none'}},'this round'),
+          React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#D9B368',letterSpacing:'0.02em',textTransform:'none'}},'this round'),
           _winLabel&&React.createElement('span',{className:'text-[10px] text-[#EDEDED]/55 tabular-nums mt-0.5',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},_winLabel),
         ),
         React.createElement('span',{className:'text-[10px] font-bold px-2 py-0.5 rounded-lg',style:{
@@ -30520,10 +30520,10 @@ function ScalperAdvisorPanel({
       // V9.17.5: patient entry status banner if applicable
       autoOrderState&&autoOrderState.status==='patient-waiting'&&React.createElement('div',{
         className:'px-3 py-2 rounded-lg mb-2',
-        style:{background:'rgba(201,169,97,0.08)',border:'1px solid rgba(201,169,97,0.25)'},
+        style:{background:'rgba(217,179,104,0.08)',border:'1px solid rgba(217,179,104,0.25)'},
       },
         React.createElement('div',{className:'flex items-baseline justify-between'},
-          React.createElement('span',{className:'text-[10px] font-bold',style:{color:'#C9A961',letterSpacing:'0.02em',textTransform:'none'}},'waiting for better entry'),
+          React.createElement('span',{className:'text-[10px] font-bold',style:{color:'#D9B368',letterSpacing:'0.02em',textTransform:'none'}},'waiting for better entry'),
           (()=>{
             const _placedAt=autoOrderState.placedAt||Date.now();
             const _waitedSec=Math.floor((Date.now()-_placedAt)/1000);
@@ -30538,7 +30538,7 @@ function ScalperAdvisorPanel({
       ),
       autoOrderState&&autoOrderState.status==='patient-skipped'&&React.createElement('div',{
         className:'px-3 py-2 rounded-lg mb-2',
-        style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1F1F1F'},
+        style:{background:'rgba(237,237,237,0.04)',border:'1px solid #1C1C22'},
       },
         React.createElement('div',{className:'text-[10px] font-bold text-[#EDEDED]/55',style:{letterSpacing:'0.02em',textTransform:'none'}},'skipped this round'),
         React.createElement('p',{className:'text-[11px] text-[#EDEDED]/55 mt-1 leading-snug'},autoOrderState.reason||'patient entry conditions not met'),
@@ -30582,7 +30582,7 @@ ${_d.responseBody||'(empty)'}`;
                 }catch(_){}
               },
               className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider',
-              style:{color:'rgba(201,169,97,0.95)',border:'1px solid rgba(201,169,97,0.40)',background:'rgba(201,169,97,0.05)'},
+              style:{color:'rgba(217,179,104,0.95)',border:'1px solid rgba(217,179,104,0.40)',background:'rgba(217,179,104,0.05)'},
               title:'Copy full request + response details to clipboard',
             },'⧉ Copy'),
             typeof onClearAutoOrder==='function'&&React.createElement('button',{
@@ -30608,19 +30608,19 @@ ${_d.responseBody||'(empty)'}`;
             ),
             React.createElement('div',null,
               React.createElement('div',{className:'text-[9px] uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.50)'}},'REQUEST BODY (what we sent)'),
-              React.createElement('pre',{className:'text-[10px] font-mono p-2 rounded-lg',style:{color:'rgba(237,237,237,0.80)',background:'#0A0A0A',border:'1px solid #1F1F1F',whiteSpace:'pre-wrap',wordBreak:'break-all',maxHeight:'160px',overflow:'auto'}},
+              React.createElement('pre',{className:'text-[10px] font-mono p-2 rounded-lg',style:{color:'rgba(237,237,237,0.80)',background:'#08080B',border:'1px solid #1C1C22',whiteSpace:'pre-wrap',wordBreak:'break-all',maxHeight:'160px',overflow:'auto'}},
                 JSON.stringify(autoOrderState._diag.requestBody||{},null,2)
               ),
             ),
             React.createElement('div',null,
               React.createElement('div',{className:'text-[9px] uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.50)'}},'RESPONSE HEADERS'),
-              React.createElement('pre',{className:'text-[10px] font-mono p-2 rounded-lg',style:{color:'rgba(237,237,237,0.80)',background:'#0A0A0A',border:'1px solid #1F1F1F',whiteSpace:'pre-wrap',wordBreak:'break-all',maxHeight:'120px',overflow:'auto'}},
+              React.createElement('pre',{className:'text-[10px] font-mono p-2 rounded-lg',style:{color:'rgba(237,237,237,0.80)',background:'#08080B',border:'1px solid #1C1C22',whiteSpace:'pre-wrap',wordBreak:'break-all',maxHeight:'120px',overflow:'auto'}},
                 JSON.stringify(autoOrderState._diag.responseHeaders||{},null,2)
               ),
             ),
             React.createElement('div',null,
               React.createElement('div',{className:'text-[9px] uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.50)'}},'RESPONSE BODY (what Kalshi sent back)'),
-              React.createElement('pre',{className:'text-[10px] font-mono p-2 rounded-lg',style:{color:'rgba(237,237,237,0.80)',background:'#0A0A0A',border:'1px solid #1F1F1F',whiteSpace:'pre-wrap',wordBreak:'break-all',maxHeight:'200px',overflow:'auto'}},
+              React.createElement('pre',{className:'text-[10px] font-mono p-2 rounded-lg',style:{color:'rgba(237,237,237,0.80)',background:'#08080B',border:'1px solid #1C1C22',whiteSpace:'pre-wrap',wordBreak:'break-all',maxHeight:'200px',overflow:'auto'}},
                 autoOrderState._diag.responseBody||'(empty)'
               ),
             ),
@@ -30651,9 +30651,9 @@ ${_d.responseBody||'(empty)'}`;
               ),
               _diverges&&React.createElement('div',{
                 className:'flex items-baseline justify-between mt-1 px-2 py-1 rounded-lg',
-                style:{background:'rgba(201,169,97,0.06)',border:'1px solid rgba(201,169,97,0.20)'},
+                style:{background:'rgba(217,179,104,0.06)',border:'1px solid rgba(217,179,104,0.20)'},
               },
-                React.createElement('span',{className:'text-[10px]',style:{color:'#C9A961',letterSpacing:'0.02em'}},'⚠ tara now says'),
+                React.createElement('span',{className:'text-[10px]',style:{color:'#D9B368',letterSpacing:'0.02em'}},'⚠ tara now says'),
                 React.createElement('span',{className:'text-[11px] tabular-nums',style:{color:_taraDirColor,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},_taraDirLabel),
               ),
               _diverges&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1 italic leading-snug'},
@@ -30682,19 +30682,19 @@ ${_d.responseBody||'(empty)'}`;
         })(),
         // EXITED PATH — replace ticket with realized summary
         _isExited&&_liveValid?[
-          React.createElement('div',{key:'ex-entry',className:'flex items-baseline justify-between py-2 border-t border-[#1F1F1F]'},
+          React.createElement('div',{key:'ex-entry',className:'flex items-baseline justify-between py-2 border-t border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'entry → exit'),
             React.createElement('span',{className:'text-base tabular-nums font-medium',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`${_liveEntryCents}¢ → ${_liveExitCents}¢`),
           ),
-          React.createElement('div',{key:'ex-count',className:'flex items-baseline justify-between py-2 border-t border-[#1F1F1F]'},
+          React.createElement('div',{key:'ex-count',className:'flex items-baseline justify-between py-2 border-t border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'contracts'),
             React.createElement('span',{className:'text-[13px] tabular-nums text-[#EDEDED]/85',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`${_liveContractsActual}`),
           ),
-          React.createElement('div',{key:'ex-stake',className:'flex items-baseline justify-between py-2 border-t border-[#1F1F1F]'},
+          React.createElement('div',{key:'ex-stake',className:'flex items-baseline justify-between py-2 border-t border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'stake'),
             React.createElement('span',{className:'text-[13px] tabular-nums text-[#EDEDED]/85',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`$${_liveStakeDollars.toFixed(2)}`),
           ),
-          React.createElement('div',{key:'ex-pnl',className:'flex items-baseline justify-between py-2 border-t border-[#1F1F1F]'},
+          React.createElement('div',{key:'ex-pnl',className:'flex items-baseline justify-between py-2 border-t border-[#1C1C22]'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'result'),
             React.createElement('span',{className:'text-base tabular-nums font-medium',style:{
               color:_liveRealCents===0?'#EDEDED':(_liveIsWin?'rgb(40,204,149)':'rgba(255,77,106,0.95)'),
@@ -30720,7 +30720,7 @@ ${_d.responseBody||'(empty)'}`;
             const _renderTip=(id,label,value,tip,valColor)=>{
               const _isOpen=tappedTip===id;
               return React.createElement('div',{key:id},
-                React.createElement('div',{className:'flex items-baseline justify-between py-2 border-t border-[#1F1F1F]'},
+                React.createElement('div',{className:'flex items-baseline justify-between py-2 border-t border-[#1C1C22]'},
                   React.createElement('button',{
                     type:'button',
                     onClick:()=>setTappedTip(_isOpen?null:id),
@@ -30767,17 +30767,17 @@ ${_d.responseBody||'(empty)'}`;
                 key:'manual-position-banner',
                 className:'py-2 px-2 mt-1 mb-1 rounded-lg',
                 style:{
-                  background:'rgba(201,169,97,0.10)',
-                  border:'1px solid rgba(201,169,97,0.35)',
+                  background:'rgba(217,179,104,0.10)',
+                  border:'1px solid rgba(217,179,104,0.35)',
                 },
               },
-                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#C9A961'}},'⚠ manual position — preview shown'),
+                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#D9B368'}},'⚠ manual position — preview shown'),
                 React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(237,237,237,0.85)'}},
                   `Tara sees you marked ENTERED ${userPosition} but doesn't know your real fill price or contract count from Kalshi. The numbers below show what Tara WOULD buy at the current market — not what you actually own.`,
                 ),
                 React.createElement('div',{className:'text-[10px] mt-1.5 leading-relaxed',style:{color:'rgba(237,237,237,0.65)'}},
                   '→ Scroll down and use the ',
-                  React.createElement('span',{style:{color:'#C9A961',fontWeight:600}},'Real Kalshi fill'),
+                  React.createElement('span',{style:{color:'#D9B368',fontWeight:600}},'Real Kalshi fill'),
                   ' input below the ENTERED button to log your actual fill price + contract count. Stop-loss / take-profit will then track against your real entry.',
                 ),
               ));
@@ -30978,12 +30978,12 @@ ${_d.responseBody||'(empty)'}`;
               ));
             }else if(_positionKnown===false&&_slDelta===0){
               // No-stop-loss warning in pre-fill state
-              _rows.push(React.createElement('div',{key:'nostop',className:'pt-2 mt-1 border-t border-[#1F1F1F]'},
+              _rows.push(React.createElement('div',{key:'nostop',className:'pt-2 mt-1 border-t border-[#1C1C22]'},
                 React.createElement('div',{className:'text-[10px] italic',style:{color:'rgba(237,237,237,0.40)'}},'no stop loss · position rides to settlement or target'),
                 React.createElement('button',{
                   onClick:()=>{if(typeof setShowTradingSettings==='function')setShowTradingSettings(true);},
                   className:'mt-1 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-lg',
-                  style:{color:'#C9A961',border:'1px solid rgba(201,169,97,0.30)',background:'rgba(201,169,97,0.05)'},
+                  style:{color:'#D9B368',border:'1px solid rgba(217,179,104,0.30)',background:'rgba(217,179,104,0.05)'},
                 },'⚙ enable stop loss'),
               ));
             }
@@ -31004,7 +31004,7 @@ ${_d.responseBody||'(empty)'}`;
                   '⚠ partial fill',
                   `${_filled} of ${_requested} contracts filled`,
                   `Your order requested ${_requested} contracts but Kalshi only filled ${_filled} at your limit price (${autoOrderState.limitCents}¢). The remaining ${_requested-_filled} contract${_requested-_filled===1?'':'s'} may still fill if price comes back, or expire when the order TTL runs out (90s default). Exit math (target/stop) only applies to the ${_filled} actually filled. If you wanted exposure to all ${_requested}, you can manually buy more on Kalshi at the current offer.`,
-                  'rgba(201,169,97,0.95)',
+                  'rgba(217,179,104,0.95)',
                 ));
               }
             }
@@ -31026,13 +31026,13 @@ ${_d.responseBody||'(empty)'}`;
                   'exits when',
                   _bits.join(' · '),
                   `Tara will automatically close this position as soon as ANY of these conditions hit (whichever comes first):\n\n• ${_bits.join('\n• ')}\n\nIf none of them trigger before window close, the position settles at the strike: YES pays $1 if BTC ended above strike, $0 if below.`,
-                  'rgba(201,169,97,0.85)',
+                  'rgba(217,179,104,0.85)',
                 ));
               }
             }
             // exiting status banner (when in the middle of exiting)
             if(_liveStatus==='exiting'&&autoOrderState?.exitReason){
-              _rows.push(React.createElement('div',{key:'exiting',className:'pt-2 mt-1 border-t border-[#1F1F1F] text-[10px]',style:{color:'rgba(212,162,76,0.95)'}},
+              _rows.push(React.createElement('div',{key:'exiting',className:'pt-2 mt-1 border-t border-[#1C1C22] text-[10px]',style:{color:'rgba(212,162,76,0.95)'}},
                 `exiting · ${autoOrderState.exitReason}`,
               ));
             }
@@ -31057,7 +31057,7 @@ ${_d.responseBody||'(empty)'}`;
               const _smartDir=scalperRead?.dir||taraCall?.direction||taraCall?.call||null;
               const _smartConv=scalperRead?.dir?Number(scalperRead.conviction)||0:Number(taraCall?.confidence)||0;
               const _smartSrc=scalperRead?.dir?'tape':'tara';
-              _rows.push(React.createElement('div',{key:'mon-toggle',className:'pt-2 mt-1 border-t border-[#1F1F1F]'},
+              _rows.push(React.createElement('div',{key:'mon-toggle',className:'pt-2 mt-1 border-t border-[#1C1C22]'},
                 React.createElement('button',{
                   type:'button',
                   onClick:()=>setShowMonitoring(v=>!v),
@@ -31073,7 +31073,7 @@ ${_d.responseBody||'(empty)'}`;
                     `SL @-${_sl}¢ → drop ${_slDrop==null?'—':_slDrop+'¢'} · ${_slFires?'FIRES':`needs ≥${_sl}¢drop`}`,
                   ),
                   _sl===0&&React.createElement('div',{style:{color:'rgba(237,237,237,0.40)'}},'SL OFF (set stop-loss delta in settings)'),
-                  _te>0&&React.createElement('div',{style:{color:_teFires?'#C9A961':'rgba(237,237,237,0.55)'}},
+                  _te>0&&React.createElement('div',{style:{color:_teFires?'#D9B368':'rgba(237,237,237,0.55)'}},
                     `time-exit @${_te}s → ${Math.round(_msLeft/1000)}s left · ${_teFires?'FIRES':'OK'}`,
                   ),
                   _smartOn&&React.createElement('div',{style:{color:'rgba(237,237,237,0.55)'}},
@@ -31108,7 +31108,7 @@ ${_d.responseBody||'(empty)'}`;
         const _btnColor=_taraDir==='UP'?'rgb(40,204,149)':'rgba(255,77,106,0.95)';
         const _tier=_snapTier||taraCall?.tier||'';
         const _isLateTier=_tier==='time-cap-commit'||_tier==='timer-commit'||_tier==='no-go-edge'||_tier==='no-go-data'||_tier==='single';
-        return React.createElement('div',{className:'pt-3 mt-3 border-t border-[#1F1F1F]'},
+        return React.createElement('div',{className:'pt-3 mt-3 border-t border-[#1C1C22]'},
           // V9.17.24: KILL SWITCH BANNER. Surfaces above the place-order button
           //   when engaged. V9.17.26 removed auto-engagement; kill switch is
           //   now ONLY engaged by the user (via this banner's Clear button or
@@ -31142,9 +31142,9 @@ ${_d.responseBody||'(empty)'}`;
             onClick:_onEnterEditMode,
             className:'w-full mb-2 py-1.5 rounded-lg text-[10px] font-medium',
             style:{
-              background:'rgba(201,169,97,0.05)',
-              border:'1px solid rgba(201,169,97,0.25)',
-              color:'rgba(201,169,97,0.85)',
+              background:'rgba(217,179,104,0.05)',
+              border:'1px solid rgba(217,179,104,0.25)',
+              color:'rgba(217,179,104,0.85)',
               letterSpacing:'0.02em',
             },
           },'✏ edit values for this window'),
@@ -31152,13 +31152,13 @@ ${_d.responseBody||'(empty)'}`;
             key:'edit-panel',
             className:'mb-2 p-3 rounded-lg',
             style:{
-              background:'rgba(201,169,97,0.04)',
-              border:'1px solid rgba(201,169,97,0.30)',
+              background:'rgba(217,179,104,0.04)',
+              border:'1px solid rgba(217,179,104,0.30)',
             },
           },[
             React.createElement('div',{key:'h',className:'flex items-baseline justify-between mb-2'},
-              React.createElement('span',{className:'text-[10px] font-bold uppercase tracking-wider',style:{color:'#C9A961'}},'edit values · this window only'),
-              React.createElement('span',{className:'text-[9px] italic',style:{color:'rgba(201,169,97,0.55)'}},'resets when window rolls'),
+              React.createElement('span',{className:'text-[10px] font-bold uppercase tracking-wider',style:{color:'#D9B368'}},'edit values · this window only'),
+              React.createElement('span',{className:'text-[9px] italic',style:{color:'rgba(217,179,104,0.55)'}},'resets when window rolls'),
             ),
             // Stake row
             React.createElement('div',{key:'r1',className:'flex items-center justify-between py-1.5 gap-2'},
@@ -31167,7 +31167,7 @@ ${_d.responseBody||'(empty)'}`;
                 type:'number',min:'0.5',max:'500',step:'0.5',value:editStake,
                 onChange:(e)=>setEditStake(e.target.value),
                 className:'flex-1 max-w-[120px] px-2 py-1 rounded-lg text-[12px] tabular-nums text-right',
-                style:{background:'#0A0A0A',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                style:{background:'#08080B',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 placeholder:'e.g. 2',
               }),
             ),
@@ -31181,7 +31181,7 @@ ${_d.responseBody||'(empty)'}`;
                 type:'number',min:'1',max:'99',step:'1',value:editEntry,
                 onChange:(e)=>setEditEntry(e.target.value),
                 className:'flex-1 max-w-[120px] px-2 py-1 rounded-lg text-[12px] tabular-nums text-right',
-                style:{background:'#0A0A0A',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                style:{background:'#08080B',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 placeholder:_entryCents!=null?String(_entryCents):'auto',
               }),
             ),
@@ -31192,7 +31192,7 @@ ${_d.responseBody||'(empty)'}`;
                 type:'number',min:'1',max:'99',step:'1',value:editCashOut,
                 onChange:(e)=>setEditCashOut(e.target.value),
                 className:'flex-1 max-w-[120px] px-2 py-1 rounded-lg text-[12px] tabular-nums text-right',
-                style:{background:'#0A0A0A',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                style:{background:'#08080B',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 placeholder:'e.g. 85',
               }),
             ),
@@ -31206,7 +31206,7 @@ ${_d.responseBody||'(empty)'}`;
                 type:'number',min:'0',max:'90',step:'1',value:editCutDelta,
                 onChange:(e)=>setEditCutDelta(e.target.value),
                 className:'flex-1 max-w-[120px] px-2 py-1 rounded-lg text-[12px] tabular-nums text-right',
-                style:{background:'#0A0A0A',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                style:{background:'#08080B',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
                 placeholder:'e.g. 30',
               }),
             ),
@@ -31257,7 +31257,7 @@ ${_d.responseBody||'(empty)'}`;
             if(_age>5000)return null;
             const _palette={
               emerald:{bg:'rgba(40,204,149,0.10)',br:'rgba(40,204,149,0.40)',co:'rgb(40,204,149)'},
-              amber:{bg:'rgba(201,169,97,0.10)',br:'rgba(201,169,97,0.40)',co:'#C9A961'},
+              amber:{bg:'rgba(217,179,104,0.10)',br:'rgba(217,179,104,0.40)',co:'#D9B368'},
               rose:{bg:'rgba(255,77,106,0.10)',br:'rgba(255,77,106,0.40)',co:'rgba(255,77,106,0.95)'},
             }[manualOrderFeedback.color||'amber'];
             return React.createElement('div',{
@@ -31281,7 +31281,7 @@ ${_d.responseBody||'(empty)'}`;
   if(_state==='BLOCKED'){
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid #1F1F1F'},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #1C1C22'},
     },
       _renderPredictorHeader(),
       _topEl,
@@ -31300,7 +31300,7 @@ ${_d.responseBody||'(empty)'}`;
   if(_state==='DISABLED'){
     return React.createElement('div',{
       className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid #1F1F1F'},
+      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #1C1C22'},
     },
       _renderPredictorHeader(),
       _topEl,
@@ -31309,7 +31309,7 @@ ${_d.responseBody||'(empty)'}`;
         React.createElement('button',{
           onClick:()=>setShowTradingSettings(true),
           className:'text-[10px] underline underline-offset-2',
-          style:{color:'#C9A961',letterSpacing:'0.02em',textTransform:'none'},
+          style:{color:'#D9B368',letterSpacing:'0.02em',textTransform:'none'},
         },'enable scalper'),
       ),
       React.createElement('p',{className:'text-[12px] text-[#EDEDED]/60 leading-relaxed'},
@@ -31321,7 +31321,7 @@ ${_d.responseBody||'(empty)'}`;
   // ── STATE: IDLE ────────────────────────────────────────────────────────
   return React.createElement('div',{
     className:'p-4 rounded-lg',
-    style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid #1F1F1F'},
+    style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #1C1C22'},
   },
     _renderPredictorHeader(),
     _topEl,
@@ -31354,7 +31354,7 @@ const KalshiBalancePill=React.memo(function KalshiBalancePill({kalshiBalance}){
     className:'inline-flex items-baseline gap-2 text-[10px] uppercase tracking-[0.10em] px-3 py-1.5 rounded-lg',
     style:{
       background:'rgba(0,0,0,0.30)',
-      border:'1px solid #1F1F1F',
+      border:'1px solid #1C1C22',
       boxShadow:'0 3px 10px rgba(0,0,0,0.3)',
       fontFamily:'IBM Plex Mono,ui-monospace,monospace',
       letterSpacing:'0.02em',
@@ -31523,7 +31523,7 @@ function TaraApp(){
         ageSec:Math.floor((_now-e.ts)/1000),
         yes:e.yes,
       }));
-      console.group('%c━━━ Kalshi 30s history ring ━━━','color:#C9A961;font-weight:bold;font-size:13px');
+      console.group('%c━━━ Kalshi 30s history ring ━━━','color:#D9B368;font-weight:bold;font-size:13px');
       console.info(`Entries: ${_ring.length} (capped at 60, pruned >90s)`);
       if(_ring.length>0){
         const _span=Math.floor((_ring[_ring.length-1].ts-_ring[0].ts)/1000);
@@ -31850,7 +31850,7 @@ function TaraApp(){
       // V10.2.22 — read mode from localStorage rather than React state. Closure
       //   captured stale value at useEffect mount; localStorage is always fresh.
       const _persistedMode=(()=>{try{return localStorage.getItem('taraKalshiAgreeMode')||'shadow';}catch(_){return 'shadow';}})();
-      console.group('%c━━━ Kalshi Agreement Analyzer ━━━','color:#C9A961;font-weight:bold');
+      console.group('%c━━━ Kalshi Agreement Analyzer ━━━','color:#D9B368;font-weight:bold');
       console.info('Persisted mode: '+_persistedMode);
       console.info('In-app React mode: '+kalshiAgreeMode+(_persistedMode!==kalshiAgreeMode?' (mismatch — refresh required, or run __taraKalshiAgree("apply",{mode:"'+_persistedMode+'"}))':''));
       console.info('Resolved trades with Kalshi data: '+resolved.length);
@@ -31901,7 +31901,7 @@ function TaraApp(){
           if(_wantMode){
             localStorage.setItem('taraSessionTierMode',_wantMode);
             console.info(`%c✓ Mode set to '${_wantMode}'`,'color:rgb(40,204,149);font-weight:bold;font-size:13px');
-            console.info('%cRefresh the page (Cmd+R) for changes to take effect.','color:#C9A961;font-weight:bold');
+            console.info('%cRefresh the page (Cmd+R) for changes to take effect.','color:#D9B368;font-weight:bold');
           }else{
             const _curMode=localStorage.getItem('taraSessionTierMode')||'off';
             console.info(`%cMode is currently '${_curMode}'.`,'color:rgba(237,237,237,0.65)');
@@ -31943,7 +31943,7 @@ function TaraApp(){
               multipliers[s][t]=Math.round(Math.max(0.7,Math.min(1.3,rawMult))*100)/100;
             });
           });
-          console.group('%c━━━ Derived session-tier multipliers ━━━','color:#C9A961;font-weight:bold');
+          console.group('%c━━━ Derived session-tier multipliers ━━━','color:#D9B368;font-weight:bold');
           console.info('Source: '+entries.length+' resolved trades');
           console.info('Multipliers (clamped to [0.7, 1.3], cells with n<10 → 1.0):');
           console.table(multipliers);
@@ -31956,7 +31956,7 @@ function TaraApp(){
       }
       // Default: show current state
       const cur=_getSessionTierMultipliers();
-      console.group('%c━━━ Session-tier optimizer state ━━━','color:#C9A961;font-weight:bold');
+      console.group('%c━━━ Session-tier optimizer state ━━━','color:#D9B368;font-weight:bold');
       console.info('mode:',sessionTierMode);
       console.info('multipliers:',cur);
       console.info('Commands:');
@@ -32929,7 +32929,7 @@ function TaraApp(){
         firedAt:new Date(v.ts).toLocaleTimeString(),
         dir:v.dir||'—',
       }));
-      console.group('%c━━━ Shared 1-Trade-Per-Window Slots ━━━','color:#C9A961;font-weight:bold');
+      console.group('%c━━━ Shared 1-Trade-Per-Window Slots ━━━','color:#D9B368;font-weight:bold');
       if(_entries.length===0)console.info('No windows claimed in this session.');
       else console.table(_entries);
       console.groupEnd();
@@ -35497,7 +35497,7 @@ function TaraApp(){
       const _flipShare=_soCosted>0?_soFlip/_soCosted:0;
       let _verdict,_col,_bg;
       if(_soCosted<4){_verdict='thin';_col='rgba(237,237,237,0.55)';_bg='rgba(237,237,237,0.06)';}
-      else if(_flipShare>0.40){_verdict='check gates';_col='rgba(201,169,97,0.95)';_bg='rgba(201,169,97,0.12)';}
+      else if(_flipShare>0.40){_verdict='check gates';_col='rgba(217,179,104,0.95)';_bg='rgba(217,179,104,0.12)';}
       else if(_flipShare<=0.20){_verdict='dead tape';_col='rgba(237,237,237,0.60)';_bg='rgba(237,237,237,0.06)';}
       else{_verdict='selective';_col='rgb(40,204,149)';_bg='rgba(40,204,149,0.10)';}
       _sitoutMix={verdict:_verdict,detail:_detail,color:_col,bg:_bg,priced:_soPriced,fade:_soFade,flip:_soFlip,noCost:_soNoCost,flipShare:_flipShare};
@@ -38038,7 +38038,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         console.info('[V10.2.28] Kalshi WebSocket DISABLED — back to 30s polling only');
         return{status:'off'};
       }
-      console.group('%c━━━ Kalshi WebSocket State ━━━','color:#C9A961;font-weight:bold');
+      console.group('%c━━━ Kalshi WebSocket State ━━━','color:#D9B368;font-weight:bold');
       console.info('Enabled: '+(kalshiWsEnabled?'YES':'NO'));
       console.info('Status: '+(kalshiWsState?.status||'unknown'));
       console.info('Message count: '+(kalshiWsState?.messageCount||0));
@@ -39030,7 +39030,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             'lock-reversed-'+(d.windowId||'w'),
             `Call reversed: ${_prevDir} → ${_newDir}`,
             `Another device committed ${_newDir} earlier. Discord alerted ${_prevDir} and will not re-alert this window.`,
-            {color:'#D4A24C',durationMs:12000,cooldown:0}
+            {color:'#D9B368',durationMs:12000,cooldown:0}
           );}catch(_t){}
         }
         adopted.push(_wasOverride?`tara ${d.taraSnapshot.call} (override · cloud authoritative)`:`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
@@ -39116,7 +39116,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               'lock-reversed-'+(d.windowId||'w'),
               `Call reversed: ${_pDir} → ${_nDir}`,
               `Another device committed ${_nDir} earlier. Discord alerted ${_pDir} and will not re-alert this window.`,
-              {color:'#D4A24C',durationMs:12000,cooldown:0}
+              {color:'#D9B368',durationMs:12000,cooldown:0}
             );}catch(_t){}
           }
           adopted=true;
@@ -42567,7 +42567,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           return null;
         }
         const _res=await kalshiFetchPositions({apiKeyId:kalshiCreds.apiKeyId,privateKeyPem:kalshiCreds.privateKeyPem});
-        console.group('%c━━━ Position reconciliation ━━━','color:#C9A961;font-weight:bold;font-size:13px');
+        console.group('%c━━━ Position reconciliation ━━━','color:#D9B368;font-weight:bold;font-size:13px');
         if(!_res.ok){
           console.error('Kalshi fetch failed:',_res.reason);
           console.groupEnd();
@@ -46712,7 +46712,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _isUp?'price-pump':'price-dump',
         `${currentAsset||'BTC'} ${_isUp?'pumping ▲':'dumping ▼'}`,
         `${_bps>0?'+':''}${_bps.toFixed(0)} bps in 30s · $${currentPrice.toFixed(0)}`,
-        {color:_isUp?'#7fa189':'#b26558',icon:_isUp?'⚡':'⚡',durationMs:6000,cooldown:60000}
+        {color:_isUp?'#6FA98C':'#C06A72',icon:_isUp?'⚡':'⚡',durationMs:6000,cooldown:60000}
       );
     }
   },[currentPrice,currentAsset,pushToast]);
@@ -46727,10 +46727,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(_cur===_prev)return;
     if(_cur==='FAST'&&(_prev==='NORMAL'||_prev==='SLOW')){
       pushToast('vel-fast',`${currentAsset||'BTC'} velocity → FAST`,'Tape pace picking up · windows may shorten',
-        {color:'#d4a24c',icon:'〰',durationMs:5500,cooldown:90000});
+        {color:'#D9B368',icon:'〰',durationMs:5500,cooldown:90000});
     }else if(_cur==='EXTREME'){
       pushToast('vel-extreme',`${currentAsset||'BTC'} velocity → EXTREME`,'News-spike pace · use caution',
-        {color:'#b26558',icon:'⚡⚡',durationMs:7000,cooldown:90000});
+        {color:'#C06A72',icon:'⚡⚡',durationMs:7000,cooldown:90000});
     }
   },[analysis?.velocityRegime,currentAsset,pushToast]);
 
@@ -47506,7 +47506,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       `hourly-lock-${lk.ticker}-${lk.side}`,
       `Hourly lock: ${lk.side} @ ${Number(lk.strike).toLocaleString('en-US')}`,
       `${Math.round(Number(lk.cost)||0)}c entry${lk.minsAtLock!=null?` · ${Math.round(Number(lk.minsAtLock))}m left`:''}`,
-      {color:'#D4A24C',durationMs:6000}
+      {color:'#D9B368',durationMs:6000}
     );}catch(_e){}
   },[]);
 
@@ -47957,7 +47957,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     clockSeconds:timeState?.secsRemaining,
   });
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#0A0A0A] flex items-center justify-center text-[#EDEDED]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#08080B] flex items-center justify-center text-[#EDEDED]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -47965,7 +47965,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const advisor=analysis?.advisor||{label:'CONNECTING...',reason:'Fetching market data...',color:'zinc',animate:false,hasAction:false};
 
   return(
-    <div data-tara-theme={simpleMode?'simple':'advanced'} className={'min-h-screen bg-[#0A0A0A] text-[#EDEDED] font-sans flex flex-col selection:bg-[#EDEDED]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
+    <div data-tara-theme={simpleMode?'simple':'advanced'} className={'min-h-screen bg-[#08080B] text-[#EDEDED] font-sans flex flex-col selection:bg-[#EDEDED]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       {/* V9.8.18: Toast notifications — pump/dump + velocity-flip alerts. Fixed
           top-right, auto-close after a few seconds, dismiss on outside-click or
           tap. Stack capped at 3 concurrent. */}
@@ -48092,7 +48092,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: Sync progress overlay */}
       {syncState&&syncState.active&&(
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-          <div className="bg-[#171717] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
+          <div className="bg-[#101014] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
             <div className="text-xs uppercase tracking-widest text-indigo-300 font-bold mb-3">
               {syncState.complete?'✓ Sync Complete':syncState.error?'⚠ Sync Failed':'🔄 Syncing Tara'}
             </div>
@@ -48100,7 +48100,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {syncState.error?syncState.error:syncState.stage}
             </div>
             {!syncState.error&&(
-              <div className="w-full bg-[#0A0A0A] rounded-full h-2 overflow-hidden">
+              <div className="w-full bg-[#08080B] rounded-full h-2 overflow-hidden">
                 <div className={'h-full transition-all duration-300 '+(syncState.complete?'bg-emerald-500':'bg-indigo-500')} style={{width:syncState.progress+'%'}}/>
               </div>
             )}
@@ -48114,7 +48114,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: SYNC PROGRESS OVERLAY ── shows during baseline sync */}
       {syncState.active&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={'bg-[#171717] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
+          <div className={'bg-[#101014] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
             <div className="flex items-center gap-3 mb-4">
               <span className="text-2xl">{syncState.error?'⚠️':syncState.complete?'✓':'⟳'}</span>
               <div>
@@ -48131,7 +48131,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             </div>
 
             {/* Progress bar */}
-            <div className="h-2 bg-[#0A0A0A] rounded-full overflow-hidden mb-2">
+            <div className="h-2 bg-[#08080B] rounded-full overflow-hidden mb-2">
               <div
                 className={'h-full transition-all duration-300 '+(syncState.error?'bg-rose-500':syncState.complete?'bg-emerald-500':'bg-indigo-500')}
                 style={{width:`${syncState.progress}%`}}
@@ -48158,14 +48158,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
       {/* V134: Learning toast removed — was crashing on minified prod build, will revisit */}
       {/* ── STICKY HEADER — V10.7.44b CLEAN ── */}
-      <header className={'sticky top-0 z-40 bg-[#0A0A0A] backdrop-blur-md border-b border-[#1F1F1F] px-2 sm:px-4 py-2 shrink-0'}>
+      <header className={'sticky top-0 z-40 bg-[#08080B] backdrop-blur-md border-b border-[#1C1C22] px-2 sm:px-4 py-2 shrink-0'}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-1.5 sm:gap-2">
 
           {/* LEFT: Logo + version + balance */}
           <div className="flex items-center gap-1.5 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
-            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-lg border'} style={{background:'rgba(201,169,97,0.10)',borderColor:'rgba(201,169,97,0.30)',color:'#C9A961'}}>
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#C9A961'}}></span>
+            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-lg border'} style={{background:'rgba(217,179,104,0.10)',borderColor:'rgba(217,179,104,0.30)',color:'#D9B368'}}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#D9B368'}}></span>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
             {/* V13.1: telemetry-health badge - confirms rich-entry stamping after deploy */}
@@ -48220,7 +48220,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           <div className="flex items-center gap-1.5 shrink-0">
 
             {/* BTC */}
-            <div className={'flex bg-[#171717] border border-[#2A2A2A] rounded-lg p-0.5 shrink-0'}>
+            <div className={'flex bg-[#101014] border border-[#2A2A34] rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
                 const _active=currentAsset===k;
@@ -48245,7 +48245,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   as one toggle — the two things Tara actually tracks. BTC is a
                   mode (currentAsset), Sports is an overlay, but from the user's
                   side both are just "which board am I looking at". */}
-              <div className="w-px my-1 bg-[#2A2A2A] mx-0.5"/>
+              <div className="w-px my-1 bg-[#2A2A34] mx-0.5"/>
               <button onClick={()=>setShowSports(v=>!v)}
                 className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showSports?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                 style={showSports?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
@@ -48259,7 +48259,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {/* window fixed at 15m, 5m removed v13.3.0 */}
 
             {/* Sound */}
-            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#1F1F1F] text-[#EDEDED]/40'}`} title={soundEnabled?'Sound on':'Sound off'}>
+            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#1C1C22] text-[#EDEDED]/40'}`} title={soundEnabled?'Sound on':'Sound off'}>
               {soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}
             </button>
 
@@ -48267,14 +48267,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className="relative">
               <button
                 onClick={()=>setShowHeaderOverflow(v=>!v)}
-                className={`p-1.5 rounded-lg border transition-colors text-sm leading-none font-bold ${showHeaderOverflow?'bg-[#EDEDED]/10 border-[#2A2A2A] text-[#EDEDED]/80':'border-[#1F1F1F] text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}
+                className={`p-1.5 rounded-lg border transition-colors text-sm leading-none font-bold ${showHeaderOverflow?'bg-[#EDEDED]/10 border-[#2A2A34] text-[#EDEDED]/80':'border-[#1C1C22] text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}
                 title="More options"
               >···</button>
 
               {/* Overflow panel */}
               {showHeaderOverflow&&(
                 <div
-                  className="absolute right-0 top-full mt-1.5 z-50 rounded-xl border border-[#2A2A2A] shadow-2xl overflow-hidden"
+                  className="absolute right-0 top-full mt-1.5 z-50 rounded-xl border border-[#2A2A34] shadow-2xl overflow-hidden"
                   style={{background:'rgba(18,20,19,0.98)',backdropFilter:'blur(16px)',minWidth:'260px'}}
                   onMouseLeave={()=>setShowHeaderOverflow(false)}
                 >
@@ -48303,7 +48303,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             onPointerUp={()=>{if(_pr.current){clearTimeout(_pr.current);_pr.current=null;setTradingSettings(prev=>({...prev,tier1OnlyMode:!prev?.tier1OnlyMode}));}}}
                             onPointerLeave={()=>{if(_pr.current){clearTimeout(_pr.current);_pr.current=null;}}}
                             className="px-2 py-1 rounded-lg text-[10px] uppercase font-bold tracking-wider transition-colors select-none"
-                            style={_on?{color:'rgb(40,204,149)',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.35)'}:{color:'rgba(237,237,237,0.55)',background:'#141414',border:'1px solid rgba(237,237,237,0.15)'}}
+                            style={_on?{color:'rgb(40,204,149)',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.35)'}:{color:'rgba(237,237,237,0.55)',background:'#0E0E12',border:'1px solid rgba(237,237,237,0.15)'}}
                             title={_on?'Tier-1 Only ON — tap to allow all. Long-press for settings.':'All tiers. Tap to enable Tier-1 Only. Long-press for settings.'}
                           >{_on?'★ TIER-1':'TIERS · ALL'}</button>
                         );
@@ -48311,7 +48311,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       {/* Auto-exec */}
                       <button onClick={()=>setShowTradingSettings(true)}
                         className="px-2 py-1 rounded-lg text-[10px] uppercase font-bold tracking-wider transition-colors"
-                        style={killSwitchEngaged?{color:'#FF4D6A',background:'rgba(255,77,106,0.15)',border:'1px solid rgba(255,77,106,0.40)'}:autoExecSettings.dryRun?{color:'#D4A24C',background:'rgba(212,162,76,0.10)',border:'1px solid rgba(212,162,76,0.30)'}:autoExecSettings.enabled?{color:'#28CC95',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.30)'}:{color:'rgba(237,237,237,0.35)',background:'#141414',border:'1px solid #1F1F1F'}}
+                        style={killSwitchEngaged?{color:'#FF4D6A',background:'rgba(255,77,106,0.15)',border:'1px solid rgba(255,77,106,0.40)'}:autoExecSettings.dryRun?{color:'#D9B368',background:'rgba(212,162,76,0.10)',border:'1px solid rgba(212,162,76,0.30)'}:autoExecSettings.enabled?{color:'#28CC95',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.30)'}:{color:'rgba(237,237,237,0.35)',background:'#0E0E12',border:'1px solid #1C1C22'}}
                         title="Auto-exec settings"
                       >{killSwitchEngaged?'⛔ KILLED':autoExecSettings.dryRun?'DRY · AUTO':autoExecSettings.enabled?'⚡ AUTO':'AUTO · OFF'}</button>
                       {/* shadow feed */}
@@ -48326,7 +48326,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         return(
                           <button onClick={()=>setShowDualFeed(v=>!v)}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors select-none"
-                            style={showDualFeed?{background:'rgba(237,237,237,0.08)',border:'1px solid rgba(237,237,237,0.25)',color:'rgba(237,237,237,0.80)'}:{background:'#141414',border:'1px solid rgba(237,237,237,0.12)',color:'rgba(237,237,237,0.40)'}}
+                            style={showDualFeed?{background:'rgba(237,237,237,0.08)',border:'1px solid rgba(237,237,237,0.25)',color:'rgba(237,237,237,0.80)'}:{background:'#0E0E12',border:'1px solid rgba(237,237,237,0.12)',color:'rgba(237,237,237,0.40)'}}
                           >
                             <span style={{color:_dfcfg.color||'rgba(237,237,237,0.55)'}}>{_dfcfg.icon||'?'}</span>
                             <span>{_dfa}</span>
@@ -48346,7 +48346,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       <SyncStatusPill onClick={_onSyncStatusClick}/>
                       <TabPresencePill peerTabs={peerTabs}/>
                       {/* Time format */}
-                      <div className="flex flex-col items-center cursor-pointer px-1.5 py-0.5 rounded-lg border border-[#1F1F1F] hover:border-indigo-500/30 transition-colors" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')}>
+                      <div className="flex flex-col items-center cursor-pointer px-1.5 py-0.5 rounded-lg border border-[#1C1C22] hover:border-indigo-500/30 transition-colors" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')}>
                         <span className="text-[10px] text-[#EDEDED]/55 uppercase tracking-wider font-bold">{timeFormat.toUpperCase()}</span>
                       </div>
                       {/* V13.4.38: advanced-view toggle removed -- simple view only */}
@@ -48373,8 +48373,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       <button onClick={()=>{setShowGuide(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors text-xs" title="How Tara Works">? Help</button>
                       <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>{setShowWhaleLog(!showWhaleLog);setShowHeaderOverflow(false);}} cls="flex"/>
                       <TheoryLabBtn active={showTheoryLab} onClick={()=>{setShowTheoryLab(!showTheoryLab);setShowHeaderOverflow(false);}} cls="flex"/>
-                      <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#1F1F1F] text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
-                      <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#1F1F1F] text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
+                      <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#1C1C22] text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
+                      <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#1C1C22] text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
                       <button onClick={()=>{setAnalyticsPageOpen(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors text-xs" title="Analytics Page">📊 Analytics</button>
                       {/* V10.7.45: Window lifecycle audit export — diagnostic for missing-log bugs */}
                       <button
@@ -48478,7 +48478,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
       {/* V2.1: Top stat strip — sticky 3-stat indicator. Always visible: Posterior · Quality · FGT.
               Provides a constant pulse-check without scanning multiple panels. */}
-      <div className="sticky top-[44px] sm:top-[52px] z-30 bg-[#0A0A0A] backdrop-blur-md border-b border-[#1F1F1F] px-2 sm:px-4 py-1.5 shrink-0">
+      <div className="sticky top-[44px] sm:top-[52px] z-30 bg-[#08080B] backdrop-blur-md border-b border-[#1C1C22] px-2 sm:px-4 py-1.5 shrink-0">
         <div className="max-w-[1600px] mx-auto flex items-center gap-3 sm:gap-5 text-[10px] sm:text-[11px]">
           {(()=>{
             const post=Number(analysis?.confidence)||50;
@@ -48547,25 +48547,37 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
         /* ── DESIGN TOKENS ───────────────────────────────────────── */
+        /* V13.4.189 OBSIDIAN: these were a second, independent palette that
+           could drift from the root one. They now DERIVE from the tokens in
+           index.html, so there is exactly one place a colour is defined. */
         [data-tara-theme="simple"] {
-          --tara-bg-page: #0c0c0e;
-          --tara-bg-card: #15151a;
-          --tara-bg-card-soft: #1a1a20;
-          --tara-bg-card-elevated: #1e1e25;
-          --tara-bg-header: rgba(12,12,14,0.94);
-          --tara-border: rgba(237,237,237,0.04);
-          --tara-border-strong: rgba(237,237,237,0.08);
-          --tara-text-primary: #EDEDED;
-          --tara-text-secondary: rgba(237,237,237,0.65);
-          --tara-text-tertiary: rgba(237,237,237,0.40);
-          --tara-text-quaternary: rgba(237,237,237,0.22);
-          --tara-gold: #C9A961;
-          --tara-gold-soft: rgba(201,169,97,0.10);
-          --tara-gold-edge: rgba(201,169,97,0.28);
-          --tara-green: rgb(40,204,149);
-          --tara-pink: rgb(255,77,106);
+          --tara-bg-page: var(--bg-0);
+          --tara-bg-card: var(--bg-1);
+          --tara-bg-card-soft: var(--bg-2);
+          --tara-bg-card-elevated: var(--bg-3);
+          --tara-bg-header: rgba(8,8,11,0.86);
+          --tara-border: var(--line-1);
+          --tara-border-strong: var(--line-2);
+          --tara-text-primary: var(--ink-1);
+          --tara-text-secondary: var(--ink-2);
+          --tara-text-tertiary: var(--ink-3);
+          --tara-text-quaternary: var(--ink-4);
+          --tara-gold: var(--accent);
+          --tara-gold-soft: var(--accent-glow);
+          --tara-gold-edge: var(--accent-border);
+          --tara-green: var(--up);
+          --tara-pink: var(--down);
           font-feature-settings: 'tnum' 1, 'ss01' 1, 'cv11' 1;
         }
+        /* Frosted header instead of an opaque bar -- content passing underneath
+           is what makes the app read as layered rather than as flat panels. */
+        [data-tara-theme="simple"] header.sticky {
+          backdrop-filter: saturate(160%) blur(14px);
+          -webkit-backdrop-filter: saturate(160%) blur(14px);
+        }
+        /* (Card elevation is applied at the .shadow-* rule further down, which
+           is where cards actually carry their class -- putting it here also hit
+           buttons and pills, and lost to the !important flattening below.) */
 
         /* ── PAGE BG & BASE ─────────────────────────────────────── */
         [data-tara-theme="simple"].min-h-screen,
@@ -48602,28 +48614,40 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
         /* ── KILL RAINBOW GRADIENT STRIP ────────────────────── */
         [data-tara-theme="simple"] .bg-gradient-to-r.from-emerald-500.via-indigo-500.to-purple-500 {
-          background: linear-gradient(90deg, rgba(201,169,97,0.50) 0%, rgba(201,169,97,0.12) 30%, rgba(201,169,97,0) 70%) !important;
+          background: linear-gradient(90deg, rgba(217,179,104,0.50) 0%, rgba(217,179,104,0.12) 30%, rgba(217,179,104,0) 70%) !important;
           height: 1px !important;
           opacity: 0.70 !important;
         }
 
         /* ── CARD REFINEMENT — NO BORDERS, TONE-SHIFT ───────── */
-        [data-tara-theme="simple"] .bg-\\[\\#171717\\] {
+        [data-tara-theme="simple"] .bg-\\[\\#101014\\] {
           background: var(--tara-bg-card) !important;
         }
-        [data-tara-theme="simple"] .bg-\\[\\#0A0A0A\\]\\/95 { background: var(--tara-bg-header) !important; }
-        [data-tara-theme="simple"] .bg-\\[\\#0A0A0A\\]\\/95 { background: var(--tara-bg-header) !important; }
+        [data-tara-theme="simple"] .bg-\\[\\#08080B\\]\\/95 { background: var(--tara-bg-header) !important; }
+        [data-tara-theme="simple"] .bg-\\[\\#08080B\\]\\/95 { background: var(--tara-bg-header) !important; }
         /* Card borders go from outline to barely-there divider */
         [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/10,
         [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/8,
         [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/5 {
           border-color: var(--tara-border) !important;
         }
-        /* Remove heavy shadows */
+        /* V13.4.189 OBSIDIAN: was box-shadow:none, which flattened every card
+           to a tone-shift. The intent (nothing heavy) is kept, but cards now get
+           a lit top edge + a soft ambient drop, which is what actually conveys
+           depth on a near-black page. */
         [data-tara-theme="simple"] .shadow-md,
         [data-tara-theme="simple"] .shadow-lg,
         [data-tara-theme="simple"] .shadow-sm {
-          box-shadow: none !important;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 2px 10px rgba(0,0,0,0.42) !important;
+        }
+        /* Cards lift slightly toward the pointer. Desktop only -- no hover state
+           on touch, and it must never shift a tap target mid-trade. */
+        @media (hover:hover) and (pointer:fine) {
+          [data-tara-theme="simple"] .shadow-md:hover,
+          [data-tara-theme="simple"] .shadow-lg:hover {
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 20px rgba(0,0,0,0.5) !important;
+            transition: box-shadow var(--dur-2) var(--ease-out);
+          }
         }
         /* Calmer rounded-lg corners — Linear/Vercel style */
         [data-tara-theme="simple"] .rounded-xl { border-radius: 10px !important; }
@@ -48634,14 +48658,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            pinpoint just one card via CSS selectors, we apply a faint ambient
            glow to any card containing the Tara's Call label via :has().
            Browsers without :has support get no glow — graceful degradation. */
-        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(span:where(:contains("Tara's Call"))),
-        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(div:where(:contains("Tara's Call"))) {
-          background: radial-gradient(120% 80% at 50% 0%, rgba(201,169,97,0.04) 0%, var(--tara-bg-card) 60%) !important;
+        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(span:where(:contains("Tara's Call"))),
+        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(div:where(:contains("Tara's Call"))) {
+          background: radial-gradient(120% 80% at 50% 0%, rgba(217,179,104,0.04) 0%, var(--tara-bg-card) 60%) !important;
           position: relative;
         }
         /* Subtle hairline accent at top of Tara's Call card */
-        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(span:where(:contains("Tara's Call"))):before,
-        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(div:where(:contains("Tara's Call"))):before {
+        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(span:where(:contains("Tara's Call"))):before,
+        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(div:where(:contains("Tara's Call"))):before {
           content: '';
           position: absolute;
           top: 0; left: 0; right: 0; height: 1px;
@@ -48654,19 +48678,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] * {
           font-variant-numeric: tabular-nums;
         }
-        /* font-serif headlines become Plex Mono medium */
+        /* V13.4.189: font-serif headlines are the DISPLAY face now. Previously
+           this forced Plex Mono, which is why every heading in the app read as
+           monospace -- the single biggest reason it looked utilitarian rather
+           than designed. */
         [data-tara-theme="simple"] .font-serif {
-          font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace !important;
-          font-weight: 500 !important;
-          letter-spacing: -0.005em !important;
+          font-family: 'Space Grotesk', 'Instrument Sans', ui-sans-serif, sans-serif !important;
+          font-weight: 600 !important;
+          letter-spacing: -0.022em !important;
         }
         /* The big confidence percentage is the hero — make it sing */
+        /* Hero numerals stay monospace on purpose -- tabular digits must not
+           jitter while a price ticks -- but take the new tracking + weight. */
         [data-tara-theme="simple"] .text-4xl,
         [data-tara-theme="simple"] .text-5xl,
         [data-tara-theme="simple"] .text-6xl {
           font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace !important;
-          font-weight: 300 !important;
-          letter-spacing: -0.02em !important;
+          font-weight: 400 !important;
+          letter-spacing: -0.035em !important;
           font-variant-numeric: tabular-nums;
         }
         /* Soften all-caps labels — sentence case-ish */
@@ -48692,8 +48721,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .text-rose-300 { color: rgba(255,77,106,0.78) !important; }
         [data-tara-theme="simple"] .text-emerald-400 { color: rgba(40,204,149,0.92) !important; }
         [data-tara-theme="simple"] .text-emerald-300 { color: rgba(40,204,149,0.95) !important; }
-        [data-tara-theme="simple"] .text-amber-300 { color: rgba(201,169,97,0.90) !important; }
-        [data-tara-theme="simple"] .text-amber-400 { color: rgba(201,169,97,0.88) !important; }
+        [data-tara-theme="simple"] .text-amber-300 { color: rgba(217,179,104,0.90) !important; }
+        [data-tara-theme="simple"] .text-amber-400 { color: rgba(217,179,104,0.88) !important; }
         [data-tara-theme="simple"] .text-indigo-300 { color: rgba(176,176,176,0.85) !important; }
         [data-tara-theme="simple"] .text-indigo-400 { color: rgba(129,140,248,0.85) !important; }
 
@@ -48703,7 +48732,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .bg-emerald-500\\/5,
         [data-tara-theme="simple"] .bg-emerald-500\\/10 { background: rgba(40,204,149,0.05) !important; }
         [data-tara-theme="simple"] .bg-amber-500\\/5,
-        [data-tara-theme="simple"] .bg-amber-500\\/10 { background: rgba(201,169,97,0.05) !important; }
+        [data-tara-theme="simple"] .bg-amber-500\\/10 { background: rgba(217,179,104,0.05) !important; }
         [data-tara-theme="simple"] .bg-indigo-500\\/5,
         [data-tara-theme="simple"] .bg-indigo-500\\/10 { background: rgba(129,140,248,0.05) !important; }
 
@@ -48716,7 +48745,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .border-emerald-500\\/40 { border-color: rgba(40,204,149,0.18) !important; }
         [data-tara-theme="simple"] .border-amber-500\\/30,
         [data-tara-theme="simple"] .border-amber-500\\/20,
-        [data-tara-theme="simple"] .border-amber-500\\/40 { border-color: rgba(201,169,97,0.20) !important; }
+        [data-tara-theme="simple"] .border-amber-500\\/40 { border-color: rgba(217,179,104,0.20) !important; }
         [data-tara-theme="simple"] .border-indigo-500\\/40,
         [data-tara-theme="simple"] .border-indigo-500\\/30 { border-color: rgba(129,140,248,0.18) !important; }
 
@@ -48735,7 +48764,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         /* ── PROGRESS / TIMER BARS ─────────────────────────── */
         /* Quality / FGT / posterior pulse bars — keep functional but calmer color */
         [data-tara-theme="simple"] .bg-gradient-to-r.from-amber-500 {
-          background: linear-gradient(90deg, rgba(201,169,97,0.6), rgba(201,169,97,0.3)) !important;
+          background: linear-gradient(90deg, rgba(217,179,104,0.6), rgba(217,179,104,0.3)) !important;
         }
 
         /* ── INTERACTIVE HOVER REFINEMENT ──────────────────── */
@@ -48783,7 +48812,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
 
         {/* STATS BAR */}
-        <div className={'bg-[#171717] rounded-xl border border-[#1F1F1F] shadow-md relative overflow-hidden shrink-0'}>
+        <div className={'bg-[#101014] rounded-xl border border-[#1C1C22] shadow-md relative overflow-hidden shrink-0'}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
@@ -48799,7 +48828,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     setPriceSource(_next);
                   }}
                   className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border transition-colors mb-1 self-start"
-                  style={{background:feedFrozen?'rgba(255,77,106,0.12)':feedSlow?'rgba(201,169,97,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(255,77,106,0.45)':feedSlow?'rgba(201,169,97,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#C9A961':'rgba(237,237,237,0.55)'}}
+                  style={{background:feedFrozen?'rgba(255,77,106,0.12)':feedSlow?'rgba(217,179,104,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(255,77,106,0.45)':feedSlow?'rgba(217,179,104,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#D9B368':'rgba(237,237,237,0.55)'}}
                   title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle. ${feedFrozen?`FROZEN ${feedStaleSeconds}s`:feedSlow?`Slow (${feedStaleSeconds}s)`:'Live'}`}
                 >
                   <span>FEED</span>
@@ -48825,9 +48854,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <div
                       className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border self-start mt-1"
                       style={{
-                        background:_ok?'rgba(40,204,149,0.10)':'rgba(201,169,97,0.10)',
-                        borderColor:_ok?'rgba(40,204,149,0.30)':'rgba(201,169,97,0.40)',
-                        color:_ok?'rgb(40,204,149)':'#C9A961',
+                        background:_ok?'rgba(40,204,149,0.10)':'rgba(217,179,104,0.10)',
+                        borderColor:_ok?'rgba(40,204,149,0.30)':'rgba(217,179,104,0.40)',
+                        color:_ok?'rgb(40,204,149)':'#D9B368',
                       }}
                       title={_title}
                     >
@@ -48881,7 +48910,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
                     onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
                     onBlur={()=>{}}
-                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#1F1F1F] focus:border-indigo-400'}
+                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#1C1C22] focus:border-indigo-400'}
                     placeholder="Auto-set"
                   />
                   {targetMargin>0&&strikeMode==='manual'&&(
@@ -48913,9 +48942,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className="flex flex-col min-w-0 flex-none lg:min-w-[140px] lg:w-auto">
               <div className={'text-xs text-[#EDEDED]/40 uppercase tracking-wide mb-1'}>Bet  Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
-                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#2A2A2A] focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#2A2A34] focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
                 <span className={'text-[#EDEDED]/30'}>&#47;</span>
-                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#2A2A2A] focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#2A2A34] focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
               </div>
             </div>
             <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block'}></div>
@@ -48942,7 +48971,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {/* Position / Score */}
             <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
               {positionStatus?(
-                <div className={'bg-[#0A0A0A] border border-amber-500/20 rounded-lg p-1.5'}>
+                <div className={'bg-[#08080B] border border-amber-500/20 rounded-lg p-1.5'}>
                   <div className="flex justify-between text-xs mb-1"><span className={'text-[#EDEDED]/40 uppercase tracking-wide'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
                   <div className="flex justify-between items-center">
                     <span className={`text-lg font-serif font-bold ${positionStatus.pnlPct>0?'text-emerald-400':'text-rose-400'}`}>{positionStatus.pnlPct>0?'+':''}{positionStatus.pnlPct.toFixed(1)}%</span>
@@ -48986,7 +49015,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 _qLevel=_score>=3?'high':_score>=2?'medium':'low';
               }
             }
-            const _qColor=_qLevel==='high'?'#7fa189':_qLevel==='medium'?'#d4a24c':_qLevel==='low'?'#b26558':null;
+            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#D9B368':_qLevel==='low'?'#C06A72':null;
             const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
             const _renderCell=(name,band,floor=_MIN_DOM)=>{
               const _b=Number(band?.b)||0,_a=Number(band?.a)||0;
@@ -48994,7 +49023,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const _af=_t>=floor;
               const _p=_t>0?(_b/_t)*100:50;
               const _isBid=_p>=50;
-              const _color=!_af?'rgba(237,237,237,0.30)':_isBid?'#7fa189':'#b26558';
+              const _color=!_af?'rgba(237,237,237,0.30)':_isBid?'#6FA98C':'#C06A72';
               const _disp=Math.max(_p,100-_p);
               return React.createElement('div',{key:name,className:'text-center'},
                 React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
@@ -49023,7 +49052,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <span className="text-[#EDEDED]/25 ml-1">ASK</span>
                   </span>
                 </div>
-                <div className="w-full h-1 bg-[#0A0A0A] rounded-full overflow-hidden flex">
+                <div className="w-full h-1 bg-[#08080B] rounded-full overflow-hidden flex">
                   <div style={{width:`${_hlBidPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
                   <div style={{width:`${_hlAskPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
                 </div>
@@ -49068,14 +49097,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               if(_w60Tot>=500000)_score+=1;
               _qLevel=_score>=3?'high':_score>=2?'medium':'low';
             }
-            const _qColor=_qLevel==='high'?'#7fa189':_qLevel==='medium'?'#d4a24c':_qLevel==='low'?'#b26558':null;
+            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#D9B368':_qLevel==='low'?'#C06A72':null;
             const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
             const _renderTapeCell=(name,w,floor)=>{
               const _t=(w.buys||0)+(w.sells||0);
               const _af=_t>=floor;
               const _p=w.buyPct!=null?w.buyPct:50;
               const _isBuy=_p>=50;
-              const _color=!_af?'rgba(237,237,237,0.30)':_isBuy?'#7fa189':'#b26558';
+              const _color=!_af?'rgba(237,237,237,0.30)':_isBuy?'#6FA98C':'#C06A72';
               const _disp=Math.max(_p,100-_p);
               return React.createElement('div',{key:name,className:'text-center'},
                 React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
@@ -49105,7 +49134,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <span className="text-[#EDEDED]/25 ml-1">SELL</span>
                   </span>
                 </div>
-                <div className="w-full h-1 bg-[#0A0A0A] rounded-full overflow-hidden flex">
+                <div className="w-full h-1 bg-[#08080B] rounded-full overflow-hidden flex">
                   <div style={{width:`${_tBuyPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
                   <div style={{width:`${_tSellPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
                 </div>
@@ -49261,7 +49290,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         />
 
         {/* MOBILE TAB NAV */}
-        <div className={'flex lg:hidden bg-[#171717] border border-[#1F1F1F] rounded-xl p-1 gap-1 shrink-0'}>
+        <div className={'flex lg:hidden bg-[#101014] border border-[#1C1C22] rounded-xl p-1 gap-1 shrink-0'}>
           {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
             <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}>
               {tab.icon}{tab.label}
@@ -49311,12 +49340,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#1C1C22] shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} className={'flex items-center gap-1.5 bg-[#0A0A0A] border border-[#1F1F1F] px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle`}>
+                <div onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} className={'flex items-center gap-1.5 bg-[#08080B] border border-[#1C1C22] px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle`}>
                   <IC.Clock className="w-4 h-4"/>
                   <span className={'text-[#EDEDED]/60 hidden sm:inline'}>{timeState.startWindow}–{timeState.nextWindow} {timeFormat.toUpperCase()}</span>
                   <span className="text-white font-bold text-sm">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
@@ -49425,12 +49454,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold shrink-0">Tara · {label}</span>
                     <span className={`text-[10px] tabular-nums tracking-wide truncate ${(isCall&&!isLocked)||isLocked?'text-[#EDEDED]/85 font-bold':'text-[#EDEDED]/45'}`}>{countdownText}</span>
                   </div>
-                  <div className="relative h-1.5 bg-[#0A0A0A] rounded-full overflow-hidden">
+                  <div className="relative h-1.5 bg-[#08080B] rounded-full overflow-hidden">
                     {/* Minute tick markers */}
                     {minMarkers.map((mk,i)=>(
                       <div key={i} className="absolute top-0 bottom-0 w-px" style={{
                         left:mk.pos+'%',
-                        background:mk.isPast?'rgba(201,169,97,0.4)':'rgba(237,237,237,0.15)',
+                        background:mk.isPast?'rgba(217,179,104,0.4)':'rgba(237,237,237,0.15)',
                       }}></div>
                     ))}
                     {/* Progress fill — fills with elapsed time (always meaningful) */}
@@ -49550,7 +49579,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
             {/* V9.2.0: Schedule relocated from RightPanel to projections column.
                 User feedback: "put schedule in the news place." */}
-            <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid #1F1F1F'}}>
+            <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid #1C1C22'}}>
               {/* V9.8.18: day-aware schedule banner — shows today's character (weekday/weekend, holiday flag, activity level, rank vs other days, next strong window). */}
               <DayAwareScheduleHeader dayContext={dayContext}/>
               <TradeScheduleStrip taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} onOpenFullSchedule={()=>setScheduleModalMain(true)}/>
@@ -49627,7 +49656,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               gating this to 'projections' would have parked News under a tab
               that has no Tara's Call on it. DOM order puts this right after the
               prediction card once the grid collapses to one column. */}
-          <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
+          <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#1C1C22] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
             <T2Stamp code="FEED · 016"/>
             <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
             <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
@@ -49653,7 +49682,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Settings */}
       {showSettings&&(
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#171717] border border-[#2A2A2A] rounded-xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#101014] border border-[#2A2A34] rounded-xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
@@ -49678,7 +49707,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         value={_val}
                         onChange={e=>setDiscordWebhooks(prev=>({...prev,[k]:e.target.value}))}
                         placeholder={_val?'':'Optional · empty = no broadcasts for this asset'}
-                        className={'flex-1 bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono'}
+                        className={'flex-1 bg-[#08080B] border border-[#2A2A34] rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono'}
                         style={_val?{borderColor:_c.color+'66'}:{}}
                       />
                     </div>
@@ -49690,16 +49719,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <label className={'text-[10px] text-[#EDEDED]/40 uppercase tracking-wide mb-1 block'}>Bot Display Name</label>
-                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V110" className={'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
+                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V110" className={'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
                 </div>
                 <div>
                   <label className={'text-[10px] text-[#EDEDED]/40 uppercase tracking-wide mb-1 block'}>Avatar Image URL</label>
-                  <input type="url" value={discordAvatar} onChange={e=>setDiscordAvatar(e.target.value)} placeholder="https://i.imgur.com/..." className={'w-full bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
+                  <input type="url" value={discordAvatar} onChange={e=>setDiscordAvatar(e.target.value)} placeholder="https://i.imgur.com/..." className={'w-full bg-[#08080B] border border-[#2A2A34] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
                 </div>
               </div>
               {discordAvatar&&(
-                <div className={'flex items-center gap-2 mb-3 p-2 bg-[#0A0A0A] rounded-lg border border-[#1F1F1F]'}>
-                  <img src={discordAvatar} alt="Bot avatar preview" className={'w-8 h-8 rounded-full object-cover border border-[#2A2A2A]'} onError={e=>e.target.style.display='none'}/>
+                <div className={'flex items-center gap-2 mb-3 p-2 bg-[#08080B] rounded-lg border border-[#1C1C22]'}>
+                  <img src={discordAvatar} alt="Bot avatar preview" className={'w-8 h-8 rounded-full object-cover border border-[#2A2A34]'} onError={e=>e.target.style.display='none'}/>
                   <div>
                     <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V110'}</div>
                     <div className={'text-[10px] text-[#EDEDED]/40'}>Preview of how bot appears in Discord</div>
@@ -49716,7 +49745,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </div>
 
               {/* V111: Sync to baseline training data */}
-              <div className={'mb-3 p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'}>
+              <div className={'mb-3 p-3 rounded-lg bg-[#08080B] border border-[#1C1C22]'}>
                 <div className={'text-[11px] text-[#EDEDED]/70 mb-2 leading-relaxed'}>
                   <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (487W-302L · 33W-25L 5m · 57 trades trained · V3.1). Use when switching devices.
                 </div>
@@ -49731,7 +49760,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
               {discordStatusMsg&&<div className={'mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2'}>{discordStatusMsg}</div>}
 
-              <div className={'border-t border-[#1F1F1F] pt-4'}>
+              <div className={'border-t border-[#1C1C22] pt-4'}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className={'text-xs font-bold uppercase tracking-wide text-[#EDEDED]/60'}>Sent Messages ({discordLog.length})</h3>
                   <p className={'text-[10px] text-[#EDEDED]/30'}>Edit or delete within 15 min</p>
@@ -49742,7 +49771,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 ):(
                   <div className="space-y-2">
                     {discordLog.map(entry=>(
-                      <div key={entry.id} className={'bg-[#0A0A0A] rounded-lg border border-[#1F1F1F] overflow-hidden'}>
+                      <div key={entry.id} className={'bg-[#08080B] rounded-lg border border-[#1C1C22] overflow-hidden'}>
                         <div className="flex items-center gap-2 p-2.5">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.type==='LOCK'?'bg-indigo-400':entry.type==='CLOSE'?'bg-emerald-400':'bg-amber-400'}`}/>
                           <div className="flex-1 min-w-0">
@@ -49760,9 +49789,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                           </div>
                         </div>
                         {discordEditingId===entry.id&&(
-                          <div className={'border-t border-[#1F1F1F] p-2.5'}>
+                          <div className={'border-t border-[#1C1C22] p-2.5'}>
                             <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
-                              className={'w-full bg-[#171717] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
+                              className={'w-full bg-[#101014] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
                               placeholder="Add a note to this message (e.g. 'Closed early, took profits at $75,200')"/>
                             <div className="flex gap-2">
                               <button onClick={async()=>{
@@ -49772,7 +49801,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                                 setTimeout(()=>setDiscordStatusMsg(''),3000);
                               }} className={'flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors'}>Add Note</button>
                               <button onClick={()=>{setDiscordEditingId(null);setDiscordEditText('');}}
-                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#1F1F1F] text-[#EDEDED]/40 hover:text-white transition-colors'}>Cancel</button>
+                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#1C1C22] text-[#EDEDED]/40 hover:text-white transition-colors'}>Cancel</button>
                             </div>
                           </div>
                         )}
@@ -49790,17 +49819,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Chat */}
       <div className={`fixed bottom-[68px] lg:bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
-          <div className={'bg-[#171717] border border-[#2A2A2A] shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#0A0A0A] p-2.5 flex justify-between items-center border-b border-[#1F1F1F]'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+          <div className={'bg-[#101014] border border-[#2A2A34] shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
+            <div className={'bg-[#08080B] p-2.5 flex justify-between items-center border-b border-[#1C1C22]'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#161616]'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
                   <span className={`text-xs uppercase opacity-30 mb-1 ${msg.role==='user'?'mr-1':'ml-1'}`}>{msg.role}</span>
-                  <div className={`text-xs p-2 rounded-lg max-w-[88%] leading-relaxed whitespace-pre-wrap ${msg.role==='user'?'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none':'bg-[#2A2D2C] text-[#EDEDED] border border-[#1F1F1F] rounded-tl-none'}`}>{msg.text}</div>
+                  <div className={`text-xs p-2 rounded-lg max-w-[88%] leading-relaxed whitespace-pre-wrap ${msg.role==='user'?'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none':'bg-[#2A2D2C] text-[#EDEDED] border border-[#1C1C22] rounded-tl-none'}`}>{msg.text}</div>
                 </div>
               ))}
             </div>
-            <div className={'p-2.5 bg-[#0A0A0A] border-t border-[#1F1F1F]'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#171717] border border-[#2A2A2A] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
+            <div className={'p-2.5 bg-[#08080B] border-t border-[#1C1C22]'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#101014] border border-[#2A2A34] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
           </div>
         )}
         {!isChatOpen&&<button onClick={()=>setIsChatOpen(true)} className={'bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 transition-transform hover:scale-105'}><IC.Msg className="w-5 h-5"/></button>}
@@ -49809,7 +49838,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V9.2.1: MOBILE STICKY BOTTOM BAR — always visible on phones. Shows current
           asset, window type, Tara's call direction, and quick-access buttons.
           Hidden on desktop (lg:hidden). Fixed to bottom with safe-area padding. */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden safe-bottom" style={{background:'#0A0A0A',borderTop:'1px solid rgba(201,169,97,0.15)',backdropFilter:'blur(8px)'}}>
+      <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden safe-bottom" style={{background:'#08080B',borderTop:'1px solid rgba(217,179,104,0.15)',backdropFilter:'blur(8px)'}}>
         <div className="flex items-center justify-between px-3 py-2 gap-2">
           {/* Asset + Window */}
           <div className="flex items-center gap-1.5">
@@ -49835,8 +49864,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
       {showAnalytics&&(
         <div className={'fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#171717] border border-[#2A2A2A] rounded-xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#171717] border-b border-[#1F1F1F] p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#101014] border border-[#2A2A34] rounded-xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#101014] border-b border-[#1C1C22] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
                 {(()=>{
@@ -49897,22 +49926,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <h3 className="text-xs font-bold uppercase tracking-wide text-emerald-400 mb-3">🔬 Backtest — Historical Performance Audit</h3>
                 {(()=>{
                   const bt=runFullBacktest(tradeLog);
-                  if(!bt.ready)return(<div className="text-xs text-[#EDEDED]/50 p-3 bg-[#0A0A0A] rounded-lg">{bt.note}</div>);
+                  if(!bt.ready)return(<div className="text-xs text-[#EDEDED]/50 p-3 bg-[#08080B] rounded-lg">{bt.note}</div>);
                   const fmt=p=>(p*100).toFixed(1)+'%';
                   return(<div className="space-y-3">
                     {/* Top metrics row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F]">
+                      <div className="bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22]">
                         <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">Overall WR</div>
                         <div className={'text-lg font-mono font-bold '+(bt.wr>=0.65?'text-emerald-400':bt.wr>=0.55?'text-amber-400':'text-rose-400')}>{fmt(bt.wr)}</div>
                         <div className="text-[10px] text-[#EDEDED]/30">{bt.n} trades</div>
                       </div>
-                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F]">
+                      <div className="bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22]">
                         <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">Brier Score</div>
                         <div className={'text-lg font-mono font-bold '+(bt.brier<0.15?'text-emerald-400':bt.brier<0.20?'text-amber-400':'text-rose-400')}>{bt.brier.toFixed(3)}</div>
                         <div className="text-[10px] text-[#EDEDED]/30">{bt.brier<0.10?'Excellent':bt.brier<0.15?'Strong':bt.brier<0.20?'Useful':bt.brier<0.24?'Marginal':'No skill'}</div>
                       </div>
-                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F]">
+                      <div className="bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22]">
                         <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">UP / DOWN</div>
                         <div className="text-sm font-mono">
                           <span className="text-emerald-400">{fmt(bt.upWR)}</span>
@@ -49921,7 +49950,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         </div>
                         <div className="text-[10px] text-[#EDEDED]/30">direction split</div>
                       </div>
-                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F]">
+                      <div className="bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22]">
                         <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">Streaks</div>
                         <div className="text-sm font-mono">
                           <span className="text-emerald-400">{bt.maxWinStreak}W</span>
@@ -49932,7 +49961,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Filter scenarios — what WR if we'd applied different filters? */}
-                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F]">
+                    <div className="bg-[#08080B] rounded-lg p-3 border border-[#1C1C22]">
                       <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Selectivity Scenarios — "What if I'd only taken these?"</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.filterScenarios).filter(([k,v])=>v).map(([name,s])=>{
@@ -49950,7 +49979,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Per-regime breakdown */}
-                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F]">
+                    <div className="bg-[#08080B] rounded-lg p-3 border border-[#1C1C22]">
                       <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Per-Regime Performance</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.regimePerf).sort((a,b)=>b[1].n-a[1].n).map(([name,s])=>{
@@ -49966,7 +49995,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Lock timing */}
-                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F]">
+                    <div className="bg-[#08080B] rounded-lg p-3 border border-[#1C1C22]">
                       <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Performance by Lock Timing</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.clockPerf).map(([name,s])=>{
@@ -49983,7 +50012,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Confidence calibration */}
-                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F]">
+                    <div className="bg-[#08080B] rounded-lg p-3 border border-[#1C1C22]">
                       <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Calibration: Predicted vs Actual</div>
                       <div className="space-y-1">
                         {Object.entries(bt.confBuckets).filter(([_,s])=>s.n>0).map(([conf,s])=>{
@@ -50013,7 +50042,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     const def=DEFAULT_WEIGHTS[key]||20;const pct=(val/55)*100;
                     const acc=signalAccuracy[key];const wrPct=acc?.total>=3?((acc.right/acc.total)*100).toFixed(0):null;
                     const delta=val-def;
-                    return(<div key={key} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F]'}>
+                    return(<div key={key} className={'bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22]'}>
                       <div className="flex justify-between items-center mb-1.5">
                         <span className={'text-xs font-bold uppercase tracking-wide text-[#EDEDED]/70'}>{key}</span>
                         <div className="flex items-center gap-1.5">
@@ -50022,7 +50051,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                           <span className={`text-xs ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#EDEDED]/30'}`}>{delta>0?'+':''}{delta.toFixed(1)}</span>
                         </div>
                       </div>
-                      <div className="w-full h-1.5 bg-[#171717] rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-[#101014] rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-500 ${delta>2?'bg-emerald-500':delta<-2?'bg-rose-500':'bg-indigo-500'}`} style={{width:`${Math.min(100,pct)}%`}}/>
                       </div>
                       <div className={'flex justify-between mt-0.5 text-xs text-[#EDEDED]/20'}>
@@ -50038,13 +50067,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-amber-400 mb-3">Probability Calibration (posterior accuracy)</h3>
                 {tradeLog.filter(t=>t.result).length<10?(
-                  <div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#0A0A0A] rounded-lg border border-[#1F1F1F]'}>Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
+                  <div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#08080B] rounded-lg border border-[#1C1C22]'}>Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
                 ):(
                   <div className="grid grid-cols-5 sm:grid-cols-10 gap-1">
                     {[0,10,20,30,40,50,60,70,80,90].map(b=>{
                       const calVal=calibration[b];const isNull=calVal==null;
                       const diff=isNull?0:calVal-b;
-                      return(<div key={b} className={'bg-[#0A0A0A] rounded-lg p-1.5 border border-[#1F1F1F] text-center'}>
+                      return(<div key={b} className={'bg-[#08080B] rounded-lg p-1.5 border border-[#1C1C22] text-center'}>
                         <div className={'text-xs text-[#EDEDED]/30 mb-1'}>{b}-{b+10}%</div>
                         <div className={`text-xs font-bold font-mono ${isNull?'text-[#EDEDED]/20':Math.abs(diff)<5?'text-emerald-400':Math.abs(diff)<15?'text-amber-400':'text-rose-400'}`}>
                           {isNull?'—':`${calVal.toFixed(0)}%`}
@@ -50082,7 +50111,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         const totalAll=totalManual+totalTara;
                         const wins=manual.wins+tara.wins;
                         const wr=totalAll>0?((wins/totalAll)*100):0;
-                        return(<div key={sess} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F] text-center'}>
+                        return(<div key={sess} className={'bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22] text-center'}>
                           <div className={'text-xs font-bold text-[#EDEDED]/70 mb-1'}>{sess}</div>
                           <div className={`text-lg font-serif font-bold ${wr>=60?'text-emerald-400':wr>=45?'text-amber-400':totalAll>0?'text-rose-400':'text-[#EDEDED]/35'}`}>{totalAll>0?`${wr.toFixed(0)}%`:'—'}</div>
                           <div className={'text-[10px] text-[#EDEDED]/55 mt-0.5'}>{wins}W · {(manual.losses+tara.losses)}L</div>
@@ -50097,7 +50126,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {/* Hourly Heatmap */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-purple-400 mb-3">Performance by Hour (local)</h3>
-                {Object.keys(hourlyPerf).length<3?<div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#0A0A0A] rounded-lg border border-[#1F1F1F]'}>Need more trades to build hourly map.</div>:(
+                {Object.keys(hourlyPerf).length<3?<div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#08080B] rounded-lg border border-[#1C1C22]'}>Need more trades to build hourly map.</div>:(
                 <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
                   {Array.from({length:24},(_,h)=>{
                     const d=hourlyPerf[h];const total=d?(d.wins+d.losses):0;const wr=total>0?((d.wins/total)*100):null;
@@ -50142,7 +50171,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     setSelectedTradeId(null);
                   };
                   return(
-                    <div className={'mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-[#0A0A0A]'}>
+                    <div className={'mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-[#08080B]'}>
                       <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
@@ -50188,7 +50217,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                           isSel?'border-indigo-500/60 bg-indigo-500/10 ring-1 ring-indigo-500/30'
                           :t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
                           :t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40'
-                          :'border-[#1F1F1F] hover:border-[#2A2A2A]'}`}>
+                          :'border-[#1C1C22] hover:border-[#2A2A34]'}`}>
                         <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':t.result==='LOSS'?'bg-rose-500':'bg-[#EDEDED]/20'}`}/>
                         <span className={'text-[#EDEDED]/40 font-mono shrink-0 text-[10px] hidden sm:inline'}>{_fmtDateTz(d,timeFormat,{month:'short',day:'numeric'})} </span>
                         <span className={'text-[#EDEDED]/40 font-mono shrink-0 text-[10px]'}>{_fmtTimeTz(d,timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
@@ -50210,7 +50239,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 {/* Window tab selector */}
                 <div className="flex gap-1 mb-3">
                   {['15m','5m'].map(wt=>(
-                    <button key={wt} onClick={()=>{}} className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase border ${windowType===wt?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#1F1F1F] text-[#EDEDED]/30'}`}>{wt}</button>
+                    <button key={wt} onClick={()=>{}} className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase border ${windowType===wt?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#1C1C22] text-[#EDEDED]/30'}`}>{wt}</button>
                   ))}
                   <span className={'text-[9px] text-[#EDEDED]/25 ml-2 self-center'}>Showing trades from your active window</span>
                 </div>
@@ -50261,7 +50290,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     const rgWins=rgTrades.filter(t=>t.result==='WIN').length;
                     const isActive=lastRegimeRef.current===rg;
                     return(
-                      <div key={rg} className={`p-2.5 rounded-lg border ${isActive?'border-indigo-500/40 bg-indigo-500/5':'border-[#1F1F1F] bg-[#0A0A0A]'}`}>
+                      <div key={rg} className={`p-2.5 rounded-lg border ${isActive?'border-indigo-500/40 bg-indigo-500/5':'border-[#1C1C22] bg-[#08080B]'}`}>
                         <div className="flex justify-between items-center mb-2">
                           <span className={`text-xs font-bold uppercase ${isActive?'text-indigo-400':'text-[#EDEDED]/50'}`}>{rg}{isActive&&' ◀ active'}</span>
                           <span className={'text-[10px] text-[#EDEDED]/30'}>{rgTrades.length} trades · {rgTrades.length>0?(rgWins/rgTrades.length*100).toFixed(0)+'% WR':'no data'}</span>
@@ -50319,7 +50348,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
                   const dowLabels=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
                   const formatHour=h=>{const h12=h%12||12;return `${h12}${h<12?'a':'p'}`;};
-                  const cellCls=(wr,n)=>n<2?'bg-[#0A0A0A] text-[#EDEDED]/25':wr>=65?'bg-emerald-500/15 text-emerald-300':wr>=55?'bg-amber-500/10 text-amber-300':wr>=45?'bg-[#0A0A0A] text-[#EDEDED]/50':'bg-rose-500/10 text-rose-300';
+                  const cellCls=(wr,n)=>n<2?'bg-[#08080B] text-[#EDEDED]/25':wr>=65?'bg-emerald-500/15 text-emerald-300':wr>=55?'bg-amber-500/10 text-amber-300':wr>=45?'bg-[#08080B] text-[#EDEDED]/50':'bg-rose-500/10 text-rose-300';
 
                   return(
                     <div className="space-y-4">
@@ -50332,7 +50361,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             const n=v.W+v.L;
                             const wr=n>0?(100*v.W/n):0;
                             return(
-                              <div key={s} className={`p-2 rounded-lg border border-[#1F1F1F] ${cellCls(wr,n)}`}>
+                              <div key={s} className={`p-2 rounded-lg border border-[#1C1C22] ${cellCls(wr,n)}`}>
                                 <div className="text-[10px] uppercase tracking-wide font-bold opacity-70">{s}</div>
                                 <div className="text-base font-mono font-bold mt-0.5">{n>0?wr.toFixed(0)+'%':'—'}</div>
                                 <div className="text-[9px] opacity-60">{v.W}W-{v.L}L · {n} trades</div>
@@ -50351,7 +50380,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             const n=v.W+v.L;
                             const wr=n>0?(100*v.W/n):0;
                             return(
-                              <div key={lbl} className={`p-1.5 rounded-lg text-center border border-[#1F1F1F] ${cellCls(wr,n)}`}>
+                              <div key={lbl} className={`p-1.5 rounded-lg text-center border border-[#1C1C22] ${cellCls(wr,n)}`}>
                                 <div className="text-[9px] uppercase tracking-wide opacity-70">{lbl}</div>
                                 <div className="text-xs font-mono font-bold mt-0.5">{n>0?wr.toFixed(0)+'%':'—'}</div>
                                 <div className="text-[8px] opacity-60">{n>0?`${v.W}-${v.L}`:'—'}</div>
@@ -50370,7 +50399,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             const n=v.W+v.L;
                             const wr=n>0?(100*v.W/n):0;
                             return(
-                              <div key={h} className={`p-1 rounded-lg text-center border border-[#1F1F1F] ${cellCls(wr,n)}`} title={n>0?`${formatHour(h)}: ${v.W}W-${v.L}L (${wr.toFixed(0)}%)`:`${formatHour(h)}: no data`}>
+                              <div key={h} className={`p-1 rounded-lg text-center border border-[#1C1C22] ${cellCls(wr,n)}`} title={n>0?`${formatHour(h)}: ${v.W}W-${v.L}L (${wr.toFixed(0)}%)`:`${formatHour(h)}: no data`}>
                                 <div className="text-[8px] opacity-70">{formatHour(h)}</div>
                                 <div className="text-[10px] font-mono font-bold">{n>0?wr.toFixed(0):'—'}</div>
                               </div>
@@ -50381,11 +50410,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
 
                       {/* Color legend */}
-                      <div className="flex items-center gap-3 text-[9px] text-[#EDEDED]/40 pt-1 border-t border-[#1F1F1F]">
+                      <div className="flex items-center gap-3 text-[9px] text-[#EDEDED]/40 pt-1 border-t border-[#1C1C22]">
                         <span className="font-bold uppercase tracking-wide">Legend</span>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-emerald-500/15"></div><span>≥65% WR</span></div>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-amber-500/10"></div><span>55-64%</span></div>
-                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-[#0A0A0A] border border-[#2A2A2A]"></div><span>45-54%</span></div>
+                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-[#08080B] border border-[#2A2A34]"></div><span>45-54%</span></div>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-rose-500/10"></div><span>&lt; 45%</span></div>
                       </div>
                     </div>
@@ -50414,7 +50443,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     return(
                       <div key={day} className="mb-3">
                         {/* Day header */}
-                        <div className={'flex items-center justify-between mb-1.5 pb-1 border-b border-[#1F1F1F]'}>
+                        <div className={'flex items-center justify-between mb-1.5 pb-1 border-b border-[#1C1C22]'}>
                           <span className={'text-[10px] font-bold uppercase tracking-wide text-[#EDEDED]/50'}>{day}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-[9px] text-emerald-400 font-mono">{wins}W</span>
@@ -50443,7 +50472,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                                   <span className={`font-bold shrink-0 ${t.result==='WIN'?'text-emerald-400':'text-rose-400'}`}>{t.result}</span>
                                 </div>
                                 {hasV145&&(
-                                  <div className="flex items-center gap-2 text-[9px] mt-1 pt-1 border-t border-[#1F1F1F] text-[#EDEDED]/40">
+                                  <div className="flex items-center gap-2 text-[9px] mt-1 pt-1 border-t border-[#1C1C22] text-[#EDEDED]/40">
                                     <span className="font-mono">@${Math.round(t.entryPrice).toLocaleString()}</span>
                                     <span>→</span>
                                     <span className="font-mono">${Math.round(t.closingPrice).toLocaleString()}</span>
@@ -50482,8 +50511,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── HOW TARA WORKS GUIDE ── */}
       {showGuide&&(
         <div className={'fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#171717] border border-[#2A2A2A] rounded-xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#171717] border-b border-[#1F1F1F] p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#101014] border border-[#2A2A34] rounded-xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#101014] border-b border-[#1C1C22] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
                   <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.8.2 Works
@@ -50495,7 +50524,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className={'p-4 sm:p-6 space-y-6 text-sm text-[#EDEDED]/80'}>
 
               {/* V8.7: CURRENT-STATE OVERVIEW — replaces stale V134 summary */}
-              <section className={'bg-[#171717] border-2 rounded-lg p-4'} style={{borderColor:'rgba(201,169,97,0.30)'}}>
+              <section className={'bg-[#101014] border-2 rounded-lg p-4'} style={{borderColor:'rgba(217,179,104,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:T2_GOLD}}>★ Current Tara — V8.7 Overview</h3>
                 <div className="space-y-3 text-xs leading-relaxed text-[#EDEDED]/75">
                   <p><strong className="text-white">What Tara does:</strong> Reads BTC price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
@@ -50506,7 +50535,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </section>
 
               {/* V8.7: LEARNING SYSTEM — current */}
-              <section className={'bg-[#171717] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
+              <section className={'bg-[#101014] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(168,85,247,0.95)'}}>🧠 How Tara Learns Every Trade</h3>
                 <div className="space-y-2.5 text-xs leading-relaxed text-[#EDEDED]/70">
                   <p><strong className="text-white">5 parallel learning loops fire on every WIN/LOSS:</strong></p>
@@ -50524,19 +50553,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </section>
 
               {/* V8.7: SYNC ARCHITECTURE */}
-              <section className={'bg-[#171717] border rounded-lg p-4'} style={{borderColor:'rgba(40,204,149,0.30)'}}>
+              <section className={'bg-[#101014] border rounded-lg p-4'} style={{borderColor:'rgba(40,204,149,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(40,204,149,0.95)'}}>☁ Cross-Device Sync (V8.6)</h3>
                 <div className="space-y-2 text-xs leading-relaxed text-[#EDEDED]/70">
                   <p>All 11 sync paths use atomic Firestore transactions with smart merge functions:</p>
                   <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">memory/taraCallLog</code> — windowId-keyed merge, prefer resolved over unresolved</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">scorecards/personal</code> — max-per-cell W/L</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">history/pastWindows</code> — windowId union</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">learnings/tara</code> — totalResolved tiebreaker</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">learnings/regimeMemory</code> — max-per-cell</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">learnings/taraWeights</code> — per-asset slice timestamps</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">state/lifetimePnL</code> — timestamp inside transaction</li>
-                    <li><code className="text-[10px] bg-[#0A0A0A] px-1">state/currentLock_*</code> (×4) — first-write-wins per window with windowId validation</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">memory/taraCallLog</code> — windowId-keyed merge, prefer resolved over unresolved</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">scorecards/personal</code> — max-per-cell W/L</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">history/pastWindows</code> — windowId union</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">learnings/tara</code> — totalResolved tiebreaker</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">learnings/regimeMemory</code> — max-per-cell</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">learnings/taraWeights</code> — per-asset slice timestamps</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">state/lifetimePnL</code> — timestamp inside transaction</li>
+                    <li><code className="text-[10px] bg-[#08080B] px-1">state/currentLock_*</code> (×4) — first-write-wins per window with windowId validation</li>
                   </ul>
                   <p className="pt-1"><strong className="text-white">Force resync</strong> — click the SyncStatusPill, confirm, and Tara re-pulls all 11 paths from cloud and applies fresh data to local state. Useful when opening a new browser or when something looks stale.</p>
                 </div>
@@ -50563,23 +50592,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <section>
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>📊 Prediction States — What Each One Means</h3>
                 <div className="space-y-3">
-                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F]'}>
+                  <div className={'bg-[#08080B] rounded-lg p-3 border border-[#1C1C22]'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">SCANNING...</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Do nothing</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Tara's composite score is between 42–58% — a coin flip zone. No structural edge exists right now. Do not enter. Most tools show a number at all times to look busy — Tara shows nothing when there's genuinely nothing to show.</p>
                   </div>
-                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-amber-500/15'}>
+                  <div className={'bg-[#08080B] rounded-lg p-3 border border-amber-500/15'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Get ready</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Posterior has crossed 58%+ or below 42% — there's a lean — but not enough consecutive readings yet to commit. The forming progress bar shows how close she is to locking. You can enter here for more time in the trade, but it's higher risk than waiting for the lock.</p>
                   </div>
-                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-emerald-500/20'}>
+                  <div className={'bg-[#08080B] rounded-lg p-3 border border-emerald-500/20'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Entry signal — act now</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>2 consecutive readings (15m) or 1 consecutive (5m) all above the regime-specific threshold (60-75 depending on regime). Tara has committed for the window. She will NOT change this prediction without a 25+ point posterior collapse or severe trajectory flip. The lock state machine is designed to commit and stay committed. This is the <strong className="text-white">primary state to enter on.</strong></p>
                   </div>
-                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-rose-500/20'}>
+                  <div className={'bg-[#08080B] rounded-lg p-3 border border-rose-500/20'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Entry signal — act now</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Same as UP — LOCKED but bearish. Posterior consistently below the regime-specific DOWN threshold (20-36 depending on regime — V2.8 made these symmetric with UP-side thresholds in choppy regimes). If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
                   </div>
-                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-zinc-500/15'}>
+                  <div className={'bg-[#08080B] rounded-lg p-3 border border-zinc-500/15'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase tracking-wide">Sit out</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Posterior collapsed 25+ points or trajectory/FGT flipped against direction. Tara released — respect it immediately.</p>
                   </div>
@@ -50589,7 +50618,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {/* STRIKE PRICE */}
               <section>
                 <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-emerald-500/20 pb-1'}>🎯 Strike Price — Auto vs Manual</h3>
-                <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F] space-y-2 text-xs leading-relaxed text-[#EDEDED]/60'}>
+                <div className={'bg-[#08080B] rounded-lg p-3 border border-[#1C1C22] space-y-2 text-xs leading-relaxed text-[#EDEDED]/60'}>
                   <p>The strike is automatically set to the <strong className="text-white">opening price of each window candle</strong> — fetched directly from Coinbase at the start of every 5m or 15m period. This matches what the binary options platform uses as the strike.</p>
                   <p>The <strong className="text-emerald-400">AUTO</strong> badge means Tara is tracking window opens automatically. Click it to reset to auto after a manual override.</p>
                   <p>Type any price in the Strike input to switch to <strong className="text-amber-400">MANUAL</strong> mode — useful if your platform uses a slightly different strike. Manual mode resets to auto at each new window.</p>
@@ -50608,7 +50637,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     {name:'Technical (W:25)',desc:'RSI divergence, VWAP position, Bollinger Band squeeze, price channel. Prevents chasing overbought tops.'},
                     {name:'Funding & Regime (W:15)',desc:'Detects SHORT SQUEEZE (retail short + whales buying), LONG SQUEEZE, TRENDING, CHOP. Adjusts thresholds per regime.'},
                   ].map((s,i)=>(
-                    <div key={i} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#1F1F1F]'}>
+                    <div key={i} className={'bg-[#08080B] rounded-lg p-2.5 border border-[#1C1C22]'}>
                       <div className="text-indigo-300 font-bold mb-1">{s.name}</div>
                       <div className={'text-[#EDEDED]/50 leading-relaxed'}>{s.desc}</div>
                     </div>
@@ -50645,7 +50674,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     {label:'HOLD STRONG',color:'text-emerald-400',desc:'Winning + momentum aligned. Do nothing. This is the hardest discipline in trading.'},
                     {label:'RECOVERY IN PROGRESS',color:'text-amber-400',desc:'Losing but momentum just flipped toward you. Give it room — don\'t panic exit at the worst moment.'},
                   ].map((a,i)=>(
-                    <div key={i} className={'flex gap-3 bg-[#0A0A0A] rounded-lg p-2 border border-[#1F1F1F]'}>
+                    <div key={i} className={'flex gap-3 bg-[#08080B] rounded-lg p-2 border border-[#1C1C22]'}>
                       <span className={`${a.color} font-bold shrink-0 min-w-[140px] text-[10px] uppercase tracking-wide`}>{a.label}</span>
                       <span className={'text-[#EDEDED]/50 text-[11px] leading-snug'}>{a.desc}</span>
                     </div>
@@ -50655,7 +50684,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
               {/* BEST PRACTICES */}
               <section>
-                <h3 className={'text-white font-bold uppercase tracking-wide mb-3 text-xs border-b border-[#1F1F1F] pb-1'}>✅ Best Practices for Maximum Edge</h3>
+                <h3 className={'text-white font-bold uppercase tracking-wide mb-3 text-xs border-b border-[#1C1C22] pb-1'}>✅ Best Practices for Maximum Edge</h3>
                 <div className={'space-y-2 text-xs leading-relaxed text-[#EDEDED]/60'}>
                   <p>🔒 <strong className="text-white">Only enter on LOCKED signals.</strong> Skip FORMING, skip SCANNING. The win rate difference between LOCKED and FORMING entries is significant.</p>
                   <p>⏰ <strong className="text-white">Enter immediately when the advisor fires ENTRY SIGNAL.</strong> The lock has been held for N consecutive samples — extra waiting only reduces your time in the trade.</p>
@@ -50671,7 +50700,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {/* STRIKE + DISCORD */}
               <section>
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>🔗 Discord Integration</h3>
-                <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#1F1F1F] text-xs leading-relaxed text-[#EDEDED]/60'}>
+                <div className={'bg-[#08080B] rounded-lg p-3 border border-[#1C1C22] text-xs leading-relaxed text-[#EDEDED]/60'}>
                   <p>Paste your Discord webhook URL in Settings (🔗 button). Tara will auto-broadcast:</p>
                   <ul className="mt-2 space-y-1 list-disc pl-4">
                     <li>Lock commits (with posterior, regime, gap, clock remaining)</li>
@@ -50768,7 +50797,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       `}</style>
       {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
               displaying context that doesn't change minute-to-minute. Wraps gracefully on mobile. */}
-      <div className="bg-[#0A0B0A] border-t border-[#1F1F1F] px-3 sm:px-4 py-1.5 mt-2 -mx-2 sm:-mx-3 lg:-mx-4 -mb-2 sm:-mb-3 shrink-0">
+      <div className="bg-[#0A0B0A] border-t border-[#1C1C22] px-3 sm:px-4 py-1.5 mt-2 -mx-2 sm:-mx-3 lg:-mx-4 -mb-2 sm:-mb-3 shrink-0">
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[8px] sm:text-[9px] tracking-[0.04em]">
           {(()=>{
             const regimeLabel=analysis?.regime||'—';
@@ -50859,7 +50888,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       try{
         const rootEl=document.getElementById('root');
         if(rootEl&&!rootEl.hasChildNodes()){
-          rootEl.innerHTML='<div style="min-height:100vh;background:#0A0A0A;color:#EDEDED;padding:32px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;display:flex;align-items:center;justify-content:center"><div style="max-width:520px"><h1 style="color:#C9A961;font-size:18px;margin:0 0 16px 0;font-weight:bold;letter-spacing:0.18em;text-transform:uppercase">Tara isn\'t loading</h1><p style="color:rgba(237,237,237,0.75);margin:0 0 16px 0;line-height:1.6;font-size:13px">React didn\'t mount within 5 seconds. The deployed bundle may be stuck behind a stale cache. Click below to clear everything and reload once.</p><button onclick="(async()=>{try{if(\'serviceWorker\' in navigator){const r=await navigator.serviceWorker.getRegistrations();await Promise.all(r.map(x=>x.unregister().catch(()=>{})));}}catch(_){}try{if(\'caches\' in window){const k=await caches.keys();await Promise.all(k.map(x=>caches.delete(x).catch(()=>{})));}}catch(_){}try{sessionStorage.clear();}catch(_){}window.location.reload();})()" style="background:#10b981;color:white;border:none;padding:12px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px">Clear cache and reload</button><p style="color:rgba(237,237,237,0.4);margin:16px 0 0 0;font-size:11px">Your trade history, weights, and learning are safe — they live in Firestore and will repopulate on reload. This only clears the browser cache.</p></div></div>';
+          rootEl.innerHTML='<div style="min-height:100vh;background:#08080B;color:#EDEDED;padding:32px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;display:flex;align-items:center;justify-content:center"><div style="max-width:520px"><h1 style="color:#D9B368;font-size:18px;margin:0 0 16px 0;font-weight:bold;letter-spacing:0.18em;text-transform:uppercase">Tara isn\'t loading</h1><p style="color:rgba(237,237,237,0.75);margin:0 0 16px 0;line-height:1.6;font-size:13px">React didn\'t mount within 5 seconds. The deployed bundle may be stuck behind a stale cache. Click below to clear everything and reload once.</p><button onclick="(async()=>{try{if(\'serviceWorker\' in navigator){const r=await navigator.serviceWorker.getRegistrations();await Promise.all(r.map(x=>x.unregister().catch(()=>{})));}}catch(_){}try{if(\'caches\' in window){const k=await caches.keys();await Promise.all(k.map(x=>caches.delete(x).catch(()=>{})));}}catch(_){}try{sessionStorage.clear();}catch(_){}window.location.reload();})()" style="background:#10b981;color:white;border:none;padding:12px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px">Clear cache and reload</button><p style="color:rgba(237,237,237,0.4);margin:16px 0 0 0;font-size:11px">Your trade history, weights, and learning are safe — they live in Firestore and will repopulate on reload. This only clears the browser cache.</p></div></div>';
         }
       }catch(_){}
     },5000);
