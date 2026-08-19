@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.193-section-headers';
-const TARA_VERSION_DISPLAY='Tara 13.4.193';
+const BASELINE_VERSION='2026.08.19-v13.4.194-reference-language';
+const TARA_VERSION_DISPLAY='Tara 13.4.194';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48631,14 +48631,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 identity instead of "generic dark dashboard";
              3. a real ambient drop, so cards sit ON the page rather than in it. */
         [data-tara-theme="simple"] .bg-\\[\\#101014\\] {
+          /* V13.4.194: reference cards sit clearly ABOVE the page -- lighter
+             fill, generous radius, and a soft ambient glow rather than a hard
+             edge. Raised the fill and softened the border to match. */
           background:
-            linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 34%, rgba(255,255,255,0) 100%),
+            linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.012) 40%, rgba(255,255,255,0) 100%),
             var(--tara-bg-card) !important;
           border: 1px solid var(--tara-border) !important;
           box-shadow:
-            inset 0 1px 0 rgba(229,192,123,0.16),
-            0 10px 28px rgba(0,0,0,0.55),
-            0 2px 6px rgba(0,0,0,0.4) !important;
+            inset 0 1px 0 rgba(245,201,96,0.14),
+            0 18px 44px rgba(0,0,0,0.62),
+            0 2px 8px rgba(0,0,0,0.45) !important;
         }
         [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
         [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
@@ -48666,10 +48669,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             transition: box-shadow var(--dur-2) var(--ease-out);
           }
         }
-        /* V13.4.191: these were pulling radii back down to 8/10px and undoing
-           the global scale. Matched to the system values instead. */
-        [data-tara-theme="simple"] .rounded-xl { border-radius: 15px !important; }
-        [data-tara-theme="simple"] .rounded-lg { border-radius: 11px !important; }
+        /* V13.4.194: matched to the reference radii. This rule kept silently
+           winning over the global scale -- computed radius on live cards was
+           11px while the system said 22px -- because the theme block is injected
+           after the head styles. Cards are the app's main surface and carry
+           rounded-lg, so this is the line that actually controls how round the
+           app looks. */
+        [data-tara-theme="simple"] .rounded-xl { border-radius: 24px !important; }
+        [data-tara-theme="simple"] .rounded-lg { border-radius: 18px !important; }
+        [data-tara-theme="simple"] button.rounded-lg,
+        [data-tara-theme="simple"] button.rounded-xl { border-radius: 9999px !important; }
 
         /* ── HERO GLOW ON TARA'S CALL CARD ──────────────────── */
         /* Targets the first card under "Tara's Call" label. Since we can't easily
@@ -48743,12 +48752,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
         /* (Section-header colour is owned by the V13.4.193 rule further down --
            a second, weaker rule here only created a specificity fight.) */
-        /* Buttons stop being flat text and become objects. */
+        /* V13.4.194: controls become pills with real presence, the way the
+           reference nav/filter/legend chips do. Padding grows with the radius
+           so the label is not crushed against a round edge. */
         [data-tara-theme="simple"] button.rounded-lg,
         [data-tara-theme="simple"] button.rounded-xl {
-          background-image: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0));
+          background-image: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.01));
           border-color: var(--tara-border-strong) !important;
+          padding-left: 14px !important;
+          padding-right: 14px !important;
         }
+        /* The page's own frame gets the reference's large outer radius. */
+        [data-tara-theme="simple"] main,
+        [data-tara-theme="simple"] .rounded-2xl { border-radius: 26px !important; }
         @media (hover:hover) and (pointer:fine) {
           [data-tara-theme="simple"] button.rounded-lg:hover,
           [data-tara-theme="simple"] button.rounded-xl:hover {
@@ -48787,6 +48803,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            Flow, Loss recap, ...) stayed grey lowercase while the arbitrary-value
            ones became headers. Brought in line so the header treatment is
            consistent no matter which utility a component happened to use. */
+        /* V13.4.194: small tracked caps do not need the V13.4.191 size bump --
+           uppercase + 0.12em tracking already gives them presence, and at 11px
+           they were overflowing tight flex rows (seen live: "ENTRY WINDOW"
+           colliding with the value beside it). Back to their declared size, which
+           is also the more refined label treatment. */
+        [data-tara-theme="simple"] .text-\[10px\].uppercase[class*="tracking-"],
+        [data-tara-theme="simple"] .text-\[9px\].uppercase[class*="tracking-"],
+        [data-tara-theme="simple"] .text-\[8px\].uppercase[class*="tracking-"] {
+          font-size: 9.6px !important;
+        }
         [data-tara-theme="simple"] .uppercase.tracking-wider,
         [data-tara-theme="simple"] .uppercase.tracking-widest,
         [data-tara-theme="simple"] .uppercase.tracking-wide {

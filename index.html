@@ -98,7 +98,7 @@
            off it (18/255 separation, ~2x the old), and hairlines become visible
            edges rather than the near-invisible 4% they were. */
         --bg-0: #050508;   /* page  — true black with a blue undertone */
-        --bg-1: #15151F;   /* card  — clearly lifted off the page */
+        --bg-1: #171721;   /* card  — clearly lifted off the page */
         --bg-2: #1D1D29;   /* raised card / hover */
         --bg-3: #262633;   /* overlay / popover */
 
@@ -116,10 +116,10 @@
         /* Signals + signature */
         --up: #28CC95;
         --down: #FF4D6A;
-        --accent: #E5C07B;      /* brighter — the signature should read as lit metal */
-        --accent-hi: #F7E3B5;
-        --accent-glow: rgba(229, 192, 123, 0.18);
-        --accent-border: rgba(229, 192, 123, 0.45);
+        --accent: #F5C960;      /* saturated, lit against true black */
+        --accent-hi: #FFE39B;
+        --accent-glow: rgba(245, 201, 96, 0.20);
+        --accent-border: rgba(245, 201, 96, 0.50);
 
         /* Elevation */
         --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -210,10 +210,15 @@
          caps are supposed to work and how they stop reading as cramped. */
       .uppercase { letter-spacing: 0.09em !important; }
 
-      /* Radii: four values collapse to two plus the pill. */
-      .rounded-lg  { border-radius: 11px !important; }
-      .rounded-xl  { border-radius: 15px !important; }
-      .rounded-2xl { border-radius: 18px !important; }
+      /* V13.4.194: radii taken from the reference dashboards -- their most
+         recognisable trait is how round the cards are against true black.
+         Buttons/chips become true pills; panels get a large, soft radius. */
+      .rounded-lg  { border-radius: 14px !important; }
+      .rounded-xl  { border-radius: 22px !important; }
+      .rounded-2xl { border-radius: 26px !important; }
+      button.rounded-lg, button.rounded-xl,
+      button.rounded-md, a.rounded-lg,
+      .rounded-full { border-radius: 9999px !important; }
 
       /* Display face: tighter tracking so headings read as designed, not default. */
       .font-serif {
