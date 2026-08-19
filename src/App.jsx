@@ -358,6 +358,8 @@ const cloudSupabaseRead=async(path)=>{
 //   survives re-renders; a path failing 3+ times in a row is benched for 90s
 //   and then re-probed, so an outage never becomes permanent.
 const _KFEED_HEALTH={};
+// V13.4.212: one-shot audit flag for the _MINI_KEEP drift guard below.
+let _MINI_AUDITED=false;
 const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows','memory/hourlyRecord']);
 
 // V12.8: MULTI-DEVICE SYNC HEARTBEAT ──────────────────────────────────────────
@@ -5257,8 +5259,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.211-quote-coverage';
-const TARA_VERSION_DISPLAY='Tara 13.4.211';
+const BASELINE_VERSION='2026.08.19-v13.4.212-minikeep-guard';
+const TARA_VERSION_DISPLAY='Tara 13.4.212';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33841,6 +33843,40 @@ function TaraApp(){
       'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
+      // V13.4.212 DRIFT GUARD. Four separate field sets have been added at lock
+      //   time and forgotten in _MINI_KEEP, each discovered months later by
+      //   noticing the data was gone (see the V13.4.31/67/84/211 notes above).
+      //   The failure is silent by construction: the key is simply not copied.
+      //   This warns once per session about SCALAR fields that would be dropped
+      //   -- scalars because all four misses were numbers/booleans/short
+      //   strings. Verbose payloads and _-prefixed internals are dropped
+      //   deliberately and stay quiet, so this only fires on the real mistake.
+      if(!_MINI_AUDITED){
+        _MINI_AUDITED=true;
+        try{
+          const _missed=[];
+          for(const k in e){
+            if(_MINI_KEEP.has(k))continue;
+            if(k.charAt(0)==='_')continue;           // internal/debug, dropped on purpose
+            const v=e[k];const t=typeof v;
+            const _scalar=(v===null||t==='number'||t==='boolean'||(t==='string'&&v.length<=40));
+            // V13.4.212b: also flag SMALL PLAIN OBJECTS. The scalar rule alone
+            //   missed V13.4.31 (signalScoresAtLock) -- the very first instance
+            //   of this bug -- because it is an object. Arrays stay excluded:
+            //   reasoning / timeSeries / releaseSignalsHistory are verbose
+            //   payloads dropped on purpose. A false positive here costs one
+            //   line of console noise once per session; a false negative costs
+            //   another silent months-long data loss.
+            const _smallObj=(v&&t==='object'&&!Array.isArray(v)&&Object.keys(v).length<=30);
+            if(_scalar||_smallObj)_missed.push(k);
+          }
+          if(_missed.length){
+            console.warn('[V13.4.212] _MINI_KEEP drift: '+_missed.length+
+              ' scalar field(s) are written at lock time but NOT whitelisted, so they are lost '+
+              'whenever an entry rehydrates from the deep cache -> '+_missed.join(', '));
+          }
+        }catch(_e){/* a diagnostic must never break the write path */}
+      }
       const o={};
       for(const k in e){if(_MINI_KEEP.has(k))o[k]=e[k];}
       return o;
