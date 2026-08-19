@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#050508" />
+    <meta name="theme-color" content="#07070F" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -40,8 +40,8 @@
       //     invisible in the mode actually in use -- see the V13.4.190 note on
       //     the tokens below. Corrected to a real 18/255 page-vs-card
       //     separation, roughly double what the app had before.
-      //   * The two competing golds (#C9A961 and #D4A24C) are unified into one
-      //     brighter signature accent (#E5C07B) with a highlight tone.
+      //   * The signature is VIOLET as of V13.4.197 (was a gold lineage:
+      //     #C9A961/#D4A24C -> #E5C07B -> #F5C960 -> #A78BFA). See the token block.
       //   * Display typography: Space Grotesk is mapped onto `serif`, which
       //     restyles all 43 existing font-serif headings with zero component
       //     edits -- the single highest-leverage line in this file.
@@ -65,9 +65,9 @@
               red: { 400: '#FF4D6A' },
               pink: { 400: '#FF4D6A' },
               // Signature accent — unified + brightened.
-              amber: { 300: '#F7E3B5', 400: '#E5C07B', 500: '#C29A54' },
-              orange: { 400: '#E5C07B' },
-              yellow: { 400: '#E5C07B' },
+              amber: { 300: '#CDBBFF', 400: '#A78BFA', 500: '#8B6DF0' },
+              orange: { 400: '#A78BFA' },
+              yellow: { 400: '#A78BFA' },
               // Everything else collapses to the cool grayscale ramp.
               indigo: { 100: '#E8E8ED', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
               sky: { 200: '#D6D6DE', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
@@ -97,15 +97,18 @@
            the corrected values: the page goes properly black, cards lift clearly
            off it (18/255 separation, ~2x the old), and hairlines become visible
            edges rather than the near-invisible 4% they were. */
-        --bg-0: #050508;   /* page  — true black with a blue undertone */
-        --bg-1: #171721;   /* card  — clearly lifted off the page */
-        --bg-2: #1D1D29;   /* raised card / hover */
-        --bg-3: #262633;   /* overlay / popover */
+        /* V13.4.197: the base is now INDIGO, not neutral black. A hue in the
+           ground plane is what separates the reference dashboards from a plain
+           dark theme -- neutral greys read as "unstyled dark mode". */
+        --bg-0: #07070F;   /* page  — deep indigo ground */
+        --bg-1: #161624;   /* card  — clearly lifted off the page */
+        --bg-2: #1E1E2E;   /* raised card / hover */
+        --bg-3: #282840;   /* overlay / popover */
 
         /* Hairlines — visible edges, not 4% ghosts */
-        --line-1: rgba(255,255,255,0.075);
-        --line-2: rgba(255,255,255,0.14);
-        --line-3: rgba(255,255,255,0.22);
+        --line-1: rgba(173,160,255,0.11);
+        --line-2: rgba(173,160,255,0.20);
+        --line-3: rgba(173,160,255,0.30);
 
         /* Ink */
         --ink-1: #EDEDED;
@@ -116,16 +119,16 @@
         /* Signals + signature */
         --up: #28CC95;
         --down: #FF4D6A;
-        --accent: #F5C960;      /* saturated, lit against true black */
-        --accent-hi: #FFE39B;
-        --accent-glow: rgba(245, 201, 96, 0.20);
-        --accent-border: rgba(245, 201, 96, 0.50);
+        --accent: #A78BFA;      /* violet signature — unmistakable against mint/rose */
+        --accent-hi: #CDBBFF;
+        --accent-glow: rgba(167, 139, 250, 0.22);
+        --accent-border: rgba(167, 139, 250, 0.52);
 
         /* Elevation */
         --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.5);
         --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.5);
-        --glow-accent: 0 0 24px rgba(229, 192, 123, 0.16);
+        --glow-accent: 0 0 26px rgba(167, 139, 250, 0.20);
 
         /* Motion — one language, used everywhere */
         --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -154,8 +157,8 @@
         pointer-events: none;
         z-index: 0;
         background:
-          radial-gradient(1100px 560px at 50% -12%, rgba(229, 192, 123, 0.07), transparent 68%),
-          radial-gradient(900px 700px at 100% 100%, rgba(130, 130, 175, 0.05), transparent 70%);
+          radial-gradient(1100px 560px at 50% -12%, rgba(167, 139, 250, 0.10), transparent 68%),
+          radial-gradient(900px 700px at 100% 100%, rgba(88, 200, 220, 0.045), transparent 70%);
       }
 
       /* Film grain — kills banding on large dark gradients. Very low opacity. */
@@ -188,15 +191,18 @@
          LAYOUT RISK, stated plainly: bigger text in fixed-width columns can
          wrap or overflow. The bump was kept modest for exactly that reason,
          and the app was checked for overflow after. */
-      .text-\[7px\]  { font-size: 9px !important;    line-height: 1.45 !important; }
-      .text-\[8px\]  { font-size: 9.5px !important;  line-height: 1.45 !important; }
-      .text-\[9px\]  { font-size: 10.5px !important; line-height: 1.45 !important; }
-      .text-\[10px\] { font-size: 11px !important;   line-height: 1.45 !important; }
-      .text-\[11px\] { font-size: 12px !important;   line-height: 1.45 !important; }
-      .text-\[12px\] { font-size: 13px !important;   line-height: 1.45 !important; }
-      .text-\[13px\] { font-size: 14px !important;   line-height: 1.45 !important; }
-      .text-xs        { font-size: 12.5px !important; line-height: 1.45 !important; }
-      .text-sm        { font-size: 14.5px !important; line-height: 1.45 !important; }
+      /* V13.4.197: reported still small. Whole scale steps up again; the floor
+         moves from 9px to 10.5px, which is the real readability threshold for
+         sustained on-screen use. */
+      .text-\[7px\]  { font-size: 10px !important; line-height: 1.5 !important; }
+      .text-\[8px\]  { font-size: 10.5px !important;   line-height: 1.5 !important; }
+      .text-\[9px\]  { font-size: 11.5px !important;   line-height: 1.5 !important; }
+      .text-\[10px\] { font-size: 12px !important; line-height: 1.5 !important; }
+      .text-\[11px\] { font-size: 13px !important; line-height: 1.5 !important; }
+      .text-\[12px\] { font-size: 14px !important; line-height: 1.5 !important; }
+      .text-\[13px\] { font-size: 14.5px !important;   line-height: 1.5 !important; }
+      .text-xs        { font-size: 13.5px !important; line-height: 1.5 !important; }
+      .text-sm        { font-size: 15px !important;   line-height: 1.5 !important; }
 
       /* Hero numerals: the hierarchy anchor. Tight tracking + lighter weight is
          what makes a large number read as considered rather than merely big. */
