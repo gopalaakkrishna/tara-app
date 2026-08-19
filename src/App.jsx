@@ -43731,6 +43731,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //                                        this is why edge-watch keeps its own
           //                                        banding instead of the global dial
           //     95c+   n=13  WR 84.6%  -15.1c/ct   blocked (was already, via tail cap)
+          // ── FIRST POST-SHIP READ (n=82 resolved, 2026-08-14..19). Recorded here so
+          //    neither session re-litigates this from scratch. The gates did exactly
+          //    what they were built to do:
+          //        <55c      PRE n=36  -7.19c/ct (-259c)  -> POST n=0
+          //        70-84c    PRE n=119 -10.26c/ct(-1221c) -> POST n=1
+          //        WR        PRE 67.5%                    -> POST 73.2%
+          //    Aggregate EV is NOT yet distinguishable (PRE +0.16 vs POST -0.32c/ct,
+          //    ~1.5sd apart; daily EV swings -68..+43c/ct dwarf the effect at this n).
+          //    Do NOT read that as the band failing, and do NOT retune on it.
+          //    THE ONE THING TO WATCH -- this island is now 34% of resolved volume
+          //    (28/82) vs 11% pre-ship, a direct consequence of funnelling no-go-edge
+          //    into 55-69 or here. Its break-even is WR = 89.9% at the observed 89.9c
+          //    average cost; it is running 92.9% post-ship vs 97.3% pre-ship. That is
+          //    a ~3pt margin on a third of the book. If island WR drifts under ~90%
+          //    it flips from the tier's best pocket to its worst, fast, because a loss
+          //    here costs ~90c and a win pays ~10c. Re-measure before widening it.
           const _ewBlocked=_ewCost<55||(_ewCost>=70&&_ewCost<85)||_ewCost>=95;
           // V13.4.179: GAP-OPPOSED GUARD, edge-watch edition. Every other commit path
           //   has one (V10.7.97 directional-lock, V10.8.1 time-cap) -- edge-watch was
