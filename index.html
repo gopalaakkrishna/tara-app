@@ -169,6 +169,52 @@
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
       }
 
+      /* ══════════════════════════════════════════════════════════════════
+         V13.4.191 TYPE SCALE.
+         Measured first: 297/322 rendered text elements were 7-12px, giving the
+         page a flat, dense texture with no hierarchy. Recolouring could never
+         fix that. This rebuilds the scale globally.
+
+         Small sizes move up modestly (+1 to +1.5px) -- 8-9px is below
+         comfortable reading and was the app's most common size. Hero numerals
+         move up hard, because contrast between smallest and largest is what
+         makes a layout read as designed rather than as a data dump. Ratio goes
+         from 7:60 to 9:70.
+
+         !important is deliberate: these override Tailwind's generated utility
+         classes, which is the only way to restyle ~1,500 call sites without
+         editing 1,500 call sites. To revert the whole thing, delete this block.
+
+         LAYOUT RISK, stated plainly: bigger text in fixed-width columns can
+         wrap or overflow. The bump was kept modest for exactly that reason,
+         and the app was checked for overflow after. */
+      .text-\[7px\]  { font-size: 9px !important;    line-height: 1.45 !important; }
+      .text-\[8px\]  { font-size: 9.5px !important;  line-height: 1.45 !important; }
+      .text-\[9px\]  { font-size: 10.5px !important; line-height: 1.45 !important; }
+      .text-\[10px\] { font-size: 11px !important;   line-height: 1.45 !important; }
+      .text-\[11px\] { font-size: 12px !important;   line-height: 1.45 !important; }
+      .text-\[12px\] { font-size: 13px !important;   line-height: 1.45 !important; }
+      .text-\[13px\] { font-size: 14px !important;   line-height: 1.45 !important; }
+      .text-xs        { font-size: 12.5px !important; line-height: 1.45 !important; }
+      .text-sm        { font-size: 14.5px !important; line-height: 1.45 !important; }
+
+      /* Hero numerals: the hierarchy anchor. Tight tracking + lighter weight is
+         what makes a large number read as considered rather than merely big. */
+      .text-2xl { font-size: 30px !important; letter-spacing: -0.03em !important; }
+      .text-3xl { font-size: 38px !important; letter-spacing: -0.035em !important; }
+      .text-4xl { font-size: 46px !important; letter-spacing: -0.04em !important; }
+      .text-5xl { font-size: 58px !important; letter-spacing: -0.042em !important; }
+      .text-6xl { font-size: 70px !important; letter-spacing: -0.045em !important; }
+
+      /* Micro-labels earn their size back through tracking, which is how small
+         caps are supposed to work and how they stop reading as cramped. */
+      .uppercase { letter-spacing: 0.1em !important; }
+
+      /* Radii: four values collapse to two plus the pill. */
+      .rounded-lg  { border-radius: 11px !important; }
+      .rounded-xl  { border-radius: 15px !important; }
+      .rounded-2xl { border-radius: 18px !important; }
+
       /* Display face: tighter tracking so headings read as designed, not default. */
       .font-serif {
         letter-spacing: -0.02em;
