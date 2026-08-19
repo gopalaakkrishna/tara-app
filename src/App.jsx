@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.185-totals-paper-record';
-const TARA_VERSION_DISPLAY='Tara 13.4.185';
+const BASELINE_VERSION='2026.08.19-v13.4.186-hourly-ladder-ev';
+const TARA_VERSION_DISPLAY='Tara 13.4.186';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16255,7 +16255,17 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
   //   CAVEAT: n=70 in the excluded bucket, one export. Widen via localStorage
   //   'taraHourlyMaxCost' if live results disagree.
   const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:60;}catch(_e){return 60;}})();
-  const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
+  // V13.4.186: MAX_LOCKS 6 -> 3. Measured on the 286 settled hourly locks, EV by
+  //   the lock's ORDINAL within its hour (first lock of the hour = ord 1):
+  //     ord 1   n=171  WR 64.3%  +9.31c/ct  +1592c   <- essentially the whole book
+  //     ord 2   n= 83  WR 54.2%  +0.27c/ct    +22c
+  //     ord 3   n= 27  WR 59.3%  +4.37c/ct   +118c
+  //     ord 4+  n=  5  WR 40.0% -17.40c/ct    -87c   <- cut
+  //   Hours that reached 4+ locks measure -10.10c/ct across all 20 of their locks.
+  //   Cutting only the clearly-negative tail (ord 4+), same shape as the V13.4.130
+  //   tail cap: ord 2 and 3 are near-breakeven-to-positive and stay, because
+  //   blocking breakeven volume is the V13.4.146 mistake.
+  const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:3;}catch(_e){return 3;}})();
   const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
   // V13.4.115: back ON by default. User wants this fixed/verifiable, not removed. Settlement
   //   code (fetches real Kalshi market, reads Kalshi's own result field) still looks correct
@@ -16384,7 +16394,34 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
     })();
     // V13.4.164: require hydration before taking a NEW lock. Locking while L.locks is
     //   still empty-but-unhydrated is precisely how the contradicting pair got through.
-    if(dir&&L.hydrated&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&coolOk&&L.locks.length<MAX_LOCKS){
+    // V13.4.186: MID-WINDOW DEAD ZONE (25-35 min left). The V13.4.146 note above
+    //   correctly refused to move the 45-min CAP, because the region is not
+    //   monotonic and there is no clean boundary to cut on. It is not a boundary --
+    //   it is a notch. Measured on the settled book with minsAtLock persisted:
+    //     <25m left    n=41  +2.87/+5.38c/ct
+    //     25-35m left  n=18  WR 33.3%  -21.06c/ct  -379c   <- the notch
+    //     35-45m left  n=60  WR 70.0%  +15.10c/ct  +906c
+    //   Three independent checks before shipping a middle cut:
+    //     (a) it is negative in EVERY cost bucket (<55 -11.50, 55-59 -29.57, 60+ -26.67),
+    //         so it is not the cost story;
+    //     (b) it survives the ordinal control -- negative for first-locks (n=13,
+    //         -17.46) AND for stacked locks (n=5, -30.40), so it is not the
+    //         MAX_LOCKS story either;
+    //     (c) the older independent sample recorded in the V13.4.146 note above
+    //         (196 locks, different window, derived lock times) flags the same
+    //         region: 20-30min n=18 WR 44.4% -14.50c.
+    //   Mechanism that makes this more than a curve fit: 35-45m locks are signals
+    //   already strong enough to fire the moment the 45m cap lets them -- the
+    //   strongest reads. <25m locks are late, where distance-to-strike finally
+    //   carries real information (the 85%-at-15min band). 25-35m is the worst of
+    //   both: too weak to fire early, too early for the barrier to have resolved.
+    //   NOT a volume cut -- the ladder keeps scanning, so a signal blocked at 30m
+    //   can still lock at 20m once it re-confirms. Deferral, not deletion.
+    //   Dials: 'taraHourlyDeadLo' / 'taraHourlyDeadHi' (minutes; set equal to disable).
+    const _MID_DEAD_LO=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadLo'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:25;}catch(_e){return 25;}})();
+    const _MID_DEAD_HI=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadHi'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:35;}catch(_e){return 35;}})();
+    const _inMidDead=_MID_DEAD_HI>_MID_DEAD_LO&&minsLeft>=_MID_DEAD_LO&&minsLeft<_MID_DEAD_HI;
+    if(dir&&L.hydrated&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&!_inMidDead&&coolOk&&L.locks.length<MAX_LOCKS){
       const side=dir==='UP'?'YES':'NO';
       // V13.4.164: check the PERSISTED record too, not just the in-memory mirror.
       //   L.locks is a cache of rec.pending; rec.pending is the thing that actually
