@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.202-lock-cap-union';
-const TARA_VERSION_DISPLAY='Tara 13.4.202';
+const BASELINE_VERSION='2026.08.19-v13.4.203-sitout-neutral';
+const TARA_VERSION_DISPLAY='Tara 13.4.203';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -22593,7 +22593,7 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
   },[taraCallLog,windowType]);
   const totalAcrossWindows=Array.isArray(taraCallLog)?taraCallLog.length:0;
   const _learnTotal=taraLearnings?.totalResolved||0;
-  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(40,204,149,0.95)'},LOSS:{bg:'rgba(255,77,106,0.18)',fg:'rgba(255,77,106,0.95)'},SITOUT:{bg:'rgba(40,204,149,0.16)',fg:'rgba(40,204,149,0.85)'},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
+  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(40,204,149,0.95)'},LOSS:{bg:'rgba(255,77,106,0.18)',fg:'rgba(255,77,106,0.95)'},/*V13.4.203: sit-outs were GREEN, the same family as WIN, so a window Tara declined read as a window she won. Neutral now -- a sit-out is an absence of a trade, not an outcome, and only real outcomes get a signal colour.*/SITOUT:{bg:'rgba(255,255,255,0.05)',fg:'rgba(255,255,255,0.45)'},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
   const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
   const _fmtTime=(ms)=>_fmtTimeTz(ms,timeFormat,{hour:'2-digit',minute:'2-digit'});
   return React.createElement(React.Fragment,null,
