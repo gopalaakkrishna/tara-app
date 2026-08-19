@@ -5257,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.206-green-discipline';
-const TARA_VERSION_DISPLAY='Tara 13.4.206';
+const BASELINE_VERSION='2026.08.19-v13.4.207-sitout-amber';
+const TARA_VERSION_DISPLAY='Tara 13.4.207';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5951,6 +5951,13 @@ const PRICE_SOURCE_DEFAULT='coinbase';
 //   These coexist — copper sits between green and red as a "watch but don't alarm" tier.
 /* V13.4.206: the chrome accent must NOT be a signal colour. This constant is used 94 times for modal headings, active pills and stamps; after the Kalshi migration all of it rendered in #28CC95 -- the exact WIN green -- so chrome and outcomes were indistinguishable. Neutral now: green and red are left to mean only what they measure. */
 const T2_GOLD='rgba(255,255,255,0.90)';
+// V13.4.207: SIT-OUT amber. Its own named colour so the four render sites cannot
+//   drift apart again (they already did once: green in three of them, neutral in a
+//   fourth). Amber is unambiguous against WIN mint and LOSS rose, and reads as
+//   'skipped / stood down' rather than as an outcome.
+const T2_SITOUT='#E8B44C';
+const T2_SITOUT_FG='rgba(232,180,76,0.92)';
+const T2_SITOUT_BG='rgba(232,180,76,0.13)';
 const T2_COPPER='#C97D4A';
 
 // V13.4.167: Discord embed palette + formatters, so alerts match the app instead of
@@ -22641,7 +22648,7 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
   },[taraCallLog,windowType]);
   const totalAcrossWindows=Array.isArray(taraCallLog)?taraCallLog.length:0;
   const _learnTotal=taraLearnings?.totalResolved||0;
-  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(40,204,149,0.95)'},LOSS:{bg:'rgba(255,77,106,0.18)',fg:'rgba(255,77,106,0.95)'},/*V13.4.203: sit-outs were GREEN, the same family as WIN, so a window Tara declined read as a window she won. Neutral now -- a sit-out is an absence of a trade, not an outcome, and only real outcomes get a signal colour.*/SITOUT:{bg:'rgba(255,255,255,0.05)',fg:'rgba(255,255,255,0.45)'},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
+  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(40,204,149,0.95)'},LOSS:{bg:'rgba(255,77,106,0.18)',fg:'rgba(255,77,106,0.95)'},/*V13.4.203: sit-outs were GREEN, the same family as WIN, so a window Tara declined read as a window she won. Neutral now -- a sit-out is an absence of a trade, not an outcome, and only real outcomes get a signal colour.*/SITOUT:{bg:T2_SITOUT_BG,fg:T2_SITOUT_FG},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
   const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
   const _fmtTime=(ms)=>_fmtTimeTz(ms,timeFormat,{hour:'2-digit',minute:'2-digit'});
   return React.createElement(React.Fragment,null,
@@ -22927,9 +22934,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   },[taraCallLog,filter,assetFilter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
   /* V13.4.206: SITOUT was WIN-green here, so 'SIT OUT' rows in the record read as wins at a glance -- the single most confusing thing in the modal. Neutral: a sit-out is not an outcome. */
-  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(40,204,149,0.95)'}:r==='LOSS'?{color:'rgba(255,77,106,0.95)'}:r==='SITOUT'?{color:'rgba(255,255,255,0.52)'}:{color:'rgba(237,237,237,0.4)'};
+  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(40,204,149,0.95)'}:r==='LOSS'?{color:'rgba(255,77,106,0.95)'}:r==='SITOUT'?{color:T2_SITOUT_FG}:{color:'rgba(237,237,237,0.4)'};
   /* V13.4.206: the fallback (SIT_OUT / unknown) was green as well. */
-  const _dirStyle=(d)=>d==='UP'?{color:'rgba(40,204,149,0.85)'}:d==='DOWN'?{color:'rgba(255,77,106,0.85)'}:{color:'rgba(255,255,255,0.45)'};
+  const _dirStyle=(d)=>d==='UP'?{color:'rgba(40,204,149,0.85)'}:d==='DOWN'?{color:'rgba(255,77,106,0.85)'}:{color:T2_SITOUT_FG};
   // V5.7.5: derive window period (e.g. "09:00–09:15") from windowId. windowId encodes the
   //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
   // V6.5.3: All time displays in this modal honor the parent's useLocalTime toggle.
@@ -24488,7 +24495,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                 )
                               : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
                                   e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',title:'Manually edited'},'✎'),
-                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded-lg shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(40,204,149,0.10)':e.result==='LOSS'?'rgba(255,77,106,0.10)':e.result==='SITOUT'?'rgba(255,255,255,0.06)':e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(237,237,237,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
+                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded-lg shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(40,204,149,0.10)':e.result==='LOSS'?'rgba(255,77,106,0.10)':e.result==='SITOUT'?T2_SITOUT_BG:e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(237,237,237,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
                                   onEditEntry&&React.createElement('button',{
                                     onClick:()=>setEditingId(e.id),
                                     className:'p-1 rounded-lg text-[#EDEDED]/30 hover:text-[#EDEDED]/70 hover:bg-[#EDEDED]/5 transition-colors',
