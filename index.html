@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#08080B" />
+    <meta name="theme-color" content="#050508" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -35,10 +35,13 @@
       //
       // What DID change:
       //   * Base moved off flat neutral black to a layered near-black with a
-      //     faint cool undertone (#08080B -> #1C1C24), so large dark areas read
-      //     as depth instead of a void, and elevation becomes legible.
+      //     cool undertone (#050508 -> #22222E). v189 first shipped this ~1.6%
+      //     away from the existing values, which made the whole redesign
+      //     invisible in the mode actually in use -- see the V13.4.190 note on
+      //     the tokens below. Corrected to a real 18/255 page-vs-card
+      //     separation, roughly double what the app had before.
       //   * The two competing golds (#C9A961 and #D4A24C) are unified into one
-      //     brighter signature accent (#D9B368) with a highlight tone.
+      //     brighter signature accent (#E5C07B) with a highlight tone.
       //   * Display typography: Space Grotesk is mapped onto `serif`, which
       //     restyles all 43 existing font-serif headings with zero component
       //     edits -- the single highest-leverage line in this file.
@@ -62,9 +65,9 @@
               red: { 400: '#FF4D6A' },
               pink: { 400: '#FF4D6A' },
               // Signature accent — unified + brightened.
-              amber: { 300: '#F0D9A0', 400: '#D9B368', 500: '#B8924D' },
-              orange: { 400: '#D9B368' },
-              yellow: { 400: '#D9B368' },
+              amber: { 300: '#F7E3B5', 400: '#E5C07B', 500: '#C29A54' },
+              orange: { 400: '#E5C07B' },
+              yellow: { 400: '#E5C07B' },
               // Everything else collapses to the cool grayscale ramp.
               indigo: { 100: '#E8E8ED', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
               sky: { 200: '#D6D6DE', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
@@ -88,15 +91,21 @@
       /* ── Design tokens ─────────────────────────────────────────────────── */
       :root {
         /* Surfaces, dark -> light. Cool undertone gives depth to big blacks. */
-        --bg-0: #08080B;   /* page */
-        --bg-1: #101014;   /* card */
-        --bg-2: #16161C;   /* raised card / hover */
-        --bg-3: #1C1C24;   /* overlay / popover */
+        /* V13.4.190: v189's values were within ~1.6% of what the app already
+           had, so the "redesign" was invisible in the mode actually in use, and
+           page-vs-card separation even dropped from 10/255 to 9/255. These are
+           the corrected values: the page goes properly black, cards lift clearly
+           off it (18/255 separation, ~2x the old), and hairlines become visible
+           edges rather than the near-invisible 4% they were. */
+        --bg-0: #050508;   /* page  — true black with a blue undertone */
+        --bg-1: #12121A;   /* card  — clearly lifted off the page */
+        --bg-2: #1A1A24;   /* raised card / hover */
+        --bg-3: #22222E;   /* overlay / popover */
 
-        /* Hairlines */
-        --line-1: #1C1C22;
-        --line-2: #2A2A34;
-        --line-3: #3A3A46;
+        /* Hairlines — visible edges, not 4% ghosts */
+        --line-1: rgba(255,255,255,0.075);
+        --line-2: rgba(255,255,255,0.14);
+        --line-3: rgba(255,255,255,0.22);
 
         /* Ink */
         --ink-1: #EDEDED;
@@ -107,16 +116,16 @@
         /* Signals + signature */
         --up: #28CC95;
         --down: #FF4D6A;
-        --accent: #D9B368;
-        --accent-hi: #F0D9A0;
-        --accent-glow: rgba(217, 179, 104, 0.16);
-        --accent-border: rgba(217, 179, 104, 0.38);
+        --accent: #E5C07B;      /* brighter — the signature should read as lit metal */
+        --accent-hi: #F7E3B5;
+        --accent-glow: rgba(229, 192, 123, 0.18);
+        --accent-border: rgba(229, 192, 123, 0.45);
 
         /* Elevation */
         --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.5);
         --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.5);
-        --glow-accent: 0 0 24px rgba(217, 179, 104, 0.14);
+        --glow-accent: 0 0 24px rgba(229, 192, 123, 0.16);
 
         /* Motion — one language, used everywhere */
         --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -145,8 +154,8 @@
         pointer-events: none;
         z-index: 0;
         background:
-          radial-gradient(1200px 600px at 50% -10%, rgba(217, 179, 104, 0.055), transparent 70%),
-          radial-gradient(900px 700px at 100% 100%, rgba(120, 120, 160, 0.035), transparent 70%);
+          radial-gradient(1100px 560px at 50% -12%, rgba(229, 192, 123, 0.07), transparent 68%),
+          radial-gradient(900px 700px at 100% 100%, rgba(130, 130, 175, 0.05), transparent 70%);
       }
 
       /* Film grain — kills banding on large dark gradients. Very low opacity. */
