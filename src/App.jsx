@@ -5257,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.205-ladder-redundancy';
-const TARA_VERSION_DISPLAY='Tara 13.4.205';
+const BASELINE_VERSION='2026.08.19-v13.4.206-green-discipline';
+const TARA_VERSION_DISPLAY='Tara 13.4.206';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5949,7 +5949,8 @@ const PRICE_SOURCE_DEFAULT='coinbase';
 //   Emerald  — wins, UP locks, profit (unchanged)
 //   Rose     — losses, DOWN locks, adverse (unchanged)
 //   These coexist — copper sits between green and red as a "watch but don't alarm" tier.
-const T2_GOLD='#28CC95';
+/* V13.4.206: the chrome accent must NOT be a signal colour. This constant is used 94 times for modal headings, active pills and stamps; after the Kalshi migration all of it rendered in #28CC95 -- the exact WIN green -- so chrome and outcomes were indistinguishable. Neutral now: green and red are left to mean only what they measure. */
+const T2_GOLD='rgba(255,255,255,0.90)';
 const T2_COPPER='#C97D4A';
 
 // V13.4.167: Discord embed palette + formatters, so alerts match the app instead of
@@ -5974,9 +5975,9 @@ const _signedMoney=(v)=>`${(Number(v)||0)>=0?'+':'-'}${_compactMoney(v)}`;
 //   whale alert line up identically instead of each padding its own way.
 const _dcRow=(label,value,note)=>
   (String(label).padEnd(8)+String(value).padStart(11)+(note?`   ${note}`:'')).replace(/\s+$/,'');
-const T2_GOLD_GLOW='rgba(40,204,149,0.18)';
-const T2_GOLD_BORDER='rgba(40,204,149,0.35)';
-const T2_GOLD_DIM='rgba(40,204,149,0.45)';
+const T2_GOLD_GLOW='rgba(255,255,255,0.07)';
+const T2_GOLD_BORDER='rgba(255,255,255,0.18)';
+const T2_GOLD_DIM='rgba(255,255,255,0.34)';
 const T2_COPPER_BG='rgba(201,125,74,0.08)';
 const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
 // Tabular-nums monospace style — used for all prices, posteriors, statistics
@@ -16632,7 +16633,7 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
           memory section too.' */}
       <button
         className="ml-2 text-[11px] px-2.5 py-1 rounded-lg"
-        style={{background:'rgba(212,162,76,0.08)',color:'rgba(212,162,76,0.9)',border:'1px solid rgba(212,162,76,0.25)'}}
+        style={{background:'rgba(212,162,76,0.08)',color:'rgba(255,255,255,0.62)',border:'1px solid rgba(212,162,76,0.25)'}}
         onClick={()=>_setHourlyMemOpen(true)}
       >Memory</button>
       {_hourlyMemOpen&&React.createElement(HourlyMemoryModal,{onClose:()=>_setHourlyMemOpen(false)})}
@@ -16643,7 +16644,7 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
           the historical summaries follow. */}
       {LOCKS.length>0&&(
         <div className="mb-3 space-y-1.5">
-          <div className="text-[9px] uppercase tracking-[0.16em] font-bold" style={{color:'rgba(212,162,76,0.9)'}}>
+          <div className="text-[9px] uppercase tracking-[0.16em] font-bold" style={{color:'rgba(255,255,255,0.62)'}}>
             {LOCKS.length} open lock{LOCKS.length===1?'':'s'} this hour
           </div>
           {/* V13.4.170: open locks no longer fade. The old `idx===0?'':'opacity-60'`
@@ -17328,7 +17329,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               const _t=snap.tier;
               const _isTier1=_t==='super-confluence'||_t==='confluence'||_t==='structural-led'||_t==='tape-led'||_t==='rising-confluence'||_t==='patient'||_t==='exceptional';
               const _isTier3=_t==='single'||_t==='time-cap-commit'||_t==='timer-commit'||_t==='no-go-data'||_t==='no-go-edge';
-              const _color=_isTier1?'#6FA98C':_isTier3?'#C06A72':'#28CC95';
+              const _color=_isTier1?'#6FA98C':_isTier3?'rgba(255,77,106,0.72)':'#28CC95';
               return <span
                 className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-lg self-baseline tabular-nums"
                 style={{color:_color,background:`${_color}1c`,border:`1px solid ${_color}55`}}
@@ -22925,8 +22926,10 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     };
   },[taraCallLog,filter,assetFilter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
-  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(40,204,149,0.95)'}:r==='LOSS'?{color:'rgba(255,77,106,0.95)'}:r==='SITOUT'?{color:'rgba(40,204,149,0.85)'}:{color:'rgba(237,237,237,0.4)'};
-  const _dirStyle=(d)=>d==='UP'?{color:'rgba(40,204,149,0.85)'}:d==='DOWN'?{color:'rgba(255,77,106,0.85)'}:{color:'rgba(40,204,149,0.7)'};
+  /* V13.4.206: SITOUT was WIN-green here, so 'SIT OUT' rows in the record read as wins at a glance -- the single most confusing thing in the modal. Neutral: a sit-out is not an outcome. */
+  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(40,204,149,0.95)'}:r==='LOSS'?{color:'rgba(255,77,106,0.95)'}:r==='SITOUT'?{color:'rgba(255,255,255,0.52)'}:{color:'rgba(237,237,237,0.4)'};
+  /* V13.4.206: the fallback (SIT_OUT / unknown) was green as well. */
+  const _dirStyle=(d)=>d==='UP'?{color:'rgba(40,204,149,0.85)'}:d==='DOWN'?{color:'rgba(255,77,106,0.85)'}:{color:'rgba(255,255,255,0.45)'};
   // V5.7.5: derive window period (e.g. "09:00–09:15") from windowId. windowId encodes the
   //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
   // V6.5.3: All time displays in this modal honor the parent's useLocalTime toggle.
@@ -24485,7 +24488,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                 )
                               : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
                                   e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/35',title:'Manually edited'},'✎'),
-                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded-lg shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(40,204,149,0.10)':e.result==='LOSS'?'rgba(255,77,106,0.10)':e.result==='SITOUT'?'rgba(40,204,149,0.10)':e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(237,237,237,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
+                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded-lg shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(40,204,149,0.10)':e.result==='LOSS'?'rgba(255,77,106,0.10)':e.result==='SITOUT'?'rgba(255,255,255,0.06)':e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(237,237,237,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
                                   onEditEntry&&React.createElement('button',{
                                     onClick:()=>setEditingId(e.id),
                                     className:'p-1 rounded-lg text-[#EDEDED]/30 hover:text-[#EDEDED]/70 hover:bg-[#EDEDED]/5 transition-colors',
@@ -25264,7 +25267,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
     if(wr>=55)return {bg:'rgba(40,204,149,0.06)',border:'rgba(40,204,149,0.18)',color:'rgba(40,204,149,0.85)'};
     if(wr>=45)return {bg:'rgba(237,237,237,0.04)',border:'rgba(237,237,237,0.10)',color:'rgba(237,237,237,0.6)'};
     if(wr>=30)return {bg:'rgba(201,125,74,0.10)',border:'rgba(201,125,74,0.30)',color:'#C97D4A'};
-    return {bg:'rgba(255,77,106,0.10)',border:'rgba(255,77,106,0.30)',color:'#C06A72'};
+    return {bg:'rgba(255,77,106,0.10)',border:'rgba(255,77,106,0.30)',color:'rgba(255,77,106,0.72)'};
   };
 
   // ── Selected-hour drill view ──
@@ -25318,7 +25321,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
               for(const t of sorted){if(t.result===lastResult)streak++;else break;}
               return streak;
             })()}</div>
-            <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#6FA98C':'#C06A72'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
+            <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#6FA98C':'rgba(255,77,106,0.72)'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
           </div>
           <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="LIFE · 004"/>
@@ -25464,7 +25467,7 @@ function CohortCard({title,stamp,rows}){
       {rows.length===0&&<div className="text-[11px] text-[#EDEDED]/30 italic">No data</div>}
       {rows.map(r=>{
         const wr=r.wr;
-        const barColor=wr>=60?'#6FA98C':wr>=50?'rgba(40,204,149,0.5)':wr>=40?T2_COPPER:'#C06A72';
+        const barColor=wr>=60?'#6FA98C':wr>=50?'rgba(40,204,149,0.5)':wr>=40?T2_COPPER:'rgba(255,77,106,0.72)';
         return(
           <div key={r.key} className="flex items-center gap-2 mb-1.5 last:mb-0 text-[11px]">
             <span className="text-[#EDEDED]/65 w-32 sm:w-40 shrink-0 truncate">{r.key}</span>
@@ -25521,7 +25524,7 @@ function TapeStrip({tapeWindows,whaleLog}){
     return '$'+v;
   };
   const buyColor='#6FA98C';
-  const sellColor='#C06A72';
+  const sellColor='rgba(255,77,106,0.72)';
   // Trend indicator — only compute when the headline window AND at least 2 others
   // are above their floors. Otherwise we're inferring acceleration from noise.
   const _trend=(()=>{
@@ -25605,7 +25608,7 @@ function TapeStrip({tapeWindows,whaleLog}){
           <span className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/50 font-bold">Tape</span>
           {/* V6.3.2: Quality badge — 3-light at-a-glance trustworthiness indicator. */}
           {_quality.level!=='thin'&&(()=>{
-            const _color=_quality.level==='high'?'#6FA98C':_quality.level==='medium'?'#28CC95':'#C06A72';
+            const _color=_quality.level==='high'?'#6FA98C':_quality.level==='medium'?'#28CC95':'rgba(255,77,106,0.72)';
             const _label=_quality.level==='high'?'STRONG':_quality.level==='medium'?'MIXED':'WEAK';
             const _checks=[_quality.windowsAgree,_quality.volMeaningful,_quality.whalesAlign];
             const _tooltip=[
@@ -25619,7 +25622,7 @@ function TapeStrip({tapeWindows,whaleLog}){
                   {_checks.map((c,i)=>React.createElement('span',{
                     key:i,
                     className:'w-1.5 h-1.5 rounded-full',
-                    style:{background:c===true?_color:c===false?'#C06A72':'rgba(237,237,237,0.18)'},
+                    style:{background:c===true?_color:c===false?'rgba(255,77,106,0.72)':'rgba(237,237,237,0.18)'},
                   }))}
                 </span>
                 <span className="text-[10px] font-bold tracking-wider" style={{color:_color}}>{_label}</span>
@@ -25733,7 +25736,7 @@ function DepthStrip({orderBook,targetMargin}){
     return '$'+v;
   };
   const bidColor='#6FA98C';
-  const askColor='#C06A72';
+  const askColor='rgba(255,77,106,0.72)';
   // Quality: do TIGHT and STD agree directionally with meaningful strength?
   const _quality=(()=>{
     const _stdTot=hlBids+hlAsks;
@@ -25785,7 +25788,7 @@ function DepthStrip({orderBook,targetMargin}){
         <div className="flex items-baseline gap-2.5">
           <span className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/50 font-bold">Depth</span>
           {_quality.level!=='thin'&&(()=>{
-            const _color=_quality.level==='high'?'#6FA98C':_quality.level==='medium'?'#28CC95':'#C06A72';
+            const _color=_quality.level==='high'?'#6FA98C':_quality.level==='medium'?'#28CC95':'rgba(255,77,106,0.72)';
             const _label=_quality.level==='high'?'STRONG':_quality.level==='medium'?'MIXED':'WEAK';
             const _checks=[_quality.bandsAgree,_quality.volMeaningful,_quality.tightConfirms];
             const _tooltip=[
@@ -25877,7 +25880,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
       const{score,direction,category}=scoreNewsImpact(item.title);
       if(score<6)continue; // subthreshold
       // Color/icon by direction
-      const _color=direction==='down'?'#C06A72':direction==='up'?'#6FA98C':'#28CC95';
+      const _color=direction==='down'?'rgba(255,77,106,0.72)':direction==='up'?'#6FA98C':'#28CC95';
       const _icon=direction==='down'?'📰▼':direction==='up'?'📰▲':category==='macro'?'🏛':category==='regulatory'?'⚖':category==='security'?'⚠':'📰';
       const _catLabel=category?category.toUpperCase():'NEWS';
       pushToast(
@@ -26638,7 +26641,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
             'Net EV per contract when a signal AGREED with the direction taken, vs when it disagreed. Win rate alone is meaningless here — the price already encodes it. A signal only carries information if EV is higher when it agreed.',
             signalEV.usingExec>0
               ?React.createElement('span',{style:{color:'rgb(40,204,149)'}},` · ${signalEV.usingExec} priced on true exec cost`)
-              :React.createElement('span',{style:{color:'rgba(212,162,76,0.9)'}},' · priced on MID (optimistic by ~½ spread until exec data accrues)')
+              :React.createElement('span',{style:{color:'rgba(255,255,255,0.62)'}},' · priced on MID (optimistic by ~½ spread until exec data accrues)')
           ),
           signalEV.regimes.length>0&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/35 mb-2'},
             'regime mix: ',signalEV.regimes.map(([r,c])=>`${r} ${Math.round(100*c/signalEV.n)}%`).join(' · ')
@@ -26670,7 +26673,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
                         React.createElement('td',{className:'px-2 py-1 text-[#EDEDED]/45'},r.k),
                         React.createElement('td',{className:'px-1 py-1 text-center text-[#EDEDED]/25',colSpan:7},
                           `zero on ${r.total-r.nonZero} of ${r.total} trades`),
-                        React.createElement('td',{className:'px-2 py-1 text-left',style:{color:'rgba(212,162,76,0.9)'}},'INERT — carries weight, contributes ~0')
+                        React.createElement('td',{className:'px-2 py-1 text-left',style:{color:'rgba(255,255,255,0.62)'}},'INERT — carries weight, contributes ~0')
                       );
                     }
                     if(r.kind==='nocontrast'){
@@ -29036,7 +29039,7 @@ const buildDayContext=(dayHourPerf,now)=>{
       dayAdvice=`Lean in on confluent setups. Volatility is ${_lowVol?'compressed':'normal'}, so trust signal quality over breakout chasing.`;
     }else if(_isBottomRanked&&_lowVol){
       dayMode='defensive';
-      dayAdviceColor='#C06A72';
+      dayAdviceColor='rgba(255,77,106,0.72)';
       dayHeadline=`Tough day · ${_wrPct}% WR, ${_atr?_atr.toFixed(0)+'bps':'low'} vol${_winGap&&_lossGap?` · wins ${_winGap.toFixed(0)}bps / losses ${_lossGap.toFixed(0)}bps`:''}`;
       dayAdvice=`Marginal moves, narrow edge. Only enter on confluence+ tier. Skip single-signal setups.`;
     }else if(_isBottomRanked){
@@ -29086,7 +29089,7 @@ function DayAwareScheduleHeader({dayContext}){
   // V9.9.2: mode-driven container tint. Visual reinforces the advice without
   //   needing to read it — green-bordered = aggressive day, rose-bordered = defensive.
   const _modeColor=dayMode==='aggressive'||dayMode==='prime'?'#6FA98C':
-                    dayMode==='defensive'?'#C06A72':
+                    dayMode==='defensive'?'rgba(255,77,106,0.72)':
                     dayMode==='selective'?'#28CC95':
                     'rgba(40,204,149,0.5)';
   const _modeLabel=dayMode==='aggressive'?'AGGRESSIVE':dayMode==='prime'?'PRIME':dayMode==='defensive'?'DEFENSIVE':dayMode==='selective'?'SELECTIVE':'NORMAL';
@@ -29371,7 +29374,7 @@ function ReversalRiskChip({reversalRisk,className}){
   const[expanded,setExpanded]=React.useState(false);
   if(!reversalRisk||reversalRisk.flag==='NONE')return null;
   const isExpected=reversalRisk.flag==='EXPECTED';
-  const _color=isExpected?'#C06A72':'#28CC95';
+  const _color=isExpected?'rgba(255,77,106,0.72)':'#28CC95';
   const _label=isExpected?'REVERSAL EXPECTED':'REVERSAL WATCH';
   const _icon=isExpected?'⚠':'⚡';
   const _firedSignals=(reversalRisk.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight);
@@ -29485,7 +29488,7 @@ function ReversalForecastSVG({reversalRisk,dir,currentPrice,strikePrice,atrBps,t
     // EXPECTED — prominent bend, ends past strike on the WRONG side
     pathD=`M ${xStart} ${yNow} C ${tToX(0.25)} ${priceToY(strikePrice+_favSign*_peakOffset*0.5)} ${xPeak} ${_yPeak} ${tToX(0.65)} ${yStrike} S ${xEnd} ${yClose} ${xEnd} ${yClose}`;
   }
-  const _flagColor=flag==='EXPECTED'?'#C06A72':flag==='WATCH'?'#28CC95':'#6FA98C';
+  const _flagColor=flag==='EXPECTED'?'rgba(255,77,106,0.72)':flag==='WATCH'?'#28CC95':'#6FA98C';
   // Confidence band — wider transparent stroke under main path
   const _bandWidth=Math.max(8,Math.min(22,(atrBps||10)*0.5));
   // Time remaining display
@@ -46817,7 +46820,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _isUp?'price-pump':'price-dump',
         `${currentAsset||'BTC'} ${_isUp?'pumping ▲':'dumping ▼'}`,
         `${_bps>0?'+':''}${_bps.toFixed(0)} bps in 30s · $${currentPrice.toFixed(0)}`,
-        {color:_isUp?'#6FA98C':'#C06A72',icon:_isUp?'⚡':'⚡',durationMs:6000,cooldown:60000}
+        {color:_isUp?'#6FA98C':'rgba(255,77,106,0.72)',icon:_isUp?'⚡':'⚡',durationMs:6000,cooldown:60000}
       );
     }
   },[currentPrice,currentAsset,pushToast]);
@@ -46835,7 +46838,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         {color:'#28CC95',icon:'〰',durationMs:5500,cooldown:90000});
     }else if(_cur==='EXTREME'){
       pushToast('vel-extreme',`${currentAsset||'BTC'} velocity → EXTREME`,'News-spike pace · use caution',
-        {color:'#C06A72',icon:'⚡⚡',durationMs:7000,cooldown:90000});
+        {color:'rgba(255,77,106,0.72)',icon:'⚡⚡',durationMs:7000,cooldown:90000});
     }
   },[analysis?.velocityRegime,currentAsset,pushToast]);
 
@@ -48281,7 +48284,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const _rich=_real.filter(e=>!!e.taraVersion).length;
               const _pct=_rich/_n;
               const _col=_pct>=0.9?{bg:'rgba(40,204,149,0.12)',bd:'rgba(40,204,149,0.35)',fg:'#28CC95'}
-                        :_pct>=0.5?{bg:'rgba(212,162,76,0.12)',bd:'rgba(212,162,76,0.3)',fg:'rgba(212,162,76,0.9)'}
+                        :_pct>=0.5?{bg:'rgba(212,162,76,0.12)',bd:'rgba(212,162,76,0.3)',fg:'rgba(255,255,255,0.62)'}
                         :{bg:'rgba(255,77,106,0.12)',bd:'rgba(255,77,106,0.35)',fg:'#FF4D6A'};
               return React.createElement('span',{
                 className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.12em] px-1.5 py-0.5 rounded-lg uppercase cursor-default',
@@ -48971,14 +48974,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           text-transform: uppercase !important;
           letter-spacing: 0.12em !important;
           font-weight: 600 !important;
-          /* V13.4.199: grey headers read as flat, so colour comes back -- but
-             from Kalshi's LIGHTER green tier (--green-x40 #5CD8AE), not their
-             brand green. That keeps section chrome visibly separate from WIN
-             values at #28CC95, which is the collision the v198 note was about.
-             Size settles the rest: headers are 10.5px tracked caps, a WIN is
-             34-52px. */
-          color: var(--accent-hi) !important;
-          opacity: 0.78;
+          /* V13.4.206: MEASURED, not guessed. Counting coloured text on the live
+             page: 111 green elements against 18 red -- 55 of the greens were
+             THIS rule. Two different greens (#5CD8AE chrome, #28CC95 win) on
+             86% of all coloured text meant green had stopped meaning anything;
+             a WIN no longer stood out because the labels around it were green
+             too. v199 was the wrong call and this reverses it.
+             Headers go neutral but BRIGHT -- the v198 mistake was dim grey, not
+             neutrality. At 0.85 white with uppercase + 0.12em tracking + weight
+             600 they read as authored headers, and green is handed back to the
+             only thing that should own it: an actual result. */
+          color: rgba(255,255,255,0.85) !important;
+          opacity: 1;
         }
         /* V13.4.193: the same softening applied to Tailwind's NAMED tracking
            utilities, so headers using tracking-wide/wider (Depth of Market, Tape
@@ -49001,14 +49008,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           text-transform: uppercase !important;
           letter-spacing: 0.12em !important;
           font-weight: 600 !important;
-          /* V13.4.199: grey headers read as flat, so colour comes back -- but
-             from Kalshi's LIGHTER green tier (--green-x40 #5CD8AE), not their
-             brand green. That keeps section chrome visibly separate from WIN
-             values at #28CC95, which is the collision the v198 note was about.
-             Size settles the rest: headers are 10.5px tracked caps, a WIN is
-             34-52px. */
-          color: var(--accent-hi) !important;
-          opacity: 0.78;
+          /* V13.4.206: MEASURED, not guessed. Counting coloured text on the live
+             page: 111 green elements against 18 red -- 55 of the greens were
+             THIS rule. Two different greens (#5CD8AE chrome, #28CC95 win) on
+             86% of all coloured text meant green had stopped meaning anything;
+             a WIN no longer stood out because the labels around it were green
+             too. v199 was the wrong call and this reverses it.
+             Headers go neutral but BRIGHT -- the v198 mistake was dim grey, not
+             neutrality. At 0.85 white with uppercase + 0.12em tracking + weight
+             600 they read as authored headers, and green is handed back to the
+             only thing that should own it: an actual result. */
+          color: rgba(255,255,255,0.85) !important;
+          opacity: 1;
         }
 
         /* ── ACCENT COLORS — KNOCK BACK 8-12% ─────────────── */
@@ -49284,7 +49295,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 _qLevel=_score>=3?'high':_score>=2?'medium':'low';
               }
             }
-            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#28CC95':_qLevel==='low'?'#C06A72':null;
+            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#28CC95':_qLevel==='low'?'rgba(255,77,106,0.72)':null;
             const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
             const _renderCell=(name,band,floor=_MIN_DOM)=>{
               const _b=Number(band?.b)||0,_a=Number(band?.a)||0;
@@ -49292,7 +49303,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const _af=_t>=floor;
               const _p=_t>0?(_b/_t)*100:50;
               const _isBid=_p>=50;
-              const _color=!_af?'rgba(237,237,237,0.30)':_isBid?'#6FA98C':'#C06A72';
+              const _color=!_af?'rgba(237,237,237,0.30)':_isBid?'#6FA98C':'rgba(255,77,106,0.72)';
               const _disp=Math.max(_p,100-_p);
               return React.createElement('div',{key:name,className:'text-center'},
                 React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
@@ -49366,14 +49377,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               if(_w60Tot>=500000)_score+=1;
               _qLevel=_score>=3?'high':_score>=2?'medium':'low';
             }
-            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#28CC95':_qLevel==='low'?'#C06A72':null;
+            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#28CC95':_qLevel==='low'?'rgba(255,77,106,0.72)':null;
             const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
             const _renderTapeCell=(name,w,floor)=>{
               const _t=(w.buys||0)+(w.sells||0);
               const _af=_t>=floor;
               const _p=w.buyPct!=null?w.buyPct:50;
               const _isBuy=_p>=50;
-              const _color=!_af?'rgba(237,237,237,0.30)':_isBuy?'#6FA98C':'#C06A72';
+              const _color=!_af?'rgba(237,237,237,0.30)':_isBuy?'#6FA98C':'rgba(255,77,106,0.72)';
               const _disp=Math.max(_p,100-_p);
               return React.createElement('div',{key:name,className:'text-center'},
                 React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
