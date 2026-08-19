@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.14-v13.4.181-edge-lab-panel';
-const TARA_VERSION_DISPLAY='Tara 13.4.181';
+const BASELINE_VERSION='2026.08.19-v13.4.182-edge-lab-verdict';
+const TARA_VERSION_DISPLAY='Tara 13.4.182';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27460,15 +27460,30 @@ function SportsView({onClose}){
                     </span>
                   )}
                 </div>
-                <div className="mt-2">
-                  <div style={{height:6,background:'#1F1F1F',borderRadius:4,overflow:'hidden'}}>
-                    <div style={{width:pct+'%',height:'100%',background:'#7DB8FF'}}/>
+                {/* Once the pre-registered sample lands, show the RESULT.
+                    Leaving a progress bar up past the finish line would be the
+                    same goalpost-moving the readiness panel exists to stop. */}
+                {e.concluded&&e.verdict?(
+                  <div className="mt-2 rounded-lg p-2.5"
+                    style={{background:'rgba(255,77,106,0.06)',
+                            border:'1px solid rgba(255,77,106,0.28)'}}>
+                    <div className="text-[11px] uppercase tracking-[0.14em] font-bold mb-1"
+                      style={{color:SPORTS_RED}}>Concluded · hypothesis rejected</div>
+                    <div className="text-[11.5px] text-[#EDEDED]/70 leading-relaxed">
+                      {e.verdict}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-[#EDEDED]/40 mt-1 leading-relaxed">
-                    {e.note} Underdog value picks unlock only if this experiment
-                    proves the gap is real.
+                ):(
+                  <div className="mt-2">
+                    <div style={{height:6,background:'#1F1F1F',borderRadius:4,overflow:'hidden'}}>
+                      <div style={{width:pct+'%',height:'100%',background:'#7DB8FF'}}/>
+                    </div>
+                    <div className="text-[11px] text-[#EDEDED]/40 mt-1 leading-relaxed">
+                      {e.note} Underdog value picks unlock only if this experiment
+                      proves the gap is real.
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })()}
