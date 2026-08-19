@@ -354,6 +354,10 @@ const cloudSupabaseRead=async(path)=>{
 // V13.4.162: 'memory/hourlyRecord' added. Same reasoning as the 15m log -- it is a
 //   six-figure doc, and echoing those over realtime is exactly what produced the
 //   ~157MB/day egress incident. Hourly rides the same heartbeat + catch-up path.
+// V13.4.204: per-proxy health for the Kalshi racers. Module scope so it
+//   survives re-renders; a path failing 3+ times in a row is benched for 90s
+//   and then re-probed, so an outage never becomes permanent.
+const _KFEED_HEALTH={};
 const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows','memory/hourlyRecord']);
 
 // V12.8: MULTI-DEVICE SYNC HEARTBEAT ──────────────────────────────────────────
@@ -5253,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.203-sitout-neutral';
-const TARA_VERSION_DISPLAY='Tara 13.4.203';
+const BASELINE_VERSION='2026.08.19-v13.4.205-ladder-redundancy';
+const TARA_VERSION_DISPLAY='Tara 13.4.205';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15500,22 +15504,59 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
 //   read can be expressed at 5 different prices. Cheaper strikes do not add EV against a
 //   fair market -- they change variance and payoff shape -- but they hand back control.
 //   Advisory only. Places no orders. Read-only public endpoint, no auth.
+// V13.4.205: content-aware JSON fetch for the hourly ladder. Mirrors the
+//   V13.4.204 treatment on the 15m feed: read as text, reject HTML before
+//   parsing (so an error page is named rather than surfacing as a JSON parse
+//   error), then check the payload actually has the shape we asked for.
+const _kLadFetch=async(url,validate,timeoutMs=6000)=>{
+  try{
+    const r=await fetch(url,{signal:AbortSignal.timeout(timeoutMs)});
+    if(!r.ok)return{ok:false,reason:'http '+r.status};
+    const t=await r.text();
+    if(!t||t.trimStart().startsWith('<'))return{ok:false,reason:'HTML not JSON'};
+    let d;
+    try{d=JSON.parse(t);}catch(_e){return{ok:false,reason:'invalid JSON'};}
+    if(validate&&!validate(d))return{ok:false,reason:'unexpected payload'};
+    return{ok:true,data:d};
+  }catch(e){return{ok:false,reason:(e&&e.message||'fetch failed').slice(0,48)};}
+};
+// V13.4.205: race several paths instead of trusting one. The first-party
+//   rewrite is normally fastest; the direct public base and a CORS proxy exist
+//   only so a single failing path can no longer stop hourly trading.
+const _kLadRace=async(urls,validate)=>{
+  try{
+    return await Promise.any(urls.map(u=>_kLadFetch(u,validate).then(r=>{
+      if(!r.ok)throw new Error(r.reason);return r;})));
+  }catch(agg){
+    const msgs=((agg&&agg.errors)||[]).map(e=>(e&&e.message)||'fail');
+    return{ok:false,reason:(msgs.join(' / ')||'all paths failed').slice(0,120)};
+  }
+};
+const _K_PUB='https://external-api.kalshi.com/trade-api/v2';
 function useHourlyLadder(activeMins){
   const[state,setState]=React.useState({loading:false,err:null,event:null,closeMs:null,strikes:[]});
   React.useEffect(()=>{
     let alive=true;
     const pull=async()=>{
       try{
-        const evR=await fetch('/api/kalshi-public/events?series_ticker=KXBTCD&status=open&limit=20');
-        if(!evR.ok){if(alive)setState(s=>({...s,err:'events http '+evR.status}));return;}
-        const evJ=await evR.json();
-        const evs=((evJ&&evJ.events)||[]).map(x=>x.event_ticker).filter(Boolean).sort();
+        const _evQ='events?series_ticker=KXBTCD&status=open&limit=20';
+        const _evRes=await _kLadRace(
+          ['/api/kalshi-public/'+_evQ,
+           _K_PUB+'/'+_evQ,
+           'https://corsproxy.io/?url='+encodeURIComponent(_K_PUB+'/'+_evQ)],
+          (d)=>!!(d&&Array.isArray(d.events)));
+        if(!_evRes.ok){if(alive)setState(s=>({...s,err:'events: '+_evRes.reason}));return;}
+        const evs=((_evRes.data&&_evRes.data.events)||[]).map(x=>x.event_ticker).filter(Boolean).sort();
         if(!evs.length){if(alive)setState(s=>({...s,err:'no open KXBTCD event'}));return;}
         const ev=evs[0];
-        const mR=await fetch('/api/kalshi-public/markets?event_ticker='+encodeURIComponent(ev)+'&limit=1000');
-        if(!mR.ok){if(alive)setState(s=>({...s,err:'markets http '+mR.status}));return;}
-        const mJ=await mR.json();
-        const all=(mJ&&mJ.markets)||[];
+        const _mkQ='markets?event_ticker='+encodeURIComponent(ev)+'&limit=1000';
+        const _mkRes=await _kLadRace(
+          ['/api/kalshi-public/'+_mkQ,
+           _K_PUB+'/'+_mkQ,
+           'https://corsproxy.io/?url='+encodeURIComponent(_K_PUB+'/'+_mkQ)],
+          (d)=>!!(d&&Array.isArray(d.markets)));
+        if(!_mkRes.ok){if(alive)setState(s=>({...s,err:'markets: '+_mkRes.reason}));return;}
+        const all=(_mkRes.data&&_mkRes.data.markets)||[];
         const closeMs=all.length&&all[0].close_time?Date.parse(all[0].close_time):null;
         const liquid=all.filter(x=>Number(x.volume_fp)>100&&Number.isFinite(Number(x.floor_strike)))
           .map(x=>({strike:Number(x.floor_strike),
@@ -15525,7 +15566,13 @@ function useHourlyLadder(activeMins){
                     ticker:x.ticker}))
           .sort((a,b)=>a.strike-b.strike);
         if(alive)setState({loading:false,err:null,event:ev,closeMs,strikes:liquid});
-      }catch(e){if(alive)setState(s=>({...s,err:String((e&&e.message)||e)}));}
+      }catch(e){
+        // V13.4.205: keep the previous strikes on a transient error. Blanking the
+        //   list stops the hour locking entirely, which is a far worse outcome
+        //   than briefly showing slightly stale strikes -- and closeMs/strike
+        //   values for an open hourly event do not move once it is open.
+        if(alive)setState(s=>({...s,loading:false,err:String((e&&e.message)||e).slice(0,90)}));
+      }
     };
     if(activeMins==null||activeMins<0){setState(s=>({...s,strikes:[]}));return()=>{alive=false;};}
     setState(s=>({...s,loading:true}));
@@ -37532,7 +37579,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   for OPTIONS may return 503 even when the GET would succeed — and the browser surfaces
     //   the 503 from OPTIONS as if the GET failed. Without that header, the browser does a
     //   simple GET (no preflight) and the request goes through cleanly.
-    const fetchWithRetry=async(url,attempts=3)=>{
+    const fetchWithRetry=async(url,attempts=3,validate=null)=>{
       let lastError=null;
       for(let i=0;i<attempts;i++){
         try{
@@ -37553,7 +37600,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(!r.ok){
             return{ok:false,status:r.status,reason:`HTTP ${r.status}`};
           }
-          const data=await r.json();
+          // V13.4.204: read as TEXT first. r.json() on an HTML error page throws
+          //   "Unexpected token '<'", which the catch below reported as a generic
+          //   "fetch error" -- indistinguishable from a dead network, so a proxy
+          //   quietly serving captcha/error HTML kept getting raced forever.
+          //   Naming it makes the health tracker able to retire that proxy.
+          const _txt=await r.text();
+          const _head=(_txt||'').trimStart().slice(0,1);
+          if(!_txt||_head==='<'){
+            return{ok:false,status:r.status,reason:'proxy returned HTML, not JSON'};
+          }
+          let data;
+          try{data=JSON.parse(_txt);}
+          catch(_pe){return{ok:false,status:r.status,reason:'invalid JSON from proxy'};}
+          // V13.4.204: a 200 carrying {} or an error object used to WIN the race
+          //   (Promise.any resolves on first success), so a junk-but-parseable
+          //   proxy could beat the good first-party paths and poison the feed.
+          if(validate&&!validate(data)){
+            return{ok:false,status:r.status,reason:'payload failed shape check'};
+          }
           return{ok:true,data};
         }catch(e){
           lastError={status:0,reason:`fetch error: ${(e.message||String(e)).slice(0,60)}`};
@@ -37605,28 +37670,57 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   Sequential fetch was up to 18s (6s × 3 timeouts) when first paths fail. Parallel
         //   gets us the strike from whichever proxy responds first — typically 1-3s.
         // V7.10.7: 6 parallel racers now (added vercel rewrite path). _via tag shows which won.
-        const _vercelPromise=fetchWithRetry(_vercelUrl,1).then(r=>{if(r.ok)return{...r,_via:'vercel'};throw new Error(r.reason||'vercel fail');});
+        // V13.4.204: an events payload must actually carry an events array.
+        //   allorigins wraps the body in .contents, so it validates separately.
+        const _okEvents=(d)=>!!(d&&Array.isArray(d.events));
+        // V13.4.204: PROXY HEALTH. A path that has failed 3+ times in a row is
+        //   benched for 90s instead of being raced on every poll. Re-probed after
+        //   that, so an outage is temporary and never permanent. Keeps a dead
+        //   proxy from contributing latency and log noise indefinitely.
+        const _H=_KFEED_HEALTH;
+        const _benched=(name)=>{
+          const h=_H[name];
+          return !!(h&&h.fails>=3&&(Date.now()-h.at)<90000);
+        };
+        const _mark=(name,ok,reason)=>{
+          const h=_H[name]||(_H[name]={fails:0,at:0,last:null});
+          if(ok){h.fails=0;h.last='ok';}
+          else{h.fails++;h.at=Date.now();h.last=reason||'fail';}
+        };
+        const _racer=(name,url,validate,post)=>{
+          if(_benched(name))return Promise.reject(new Error(name+' benched ('+(_H[name]?.last||'fail')+')'));
+          return fetchWithRetry(url,1,validate).then(r=>{
+            const out=post?post(r):r;
+            if(out&&out.ok){_mark(name,true);return{...out,_via:name};}
+            _mark(name,false,(out&&out.reason)||r.reason);
+            throw new Error((out&&out.reason)||r.reason||name+' fail');
+          }).catch(e=>{_mark(name,false,e&&e.message);throw e;});
+        };
+        const _vercelPromise=_racer('vercel',_vercelUrl,_okEvents);
         // V13.4.52: first-party PUBLIC-base racer. The authed /api/kalshi vercel path
         //   503s for unauth browser reads, so the only reliable racers were flaky free
         //   CORS proxies -> stale yes-price -> Kalshi guards sit out. The public base
         //   (external-api) needs no auth and egresses from Vercel's edge IP, dodging
         //   Kalshi's browser-503s. Additive: if it fails it just loses Promise.any.
         const _vercelPubUrl=`/api/kalshi-public/events?series_ticker=${_seriesTicker}&with_nested_markets=true&status=open&limit=50&min_close_ts=${_minCloseTs}`;
-        const _vercelPubPromise=fetchWithRetry(_vercelPubUrl,1).then(r=>{if(r.ok)return{...r,_via:'vercel-pub'};throw new Error(r.reason||'vercel-pub fail');});
-        const _directPromise=fetchWithRetry(_eventsUrl,1).then(r=>{if(r.ok)return{...r,_via:'direct'};throw new Error(r.reason||'direct fail');});
-        const _corsproxyPromise=fetchWithRetry(`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{if(r.ok)return{...r,_via:'corsproxy'};throw new Error(r.reason||'corsproxy fail');});
-        const _allOriginsPromise=fetchWithRetry(`https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{
-          if(!r.ok)throw new Error(r.reason||'allorigins fail');
-          if(r.data?.contents){
-            try{return{ok:true,data:JSON.parse(r.data.contents),_via:'allorigins'};}
-            catch(e){throw new Error('allorigins parse error');}
-          }
-          throw new Error('allorigins empty');
-        });
+        const _vercelPubPromise=_racer('vercel-pub',_vercelPubUrl,_okEvents);
+        const _directPromise=_racer('direct',_eventsUrl,_okEvents);
+        const _corsproxyPromise=_racer('corsproxy',`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,_okEvents);
+        const _allOriginsPromise=_racer('allorigins',
+          `https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,
+          (d)=>!!(d&&typeof d.contents==='string'),
+          (r)=>{
+            if(!r.ok)return r;
+            try{
+              const inner=JSON.parse(r.data.contents);
+              if(!_okEvents(inner))return{ok:false,reason:'allorigins inner payload not events'};
+              return{ok:true,data:inner};
+            }catch(_e){return{ok:false,reason:'allorigins inner parse error'};}
+          });
         // V5.5.5 patch: 2 more proxies for resilience. User: 'how to never get this'.
         //   With 6 parallel paths + 15-min cache, all-paths-fail is exceedingly rare.
-        const _codetabsPromise=fetchWithRetry(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{if(r.ok)return{...r,_via:'codetabs'};throw new Error(r.reason||'codetabs fail');});
-        const _thingproxyPromise=fetchWithRetry(`https://thingproxy.freeboard.io/fetch/${_eventsUrl}`,1).then(r=>{if(r.ok)return{...r,_via:'thingproxy'};throw new Error(r.reason||'thingproxy fail');});
+        const _codetabsPromise=_racer('codetabs',`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_eventsUrl)}`,_okEvents);
+        const _thingproxyPromise=_racer('thingproxy',`https://thingproxy.freeboard.io/fetch/${_eventsUrl}`,_okEvents);
         let result;
         try{
           // V13.4.59: TIERED race -- first-party edge paths win; flaky CORS proxies (cache ~10s,
