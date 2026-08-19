@@ -113,10 +113,13 @@
         --line-3: rgba(255,255,255,0.24);
 
         /* Ink */
-        --ink-1: rgba(255,255,255,0.90);  /* = Kalshi --text-x10 */
-        --ink-2: rgba(255,255,255,0.62);
-        --ink-3: rgba(255,255,255,0.42);  /* ~ Kalshi --text-x30 */
-        --ink-4: rgba(255,255,255,0.26);
+        /* V13.4.200: the secondary tiers were sitting low enough that every
+           label read as a grey haze over the card rather than as text. Lifted;
+           ink-1 stays at Kalshi's --text-x10 so primary values are unchanged. */
+        --ink-1: rgba(255,255,255,0.92);  /* ~ Kalshi --text-x10 */
+        --ink-2: rgba(255,255,255,0.76);
+        --ink-3: rgba(255,255,255,0.58);
+        --ink-4: rgba(255,255,255,0.38);
 
         /* Signals + signature */
         --up: #28CC95;
@@ -196,15 +199,15 @@
       /* V13.4.197: reported still small. Whole scale steps up again; the floor
          moves from 9px to 10.5px, which is the real readability threshold for
          sustained on-screen use. */
-      .text-\[7px\]  { font-size: 10px !important; line-height: 1.5 !important; }
-      .text-\[8px\]  { font-size: 10.5px !important;   line-height: 1.5 !important; }
-      .text-\[9px\]  { font-size: 11.5px !important;   line-height: 1.5 !important; }
-      .text-\[10px\] { font-size: 12px !important; line-height: 1.5 !important; }
-      .text-\[11px\] { font-size: 13px !important; line-height: 1.5 !important; }
-      .text-\[12px\] { font-size: 14px !important; line-height: 1.5 !important; }
-      .text-\[13px\] { font-size: 14.5px !important;   line-height: 1.5 !important; }
-      .text-xs        { font-size: 13.5px !important; line-height: 1.5 !important; }
-      .text-sm        { font-size: 15px !important;   line-height: 1.5 !important; }
+      .text-\[7px\]  { font-size: 7.5px !important; line-height: 1.5 !important; }
+      .text-\[8px\]  { font-size: 8.5px !important;   line-height: 1.5 !important; }
+      .text-\[9px\]  { font-size: 9.5px !important;   line-height: 1.5 !important; }
+      .text-\[10px\] { font-size: 10.5px !important; line-height: 1.5 !important; }
+      .text-\[11px\] { font-size: 11.5px !important; line-height: 1.5 !important; }
+      .text-\[12px\] { font-size: 12.5px !important; line-height: 1.5 !important; }
+      .text-\[13px\] { font-size: 13.5px !important;   line-height: 1.5 !important; }
+      .text-xs        { font-size: 12.5px !important; line-height: 1.5 !important; }
+      .text-sm        { font-size: 14.5px !important;   line-height: 1.5 !important; }
 
       /* Hero numerals: the hierarchy anchor. Tight tracking + lighter weight is
          what makes a large number read as considered rather than merely big. */

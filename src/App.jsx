@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.199-green-headers';
-const TARA_VERSION_DISPLAY='Tara 13.4.199';
+const BASELINE_VERSION='2026.08.19-v13.4.200-ink-and-trim';
+const TARA_VERSION_DISPLAY='Tara 13.4.200';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -49125,40 +49125,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 )}
               </div>
             </div>
-            <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block'}></div>
-
-            {/* V10.9.11: Bet/Win + Live Offer share one row on mobile/compact so
-                the empty space to the right of each (when stacked) is reclaimed.
-                On lg+ they flow inline in the bar as before. */}
-            <div className="flex flex-row gap-2 w-full lg:contents">
-            {/* Bet/Win */}
-            <div className="flex flex-col min-w-0 flex-none lg:min-w-[140px] lg:w-auto">
-              <div className={'text-xs text-[#EDEDED]/40 uppercase tracking-wide mb-1'}>Bet  Max Win</div>
-              <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
-                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#2A2A34] focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
-                <span className={'text-[#EDEDED]/30'}>&#47;</span>
-                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#2A2A34] focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
-              </div>
-            </div>
-            <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block'}></div>
-
-            {/* Live Offer */}
-            <div className="flex flex-col min-w-0 flex-none">
-              <div className={'text-xs text-emerald-400/80 uppercase tracking-wide mb-1'}>Live Offer</div>
-              <div className="flex items-center gap-1 text-emerald-400 text-sm sm:text-base font-serif">
-                $<input type="number" value={currentOffer} onChange={e=>setCurrentOffer(e.target.value)} placeholder="0.00" className={'bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 sm:w-20 text-center outline-none placeholder-emerald-900'}/>
-              </div>
-              {kalshiYesPrice!==null&&windowType==='15m'&&(
-                <div className="flex items-center gap-1 mt-0.5" title="Live Kalshi YES price for current 15m market">
-                  <span className={'text-[9px] text-purple-400/70 uppercase tracking-wide font-bold'}>KLSH</span>
-                  <span className="text-[10px] text-purple-300 font-mono">${kalshiYesPrice.toFixed(2)}</span>
-                  {currentOffer&&Math.abs(parseFloat(currentOffer)-kalshiYesPrice)>2&&(
-                    <span className="text-[9px] text-amber-400" title="Divergence vs Kalshi">⚡</span>
-                  )}
-                </div>
-              )}
-            </div>
-            </div>
+            {/* V13.4.200: Bet/Max Win + Live Offer inputs REMOVED from the strike
+                bar at user request. Consequence, recorded because it is not
+                obvious: betAmount/maxPayout fed recordPnL (which early-returns
+                on bet<=0), the Kelly sizing calc, and offer/peak tracking, so
+                lifetime P&L via that path no longer accumulates. The state and
+                every consumer are left intact, so re-adding an input anywhere
+                (e.g. Settings) restores it with no other change. */}
             <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block lg:ml-auto'}></div>
 
             {/* Position / Score */}
