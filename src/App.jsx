@@ -443,6 +443,17 @@ let _v112Live={timing:'now',why:'',oddsCeil:null,kForDir:null,at:0};
 // Written by the Kalshi poll; read by _logSnapshotEntry. Module-level (not state)
 //   so it never participates in hook ordering or triggers a re-render.
 let _kalshiQuote={bid:null,ask:null,mid:null,spread:null,at:0,ticker:null};
+// V13.4.214: a quote is only usable if BOTH sides are real prices strictly
+//   inside 0-100 and the book is not crossed. bid:0/ask:0 is an empty book, not
+//   a market at 0c -- and after the DOWN inversion it reads as a confident
+//   100c. Same sentinel trap as V13.4.161. Age is checked separately by callers.
+const _quoteUsable=(q)=>{
+  if(!q)return false;
+  const b=Number(q.bid),a=Number(q.ask);
+  if(!Number.isFinite(b)||!Number.isFinite(a))return false;
+  if(b<=0||b>=100||a<=0||a>=100)return false;
+  return a>=b;
+};
 
 // Executable entry cost in cents for a given direction, from the live quote.
 //   UP   → we buy YES → we pay the YES ask.
@@ -5259,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.212-minikeep-guard';
-const TARA_VERSION_DISPLAY='Tara 13.4.212';
+const BASELINE_VERSION='2026.08.19-v13.4.214-quote-validity';
+const TARA_VERSION_DISPLAY='Tara 13.4.214';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15979,7 +15990,8 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
       //   it now, the bid is what you pay if you rest and wait. Advisory only -- Tara
       //   places nothing; you still choose.
       const _q=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
-      const _qFresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000&&_q.bid!=null&&_q.ask!=null);
+      // V13.4.214: was null-checked only, so an empty book (bid:0/ask:0) passed.
+      const _qFresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000&&_quoteUsable(_q));
       // Cost of OUR side: UP buys YES (pay ask, rest at bid). DOWN buys NO, whose
       //   ask is (100 - yesBid) and whose bid is (100 - yesAsk).
       const _takeC=_qFresh?(call==='UP'?_q.ask:(100-_q.bid)):null;
@@ -17592,6 +17604,44 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             </div>
           </div>
           );
+        })()}
+
+        {/* V13.4.213: EXECUTION ROW. The measured cost of crossing the spread
+            (2.31c/contract on the quoted book) is larger than the measured edge
+            itself, yet the rest-vs-take prices only existed in the Trade Coach
+            column. This puts them on the card the eye is already on, at the
+            moment the order gets placed.
+            Colourless on purpose -- green now means WIN and amber means SIT-OUT
+            app-wide, and "rest here" is neither. Shows even at zero spread,
+            since resting still avoids the taker fee; that case used to be
+            hidden because the old block required saveC > 0. */}
+        {(()=>{
+          try{
+            const _q=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
+            // V13.4.214: _quoteUsable rejects the empty book that made this row
+            //   render "take 100c · rest 100c · saves 0.0c".
+            const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000&&_quoteUsable(_q));
+            const _dir=(tc?.call==='UP'||tc?.call==='DOWN')?tc.call:(tc?.direction==='UP'||tc?.direction==='DOWN'?tc.direction:null);
+            if(!_fresh||!_dir)return null;
+            // Our side: UP buys YES (pay the ask, rest at the bid). DOWN buys NO,
+            //   whose ask is 100-yesBid and whose bid is 100-yesAsk.
+            const _take=_dir==='UP'?_q.ask:(100-_q.bid);
+            const _rest=_dir==='UP'?_q.bid:(100-_q.ask);
+            if(!Number.isFinite(_take)||!Number.isFinite(_rest))return null;
+            const _fee=0.07*(_take/100)*(1-_take/100)*100;   // Kalshi taker fee; maker is 0
+            const _save=(_take-_rest)+_fee;
+            return(
+              <div className="flex items-center justify-between gap-2 mb-3 px-2.5 py-1.5 rounded-lg bg-[#050508] border border-[#2A2A34]">
+                <span className="text-[10px] uppercase tracking-[0.18em] font-bold shrink-0" style={{color:'rgba(255,255,255,0.55)'}}>Execution</span>
+                <div className="flex items-baseline gap-2 tabular-nums">
+                  <span className="text-[11px]" style={{color:'rgba(255,255,255,0.55)'}}>take {_take.toFixed(0)}c</span>
+                  <span style={{color:'rgba(255,255,255,0.25)'}}>·</span>
+                  <span className="text-[12px] font-bold" style={{color:'rgba(255,255,255,0.92)'}}>rest {_rest.toFixed(0)}c</span>
+                  <span className="text-[9px]" style={{color:'rgba(255,255,255,0.45)'}}>saves {_save.toFixed(1)}c</span>
+                </div>
+              </div>
+            );
+          }catch(_e){return null;}
         })()}
 
         {/* V9.17.1: General prediction box REMOVED. The scalper advisor panel
@@ -44456,7 +44506,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           ...(()=>{
             const _dirNow=(()=>{try{return snapshot.call||snapshot.direction||null;}catch(_e){return null;}})();
             const _q=(()=>{try{return (typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;}catch(_e){return null;}})();
-            const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000);
+            // V13.4.214: an empty book was being written as spread:0, and those
+            //   fake zeros drag the Execution panel's measured spread down --
+            //   understating the very cost it exists to expose.
+            const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000&&_quoteUsable(_q));
             const _num=(v)=>{const n=Number(v);return Number.isFinite(n)?n:null;};
             let _exec=null;
             try{_exec=_execCostCents(_dirNow);}catch(_e){_exec=null;}
