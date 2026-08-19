@@ -5257,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.207-sitout-amber';
-const TARA_VERSION_DISPLAY='Tara 13.4.207';
+const BASELINE_VERSION='2026.08.19-v13.4.208-modal-rowcap';
+const TARA_VERSION_DISPLAY='Tara 13.4.208';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -22896,6 +22896,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   // V7.0.6: default filter to current windowType (passed from card) so modal opens
   //   already aligned. User can click ALL to broaden.
   const[filter,setFilter]=React.useState(initialFilter||'all');
+  // V13.4.208: cap how many rows are built at once. Rendering the whole log
+  //   (1,000 entries x several nodes each) in one synchronous pass was enough
+  //   to kill the browser tab. 120 fills the 60vh scroll area several times
+  //   over, so the cap is invisible until you deliberately page past it.
+  const _ROW_STEP=120;
+  const[rowLimit,setRowLimit]=React.useState(_ROW_STEP);
   // V9.2.0: per-asset filter — separate BTC vs ETH views since they trade independently.
   //   "all" shows both. Default is 'all' so the user immediately sees the full picture.
   const[assetFilter,setAssetFilter]=React.useState('BTC');
@@ -22915,6 +22921,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     else if(filter==='sitouts')arr=arr.filter(e=>e.result==='SITOUT');
     return arr;
   },[taraCallLog,filter,assetFilter]);
+  // V13.4.208: a filter change starts the row budget over, otherwise switching to
+  //   a narrow filter keeps an inflated limit and switching back re-explodes the DOM.
+  React.useEffect(()=>{setRowLimit(_ROW_STEP);},[filter,assetFilter]);
   const counts=React.useMemo(()=>{
     // V10.7.87: use _isRealTrade filter to match taraScorecards exactly.
     //   Previously counted raw result=WIN/LOSS which included wasOverriddenNoTrade entries
@@ -24379,7 +24388,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 catch(e){return'unknown';}
               };
               const _byDay=new Map();
-              filtered.forEach(e=>{
+              // V13.4.208: group only the slice being rendered -- grouping the full
+              //   array and trimming afterwards still walks every entry, which is
+              //   most of the cost.
+              const _visible=filtered.slice(0,rowLimit);
+              const _hiddenCount=Math.max(0,filtered.length-_visible.length);
+              _visible.forEach(e=>{
                 const _et=e?.time||e?.id; // V10.9.26: id fallback
                 if(!e||!_et)return;
                 const k=_dayKeyFor(_et);
@@ -24539,6 +24553,11 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     ),
                   );
                 }),
+                _hiddenCount>0&&React.createElement('button',{key:'_showmore',
+                  onClick:()=>setRowLimit(n=>n+_ROW_STEP*4),
+                  className:'w-full py-3 text-[11px] uppercase tracking-[0.12em] font-bold border-t border-[#24242E] hover:bg-[#EDEDED]/5 transition-colors',
+                  style:{color:'rgba(255,255,255,0.72)'},
+                },'show more · '+_hiddenCount+' older hidden'),
               );
             })(),
       ),
