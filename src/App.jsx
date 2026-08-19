@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.183-totals-lane';
-const TARA_VERSION_DISPLAY='Tara 13.4.183';
+const BASELINE_VERSION='2026.08.19-v13.4.184-calls-under-match';
+const TARA_VERSION_DISPLAY='Tara 13.4.184';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27119,6 +27119,32 @@ function SportsRow({r,grid,showResult}){
           )}
         </div>
       </div>
+      {/* Every OTHER bet on this same game. The winner call is the headline
+          above; totals and anything added later sit here rather than in a
+          separate section further down the page, because a person watching
+          one match wants every call they hold on it in one place, under its
+          own kick-off time. `lane` keeps the distinction that matters: the
+          record is scored, paper is not. */}
+      {Array.isArray(r.calls)&&r.calls.length>1&&(
+        <div className="mt-1.5 pl-2 flex flex-col gap-1" style={{borderLeft:'2px solid #232323'}}>
+          {r.calls.slice(1).map((c,ci)=>(
+            <div key={ci} className="flex items-baseline gap-x-2 flex-wrap">
+              <span className="text-[11.5px] font-bold text-white/90 tracking-tight">{c.bet}</span>
+              {c.lane==='paper'&&(
+                <span className="text-[8.5px] font-bold uppercase tracking-wider px-1 py-0.5 rounded border normal-case"
+                  style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}
+                  title="Paper only — not counted in the record. The model beats a base rate on this market but not the closing line.">
+                  paper
+                </span>
+              )}
+              <span className="ml-auto text-[11px]" style={T2_MONO_STYLE}>
+                <span className="text-white">{pct(c.model)}</span>
+                <span className="text-[#EDEDED]/35"> · mkt {pct(c.mkt)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {isBall&&grid&&(
         <div className="mt-1">
           <button onClick={()=>setOpen(o=>!o)} className="text-[10px] hover:underline" style={{color:T2_GOLD}}>
@@ -27428,38 +27454,6 @@ function SportsView({onClose}){
                   than that is profit; winning less is a loss no matter how high the
                   raw win rate looks — which is why the win rate on its own is not the
                   number to watch.
-                </div>
-              </div>
-            );
-          })()}
-
-          {data.totals&&data.totals.picks&&data.totals.picks.length>0&&(()=>{
-            const t=data.totals;
-            return(
-              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 mb-3">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
-                  <span className="text-[11px] uppercase tracking-[0.16em] font-bold" style={{color:T2_GOLD}}>
-                    Totals lane · over 2.5 goals
-                  </span>
-                  <span className="text-[11px] text-[#EDEDED]/45">
-                    paper only · {t.picks.length} pick{t.picks.length===1?'':'s'} of {t.priced} priced
-                  </span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  {t.picks.map((p,i)=>(
-                    <div key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-lg bg-[#161616] px-2.5 py-2">
-                      <span className="text-[12px] font-bold text-white tracking-wide">{p.bet}</span>
-                      <span className="text-[12px] text-[#EDEDED]/70">{p.match}</span>
-                      <span className="text-[11px] text-[#EDEDED]/40">{p.league}</span>
-                      <span className="ml-auto text-[12px]" style={T2_MONO_STYLE}>
-                        <b className="text-white">{Math.round(p.model*100)}%</b>
-                        <span className="text-[#EDEDED]/45"> · mkt {Math.round(p.mkt*100)}%</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className="text-[11px] text-[#EDEDED]/40 mt-2 leading-relaxed">
-                  {t.note}
                 </div>
               </div>
             );
