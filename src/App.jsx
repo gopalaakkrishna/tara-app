@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.184-calls-under-match';
-const TARA_VERSION_DISPLAY='Tara 13.4.184';
+const BASELINE_VERSION='2026.08.19-v13.4.185-totals-paper-record';
+const TARA_VERSION_DISPLAY='Tara 13.4.185';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27454,6 +27454,47 @@ function SportsView({onClose}){
                   than that is profit; winning less is a loss no matter how high the
                   raw win rate looks — which is why the win rate on its own is not the
                   number to watch.
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* The totals lane's own record. It is shown next to the headline
+              readiness rather than inside the board, because it answers a
+              different question: not "which bets today" but "does the
+              aligned+floor filter reproduce on a second market". Until it
+              settles anything there is nothing to claim, so it says so. */}
+          {data.totals&&data.totals.paper_record&&(()=>{
+            const p=data.totals.paper_record;
+            if(!p.n)return(
+              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-2.5 mb-3 text-[11px] text-[#EDEDED]/45">
+                <span className="uppercase tracking-[0.16em] font-bold" style={{color:T2_GOLD}}>Totals lane</span>
+                <span className="ml-2">{p.open} pick{p.open===1?'':'s'} recorded, none settled yet — paper only.</span>
+              </div>
+            );
+            return(
+              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 mb-3">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1.5">
+                  <span className="text-[11px] uppercase tracking-[0.16em] font-bold" style={{color:T2_GOLD}}>
+                    Totals lane · paper record
+                  </span>
+                  <span className="text-[11px] text-[#EDEDED]/45">{p.wins}–{p.losses} settled · {p.open} open</span>
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]" style={T2_MONO_STYLE}>
+                  <span>win rate <b className="text-white">{Math.round(p.win_rate*100)}%</b></span>
+                  <span className="text-[#EDEDED]/55">breakeven {Math.round(p.breakeven*100)}%</span>
+                  <span style={{color:p.edge>0?SPORTS_GREEN:SPORTS_RED}}>
+                    edge {p.edge>0?'+':''}{Math.round(p.edge*100)}%
+                  </span>
+                  <span style={{color:p.units>=0?SPORTS_GREEN:SPORTS_RED}}>
+                    {p.units>=0?'+':''}{p.units.toFixed(2)}u
+                  </span>
+                </div>
+                <div className="text-[11px] text-[#EDEDED]/40 mt-1.5 leading-relaxed">
+                  Not counted in the record above. This exists to test whether the
+                  same aligned + 60% filter holds on a second market type — if it
+                  does not reproduce here, that is worth knowing about the filter
+                  itself.
                 </div>
               </div>
             );
