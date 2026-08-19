@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.186-hourly-ladder-ev';
-const TARA_VERSION_DISPLAY='Tara 13.4.186';
+const BASELINE_VERSION='2026.08.19-v13.4.187-one-cloud-stripper';
+const TARA_VERSION_DISPLAY='Tara 13.4.187';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5319,6 +5319,22 @@ const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntr
 //   (weights audit V10.7.91: gap is primary, flow secondary; the rest for context),
 //   rounded, ~60-90 bytes/entry vs the ~1KB the full object cost -- a deliberate,
 //   bounded egress spend so future audits can measure the actual weighted signals.
+// V13.4.187: THE canonical call-log entry stripper for every cloud write.
+//   v13.4.180 added the slim-keep at only 2 of the call-log write paths. Verified
+//   from live cloud data: entries stamped v13.4.185 carry the FULL 24-key signal
+//   object (vwap, htfPatterns, liqSignal, ...) because the post-hydration flush and
+//   the import flush return their merged arrays unstripped -- the exact ~1KB/entry
+//   egress V10.7.58 existed to prevent. Worse, the force-push path stripped
+//   signalScoresAtLock ENTIRELY, so one Force Push would wipe the signal history
+//   v180 was added to preserve, for every entry in the doc at once.
+//   One function, used by all of them, so the next write path cannot silently differ.
+const _stripEntryForCloud=(e)=>{
+  if(!e)return e;
+  const{signalScoresAtLock:_sig,reasoning:__,...rest}=e;
+  const _slim=_slimSigsForCloud(_sig);
+  if(_slim)rest.signalScoresAtLock=_slim;
+  return rest;
+};
 const _slimSigsForCloud=(s)=>{
   if(!s||typeof s!=='object')return undefined;
   const o={};let any=false;
@@ -33106,7 +33122,7 @@ function TaraApp(){
                     else if(!ex.result&&e.result)cMap.set(k,e);
                     else if((e.result==='WIN'||e.result==='LOSS')&&(ex.result==='SITOUT'||ex.result==='NO_TRADE'))cMap.set(k,e); /* V13.3.5: real trade outranks stored sit-out */
                   });
-                  return{entries:Array.from(cMap.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-_TARA_CLOUD_LOG_CAP)};
+                  return{entries:Array.from(cMap.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-_TARA_CLOUD_LOG_CAP).map(_stripEntryForCloud)}; // V13.4.187: was unstripped
                 },
                 500, // very short debounce — this is the import flush
               );
@@ -33668,12 +33684,7 @@ function TaraApp(){
           //   This alone cuts per-entry size from ~3KB → ~0.8KB → 2.5x smaller payload.
           const _stripForCloud=(e)=>{
             if(!e)return e;
-            const{signalScoresAtLock:_sig,reasoning:__,...rest}=e;
-            // V13.4.180: keep a 6-signal slim instead of dropping the whole object --
-            //   see _slimSigsForCloud. Verbose reasoning stays stripped.
-            const _slim=_slimSigsForCloud(_sig);
-            if(_slim)rest.signalScoresAtLock=_slim;
-            return rest;
+            return _stripEntryForCloud(e); // V13.4.187: single shared definition
           };
           return{entries:_cloudSlice.map(_stripForCloud),_strippedAt:Date.now()};
         },
@@ -34223,7 +34234,7 @@ function TaraApp(){
                 (cloudData,localEntries)=>{
                   const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
                   const merged=_mergeCallLogEntries(cloudEntries,localEntries);
-                  return{entries:merged.slice(-_TARA_CLOUD_LOG_CAP)};
+                  return{entries:merged.slice(-_TARA_CLOUD_LOG_CAP).map(_stripEntryForCloud)}; // V13.4.187: was unstripped
                 },
                 50, // very short debounce — this IS the flush
               );
@@ -47092,11 +47103,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // V9.2.0: scorecards removed from baseline payload — personal data, local only.
       const _stripForCloud=(e)=>{
         if(!e)return e;
-        const{signalScoresAtLock:_sig,reasoning:__,...rest}=e;
-        // V13.4.180: same slim-keep as the RMW sync path -- see _slimSigsForCloud.
-        const _slim=_slimSigsForCloud(_sig);
-        if(_slim)rest.signalScoresAtLock=_slim;
-        return rest;
+        return _stripEntryForCloud(e); // V13.4.187: single shared definition
       };
       // V10.7.58: strip verbose fields before baseline save to avoid Supabase payload limit.
       //   signalScoresAtLock (~25 fields) + reasoning (~40 strings) = ~1.5KB per entry.
@@ -47228,7 +47235,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       try{
         const _writes=[];
         if(Array.isArray(_d.taraCallLog)){
-          _writes.push(cloudWrite('memory/taraCallLog',{entries:_d.taraCallLog.slice(-_TARA_CLOUD_LOG_CAP),_baselineApply:Date.now()}));
+          _writes.push(cloudWrite('memory/taraCallLog',{entries:_d.taraCallLog.slice(-_TARA_CLOUD_LOG_CAP).map(_stripEntryForCloud),_baselineApply:Date.now()}));
         }
         // V9.2.0: scorecards write removed — personal record is local-only.
         if(Array.isArray(_d.pastWindows)){
@@ -47281,7 +47288,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     setBaselineBusy(true);
     try{
       const _writes=[];
-      const _stripEntry=(e)=>{if(!e)return e;const{signalScoresAtLock:_,reasoning:__,...r}=e;return r;};
+      // V13.4.187: was dropping signalScoresAtLock outright -- one Force Push wiped
+      //   the signal history for every entry in the cloud doc. Uses the canonical
+      //   stripper now, which keeps the 6-signal slim.
+      const _stripEntry=_stripEntryForCloud;
       _writes.push(cloudWrite('memory/taraCallLog',{entries:_log.map(_stripEntry).slice(-_TARA_CLOUD_LOG_CAP),_forcePush:Date.now(),_pushedBy:_deviceLabel}));
       _writes.push(cloudWrite('history/pastWindows',{entries:_past,_forcePush:Date.now()}));
       _writes.push(cloudWrite('state/lifetimePnL',{value:_pnl,updatedAt:Date.now(),_forcePush:Date.now()}));
