@@ -5286,8 +5286,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.234-armed-live-preflight';
-const TARA_VERSION_DISPLAY='Tara 13.4.234';
+const BASELINE_VERSION='2026.08.20-v13.4.235-autoexec-is-not-wired';
+const TARA_VERSION_DISPLAY='Tara 13.4.235';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19290,19 +19290,26 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             'Stored in your browser only. Anthropic / Tara servers never see these values. Test calls /portfolio/balance.',
           ),
         ),
-        // V13.4.234: ARMED-LIVE PRE-FLIGHT. Found on the live personal deployment:
-        //   enabled true, dryRun FALSE, Kalshi credentials present — and every
-        //   filter switched off. minTier "any", minQualityScore 0, patient entry
-        //   disabled so there is no entry-price cap, and the entry ladder off so it
-        //   crosses the spread. On a lane measured at -2.07c per contract, where
-        //   resting instead of crossing is worth about 2.8c, that is the worst
-        //   available configuration pointed at real money.
+        // V13.4.235: CORRECTS V13.4.234, which was wrong and shipped a false warning.
+        //   v234 told the user this panel "will place real orders with your Kalshi
+        //   key the first time a lock qualifies". It cannot. Verified by reference
+        //   count: kalshiPlaceOrder, kalshiCancelOrder, kalshiExitPosition and
+        //   kalshiGetOrder each appear exactly once in the file -- their own
+        //   definition, no callers. The read-only calls (kalshiPing,
+        //   kalshiFetchPositions, kalshiAuthedFetch) are wired; every mutating one
+        //   is orphaned. _handlePlaceOrderOnTaraCall is literally a no-op that logs
+        //   "[V13.4.75] auto-exec removed".
         //
-        //   It has also never fired: taraAutoExecLog_v1 does not exist and no call
-        //   carries autoExec:true, so nothing has ever exercised this path. "Armed,
-        //   funded, unfiltered and untested" is the state this warns about — the
-        //   danger is not what it has done, it is what it does the first time it
-        //   works.
+        //   So the engine was removed on purpose in V13.4.75, and V13.4.76 replaced
+        //   it with auto-follow: on a lock, copy the call into the tracked position
+        //   so the coach manages it, and never place an order. dryRun:false is
+        //   therefore inert, not dangerous.
+        //
+        //   Two earlier readings in this session were also wrong and are corrected
+        //   here: the empty taraAutoExecLog_v1 and the zero autoExec:true flags were
+        //   read as "it has never fired". Both are dead instrumentation --
+        //   _autoExecLogPush has no call sites and nothing ever writes autoExec:true
+        //   -- so their absence said nothing about activity either way.
         (()=>{
           const a=autoExecSettings||{};
           if(!a.enabled||a.dryRun)return null;
@@ -19314,13 +19321,18 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           if(a.enabledWindowTypes&&a.enabledWindowTypes['5m'])off.push('5m enabled, a series with no open markets');
           if(!off.length)return null;
           return React.createElement('div',{className:'mb-3 p-3 rounded-lg',
-            style:{background:'rgba(232,69,94,0.07)',border:'1px solid rgba(232,69,94,0.32)'}},
-            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:'rgba(232,69,94,0.95)'}},
-              'armed live · dry-run is off'),
+            style:{background:'rgba(212,160,58,0.07)',border:'1px solid rgba(212,160,58,0.30)'}},
+            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:T2_SITOUT_FG}},
+              'these settings do not place orders'),
             React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(255,255,255,0.66)'}},
-              'This will place real orders with your Kalshi key the first time a lock qualifies, and it is running with ',
-              React.createElement('b',{style:{color:'rgba(232,69,94,0.95)'}},off.join(', ')),
-              '. Applying Hawk sets a 70c entry cap and rests before taking, which is worth about 2.8c a contract on your own record — larger than the edge itself. Turn dry-run back on until you have watched it place correctly at least once.'));
+              'The order engine was removed in V13.4.75 and never replaced. ',
+              React.createElement('code',{style:{color:'rgba(255,255,255,0.8)'}},'kalshiPlaceOrder'),
+              ', cancel and exit-position all still exist and have no callers, so nothing on this panel can reach Kalshi — including the dry-run switch, which currently reads ',
+              React.createElement('b',{style:{color:T2_SITOUT_FG}},'off'),
+              ' but changes nothing either way. What does run is auto-follow (V13.4.76): when Tara locks, the call is copied into your tracked position so the coach manages it. You place the order yourself.',
+              React.createElement('div',{className:'mt-1.5',style:{color:'rgba(255,255,255,0.45)'}},
+                'For when it is wired again, these are the values that are off: ',off.join(', '),
+                '. Hawk sets a 70c cap and rests before taking, worth about 2.8c a contract on your own record.')));
         })(),
         // V13.4.227: READINESS. A professional does not arm an algo without
         //   knowing its measured edge and its error bars, so the number goes
