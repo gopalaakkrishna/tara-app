@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.224-responsive-clipping';
-const TARA_VERSION_DISPLAY='Tara 13.4.224';
+const BASELINE_VERSION='2026.08.20-v13.4.225-reconcile-honesty';
+const TARA_VERSION_DISPLAY='Tara 13.4.225';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -23340,7 +23340,22 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 //     2. Build a close-time->market index and require the match to land
                 //        in the SAME window bucket (tolerance = 1/2 window minus 1s),
                 //        so an adjacent window can never be selected.
-                let _matchedEntries=0,_pendingResolved=0;
+                // V13.4.225: three counts, not one, because "matched 0" had three
+                //   completely different meanings and the panel showed the same
+                //   sentence for all of them.
+                //
+                //   THIS is the likely reason reconcile looked broken. V11.2.1 FAST
+                //   RECONCILE only fetches markets for windows that still need data,
+                //   and _settledMarkets is built solely from what it fetched. On a
+                //   log that is already fully reconciled it correctly fetches
+                //   nothing — and then every entry fails to match, so the summary
+                //   read "Matched 0 entries" on a perfectly healthy run. Identical
+                //   to what a total auth failure printed.
+                //
+                //   Splitting already-complete (deliberately skipped) from
+                //   needs-checking (the actual work) makes the three cases legible
+                //   and stops a good run from looking like a broken one.
+                let _matchedEntries=0,_pendingResolved=0,_eligibleEntries=0,_alreadyComplete=0,_matchedIncomplete=0;
                 const _nowMs=Date.now();
                 // Index settled markets by their exact window-close bucket for O(1) exact match
                 const _marketByCloseBucket=new Map();
@@ -23369,6 +23384,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   }
                   if(_expectedClose==null)_expectedClose=Math.ceil(e.id/_winMs)*_winMs;
                   if(_expectedClose>_nowMs-30000)continue;
+                  // Past its close and committed. Classify it the SAME way the fast
+                  //   path did when it decided what to fetch, so the counts describe
+                  //   what actually happened rather than contradicting it.
+                  const _entryComplete=(e.result==='WIN'||e.result==='LOSS')&&Number(e.strike)>0&&Number(e.closingPrice)>0;
+                  if(_entryComplete)_alreadyComplete++;  // deliberately not re-fetched — not a miss
+                  else _eligibleEntries++;               // incomplete: this run was supposed to fix it
                   const _whenStr=new Date(e.id).toISOString().slice(5,16).replace('T',' ');
                   // EXACT bucket match first (cannot select an adjacent window)
                   const _eBucket=Math.round(_expectedClose/_winMs)*_winMs;
@@ -23387,6 +23408,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   if(!_best||_bestDiff>_maxTol)continue;
                   if(!_best.result)continue;
                   _matchedEntries++;
+                  if(!_entryComplete)_matchedIncomplete++;   // coverage of the work that mattered
 
                   // Ground truth: 'yes' = price settled >= strike (UP wins)
                   const _wasAbove=_best.result==='yes';
@@ -23580,7 +23602,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   _issues.push({
                     entryId:0,
                     kind:'no-credentials',
-                    detail:'Add your Kalshi API Key ID and Private Key in Settings to enable authenticated reconcile with full field backfill. Without credentials, only the last 72h can be checked via public API.',
+                    // V13.4.225: the old copy promised "only the last 72h can be
+                    //   checked via public API". That public path was replaced by the
+                    //   authenticated one in V10.7.89 and no longer exists — every
+                    //   fetch here goes through _authFetch, which returns null
+                    //   immediately without credentials. So nothing at all is
+                    //   checked, and the message said otherwise.
+                    detail:'Nothing was checked. Every request in this reconcile is signed with your Kalshi key, so without credentials it reaches the API zero times — there is no public fallback. Add your Key ID and Private Key in Settings, then run it again.',
                     suggested:null,
                     confident:false,
                   });
@@ -23608,12 +23636,43 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   checkedAt:Date.now(),
                   checkedAgainst:_diag.settlementsTotal,
                   matchedEntries:_matchedEntries,
-                  unmatchedEntries:0,
+                  // V13.4.225: this was hardcoded to 0, so the panel could never
+                  //   show coverage — every run claimed nothing was left unchecked
+                  //   even when the whole log went unmatched.
+                  eligibleEntries:_eligibleEntries,
+                  alreadyComplete:_alreadyComplete,
+                  matchedIncomplete:_matchedIncomplete,
+                  unmatchedEntries:Math.max(0,_eligibleEntries-_matchedIncomplete),
                   authenticated:_hasAuth,
+                  // A run that could not reach Kalshi is a FAILED run, not a clean
+                  //   one. Surfaced as its own flag so the panel can style it as an
+                  //   error rather than leaving it to be inferred from a zero.
+                  verifyFailed:_hasAuth&&_diag.fetchAttempts>0&&_diag.fetchOk===0,
                   diag:_diag,
-                  summary:_hasAuth
-                    ?`Matched ${_matchedEntries} entries · auto-applied ${_autoApplied} correction${_autoApplied===1?'':'s'} from Kalshi${_remaining.length>0?` · ${_remaining.length} need review`:''}.`
-                    :'No Kalshi API credentials — add your Key ID and Private Key in Settings to enable full reconcile.',
+                  // V13.4.225: the old summary read "Matched 0 entries · auto-applied
+                  //   0 corrections from Kalshi." when EVERY signed request had failed
+                  //   — a success-shaped sentence describing a total failure. Auth
+                  //   errors were collected into _diag.errors and then never mentioned.
+                  //   The summary now leads with the failure when there is one, and
+                  //   always states coverage so "verified" cannot be confused with
+                  //   "did not look".
+                  summary:(()=>{
+                    if(!_hasAuth)return 'NOT VERIFIED — no Kalshi API credentials. Add your Key ID and Private Key in Settings; without them this check reaches nothing and proves nothing.';
+                    if(_diag.fetchAttempts>0&&_diag.fetchOk===0){
+                      const _why=(_diag.errors[0]||'').split(': ').slice(1).join(': ')||'request failed';
+                      return `NOT VERIFIED — all ${_diag.fetchAttempts} Kalshi requests failed (${_why}). Nothing was checked. Most likely the API key was rotated or revoked; re-add it in Settings.`;
+                    }
+                    const _partial=_diag.errors.length>0?` · ${_diag.errors.length} request${_diag.errors.length===1?'':'s'} failed, coverage is incomplete`:'';
+                    const _done=`${_alreadyComplete} entr${_alreadyComplete===1?'y':'ies'} already complete and skipped`;
+                    // Nothing incomplete left: the fast path fetching nothing is the
+                    //   CORRECT outcome here, not a failure. This is the case that
+                    //   used to print "Matched 0 entries" and look broken.
+                    if(_eligibleEntries===0)
+                      return `Nothing left to reconcile — ${_done}. No gaps found${_partial}.`;
+                    if(_matchedIncomplete===0)
+                      return `NOT VERIFIED — ${_eligibleEntries} incomplete entr${_eligibleEntries===1?'y':'ies'} needed a Kalshi market and none could be matched${_partial}. (${_done}.)`;
+                    return `Auto-applied ${_autoApplied} correction${_autoApplied===1?'':'s'}${_remaining.length>0?` · ${_remaining.length} need review`:''} · filled ${_matchedIncomplete}/${_eligibleEntries} incomplete · ${_done}${_partial}.`;
+                  })(),
                 });
               }catch(err){
                 setReconcileResult({kind:'reconcile',issues:[],error:err.message||String(err),diag:_diag});
@@ -23961,12 +24020,29 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         //   Rose = hard error from the audit itself.
         const _isReconcile=reconcileResult.kind==='reconcile';
         const _fetchedNothing=_isReconcile&&(reconcileResult.checkedAgainst||0)===0&&!reconcileResult.error;
-        const _noMatches=_isReconcile&&(reconcileResult.matchedEntries||0)===0&&(reconcileResult.checkedAgainst||0)>0;
+        // V13.4.225: was `matchedEntries===0`, which flagged every healthy re-run —
+        //   a fully reconciled log has nothing to fetch and therefore nothing to
+        //   match. Only unfilled INCOMPLETE entries are a real warning.
+        const _noMatches=_isReconcile&&(reconcileResult.eligibleEntries||0)>0&&(reconcileResult.matchedIncomplete||0)===0;
+        // V13.4.225: a reconcile that could not reach Kalshi is a FAILURE, not a
+        //   warning and certainly not a pass. It now counts as an error, alongside
+        //   the missing-credentials case — in both, nothing was checked, so calling
+        //   the log "reconciled" afterwards would be false.
+        //   `authenticated` is set from `_creds?.apiKeyId && _creds?.privateKeyPem`,
+        //   which is UNDEFINED when there are no credentials, not false. A strict
+        //   `===false` check therefore never fired and the no-credentials case
+        //   still rendered as a warning. Caught on the live panel, not by the unit
+        //   test, which passed an explicit false.
+        const _notVerified=_isReconcile&&(reconcileResult.verifyFailed||!reconcileResult.authenticated);
         const _isWarn=reconcileResult.issues.length>0||_fetchedNothing||_noMatches;
-        const _isError=!!reconcileResult.error;
-        const _bg=_isError?'rgba(232,69,94,0.06)':_isWarn?'rgba(35,185,129,0.06)':'rgba(35,185,129,0.06)';
-        const _border=_isError?'rgba(232,69,94,0.20)':_isWarn?'rgba(35,185,129,0.20)':'rgba(35,185,129,0.20)';
-        const _headerColor=_isError?'rgba(232,69,94,0.85)':_isWarn?'rgba(35,185,129,0.85)':'rgba(35,185,129,0.85)';
+        const _isError=!!reconcileResult.error||_notVerified;
+        // The three states were all painted the SAME green — the tri-state comment
+        //   above promised amber for warnings and the amber had been lost, so a
+        //   failed run looked exactly like a clean one. Restored to the app's own
+        //   grammar: green passed, gold needs attention, red did not verify.
+        const _bg=_isError?'rgba(232,69,94,0.06)':_isWarn?'rgba(212,160,58,0.06)':'rgba(35,185,129,0.06)';
+        const _border=_isError?'rgba(232,69,94,0.30)':_isWarn?'rgba(212,160,58,0.28)':'rgba(35,185,129,0.20)';
+        const _headerColor=_isError?'rgba(232,69,94,0.90)':_isWarn?'#D4A03A':'rgba(35,185,129,0.85)';
         return React.createElement('div',{
         className:'mb-5 p-4 rounded-xl',
         style:{background:_bg,border:`1px solid ${_border}`},
@@ -23974,7 +24050,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         React.createElement('div',{key:'header',className:'flex items-center justify-between mb-3 flex-wrap gap-2'},[
           React.createElement('div',{key:'l',className:'flex flex-col'},[
             React.createElement('div',{key:'t',className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:_headerColor}},
-              reconcileResult.kind==='verify'?'STORAGE AUDIT':'KALSHI RECONCILE'),
+              reconcileResult.kind==='verify'?'STORAGE AUDIT'
+                :_notVerified?'KALSHI RECONCILE · NOT VERIFIED'
+                :'KALSHI RECONCILE'),
             React.createElement('div',{key:'s',className:'text-[12px] mt-0.5',style:{color:'#EDEDED'}},(()=>{
               if(reconcileResult.error)return `Error: ${reconcileResult.error}`;
               if(reconcileResult.summary&&reconcileResult.kind==='reconcile')return reconcileResult.summary;
@@ -24186,7 +24264,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         // V9.17.10: when there are no issues AND we have diagnostic info, show
         //   a small per-series breakdown so the user can see what was actually
         //   fetched. Surfaces silent fetch failures that used to hide as "no issues".
-        reconcileResult.kind==='reconcile'&&reconcileResult.diag&&reconcileResult.issues.length===0?React.createElement('div',{
+        // V13.4.225: this used to render ONLY when issues.length===0, so a run that
+        //   found some issues AND failed some requests hid the failures entirely —
+        //   the one case where partial coverage most needs saying. Now shown
+        //   whenever there is nothing to report OR something went wrong. Coverage
+        //   is included so the numbers behind the headline are checkable.
+        reconcileResult.kind==='reconcile'&&reconcileResult.diag
+          &&(reconcileResult.issues.length===0||(reconcileResult.diag.errors||[]).length>0)?React.createElement('div',{
           key:'diag',
           className:'mt-2 px-3 py-2 rounded-lg text-[10px]',
           style:{background:'#0B0B0F',border:'1px solid #24242E',color:'rgba(237,237,237,0.55)'},
@@ -24194,6 +24278,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('div',{key:'tt',className:'uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.4)'}},'Fetch diagnostic'),
           React.createElement('div',{key:'st',className:'tabular-nums leading-relaxed',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `attempts ${reconcileResult.diag.fetchAttempts||0} · ok ${reconcileResult.diag.fetchOk||0}`+
+            (reconcileResult.eligibleEntries!=null?` · incomplete ${reconcileResult.matchedIncomplete||0}/${reconcileResult.eligibleEntries} filled · ${reconcileResult.alreadyComplete||0} already complete`:'')+
+            (reconcileResult.diag.settlementsTotal!=null?` · settlements ${reconcileResult.diag.settlementsTotal}`:'')+
             (reconcileResult.diag.bucketsFetched?` · ${reconcileResult.diag.bucketsFetched} buckets fetched`:'')+
             (reconcileResult.diag.marketsBySeries?` · markets per series: `+Object.entries(reconcileResult.diag.marketsBySeries).map(([k,v])=>`${k}=${v}`).join(' '):''),
           ),
