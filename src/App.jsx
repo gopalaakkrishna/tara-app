@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.229-hourly-is-the-proven-lane';
-const TARA_VERSION_DISPLAY='Tara 13.4.229';
+const BASELINE_VERSION='2026.08.20-v13.4.230-plain-language-settings';
+const TARA_VERSION_DISPLAY='Tara 13.4.230';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19446,7 +19446,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'Max WR play. Every V10.2.x filter stacked aggressive. Few trades, mostly wins.',
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Sniper'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'78%+ · 2-4/day · V10.2.25'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'strictest filters · ~2-4 trades a day'),
               ),
               // HUNTER — V10.2.25, win-ideally + take-volume sweet spot
               React.createElement('button',{
@@ -19490,7 +19490,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'Win-ideally AND take meaningful volume. The recommended preset for daily auto-exec.',
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hunter'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-72% · 6-10/day · V10.2.25'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'balanced · ~6-10 trades a day'),
               ),
               // HAWK — V10.2.35, "confident lock + cheap entry" play.
               //   Stacks Hunter base + patient entry @ ≤70¢ + tighter qScore.
@@ -19544,7 +19544,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'Confident lock + cheap entry. Waits for price to drop to ≤70¢ before firing. Patient tier wins 80% recent / 66% lifetime.',
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hawk'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-76% · 4-7/day · V10.2.35'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'middle ground · ~4-7 trades a day'),
               ),
             ),
             // ── V10.7.18: BARGAIN HUNTER — "deep value + smart cashout" preset ──
@@ -19615,7 +19615,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'Bargain Hunter: max 55¢ entries + smart trail-stop cashout + early loss cuts. Few trades, best risk/reward per trade.',
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Bargain Hunter'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-75% · 3-6/day · ≤55¢ entry + ladder + smart cashout · V10.7.18/16'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'only entries at 55c or under · ~3-6 a day · rests before it takes'),
               ),
             ),
             // V10.4.1a: legacy presets hidden by default. Click to reveal.
@@ -19661,7 +19661,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'Highest WR, lowest volume. Confluence+ trades only. ~72-75% WR target. PRE-V10.2.x calibration.',
               },
                 React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Surgeon'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-75% · 3-5/day'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'picky · ~3-5 trades a day'),
               ),
               // BALANCED preset — audit-optimal
               React.createElement('button',{
@@ -19695,7 +19695,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'Audit-optimal. Mid WR, mid volume. PRE-V10.2.x calibration.',
               },
                 React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Balanced'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-72% · 8-12/day'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'moderate · ~8-12 trades a day'),
               ),
               // VOLUME preset — higher turnover, lower WR
               React.createElement('button',{
@@ -19728,7 +19728,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 title:'More trades, lower per-trade WR. PRE-V10.2.x calibration.',
               },
                 React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Volume'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'66-68% · 15-25/day'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'loosest · ~15-25 trades a day'),
               ),
             ),
             React.createElement('div',{className:'text-[9px] text-[#EDEDED]/35 mt-1.5 leading-relaxed'},'Sniper & Hunter also enable Kalshi-agree LIVE. Presets overwrite ~12 fields (sizing mode, signal source, dryRun, API stay as-is).'),
@@ -19962,8 +19962,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
           React.createElement('div',{className:'mb-1'},
             React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
-              _labelTip('timing-mode','Tara\'s Trade engine (Phase 4)','New V10.0.0 timing engine. Evaluates every Tara\'s Call lock and outputs fire-now / wait / abort with reasons. Currently in SHADOW mode for Session 2 data collection — runs silently, logs to CSV, does NOT affect trades. Future sessions: tune thresholds (Session 3) → advisory/pregate live blocking (Session 4). Set to "off" if you don\'t want the engine logging anything at all.'),
-              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V10.0.0'),
+              _labelTip('timing-mode','Second opinion on timing','A separate check that grades every lock and says go now, hold on, or skip. It is not the thing that picks direction — it only judges whether this is a good moment to act on a call that has already been made. Start on Watch only, move to Show me once you want to see its verdict, and only let it veto after you have watched it be right.'),
             ),
             React.createElement('select',{
               value:autoExecSettings?.tradeTimingMode||'shadow',
@@ -19971,19 +19970,19 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm focus:border-[#23B981] focus:outline-none',
               style:{background:'#121218',color:'#EDEDED'},
             },
-              React.createElement('option',{value:'off',style:{background:'#121218',color:'#EDEDED'}},'Off — Phase 4 disabled'),
-              React.createElement('option',{value:'shadow',style:{background:'#121218',color:'#EDEDED'}},'Shadow — logs decisions, no blocking (RECOMMENDED)'),
-              React.createElement('option',{value:'advisory',style:{background:'#121218',color:'#EDEDED'}},'Advisory — shows decision badge, no blocking'),
-              React.createElement('option',{value:'pregate',style:{background:'#121218',color:'#EDEDED'}},'Pre-gate — BLOCKS abort/wait decisions'),
+              React.createElement('option',{value:'off',style:{background:'#121218',color:'#EDEDED'}},'Off — second opinion not running'),
+              React.createElement('option',{value:'shadow',style:{background:'#121218',color:'#EDEDED'}},'Watch only — records what it would have said (recommended)'),
+              React.createElement('option',{value:'advisory',style:{background:'#121218',color:'#EDEDED'}},'Show me — puts its verdict on screen, changes nothing'),
+              React.createElement('option',{value:'pregate',style:{background:'#121218',color:'#EDEDED'}},'Let it veto — stops auto-trades it disagrees with'),
             ),
             React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
               const _m=autoExecSettings?.tradeTimingMode||'shadow';
-              if(_m==='off')return '= no Phase 4 evaluation, V9.19.x behavior preserved';
-              if(_m==='shadow')return '= scoring runs every lock, decision logged to CSV (tradeTimingDecision column). Auto-exec NOT affected. Run 30+ trades, then we analyze.';
-              if(_m==='advisory')return '= V10.2.11 LIVE — decision badge renders in predictor header (color-coded fire-now/wait/abort), auto-exec still proceeds. Manual gut-check mode.';
-              if(_m==='pregate')return '= V10.2.11 LIVE — auto-exec is BLOCKED when Phase 4 returns abort or wait. Manual click bypasses. Most conservative live mode.';
+              if(_m==='off')return 'nothing is evaluated or logged';
+              if(_m==='shadow')return 'it grades every lock in the background so the calls can be checked later. Nothing on screen changes and no trade is affected.';
+              if(_m==='advisory')return 'you see its verdict — go now, hold on, or skip — next to the call. Trades still happen either way. Use this to see whether you agree with it before letting it block anything.';
+              if(_m==='pregate')return 'auto-trades are cancelled when it says hold on or skip. You can still place them by hand. Only turn this on once Show me has convinced you it is right.';
             })()),
-            _tipBox('timing-mode','New V10.0.0 timing engine. Evaluates every Tara\'s Call lock and outputs fire-now / wait / abort with reasons. Currently in SHADOW mode for Session 2 data collection — runs silently, logs to CSV, does NOT affect trades. Future sessions: tune thresholds (Session 3) → advisory/pregate live blocking (Session 4). Set to "off" if you don\'t want the engine logging anything at all.'),
+            _tipBox('timing-mode','A separate check that grades every lock and says go now, hold on, or skip. It does not pick direction — it only judges whether this is a good moment to act on a call already made. Start on Watch only, move to Show me when you want its verdict on screen, and only let it veto once you have seen it be right.'),
           ),
         ),
         // ── V9.6.0: ADVANCED ENTRY FILTERS ────────────────────────────────
