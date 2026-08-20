@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.216-comment-repair';
-const TARA_VERSION_DISPLAY='Tara 13.4.216';
+const BASELINE_VERSION='2026.08.20-v13.4.217-weather-lane';
+const TARA_VERSION_DISPLAY='Tara 13.4.217';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27557,6 +27557,234 @@ function SportsRow({r,grid,showResult}){
   );
 }
 
+// V13.4.217: WEATHER LANE — a second market where the underlying cannot be pushed around.
+//
+// WHY THIS EXISTS. The Window Clock measured what BTC 15m actually is: median
+// distance to the strike 5.6bps, 72% of windows finishing inside 10bps, and
+// 6am ET pinning 84% of the time at -16c/contract. That is a market that
+// resolves near a coin flip by construction, however good the read is.
+// Daily-high temperature is the opposite shape: the settlement number is a
+// physical observation nobody can trade against you, it is forecast publicly
+// and continuously, and — the part that actually matters — it is PARTIALLY
+// KNOWN BEFORE EXPIRY. Once the day's observed maximum is 80.1F, every bucket
+// that tops out below 80 is finished. That is arithmetic, not prediction.
+//
+// THE HONEST CAVEATS, up front and repeated in the UI:
+//   1. BASIS RISK. Kalshi settles this series on THE WEATHER COMPANY. This
+//      panel reads NWS (api.weather.gov), which is free and open but is a
+//      DIFFERENT source. They track each other closely and can still disagree
+//      by a degree at the boundary — which is exactly where the money is. So
+//      "dead" here means "dead on the NWS proxy", not settled fact.
+//   2. NO TRACK RECORD. BTC has 1,000 logged calls behind it. This has zero.
+//      Every number below is a model output, not a measured edge. Paper first.
+//   3. THE MODEL IS DELIBERATELY SIMPLE. Final high ~ Normal(NWS forecast,
+//      sigma), truncated below the observed running max, sigma shrinking as
+//      the day approaches peak heating. No ensemble, no bias correction.
+const _WX_CITIES=[
+  {id:'NYC', series:'KXHIGHNY',   label:'New York',  station:'KNYC', lat:40.7789, lon:-73.9692, tz:'America/New_York'},
+  {id:'HOU', series:'KXHIGHOU',   label:'Houston',   station:'KHOU', lat:29.6539, lon:-95.2775, tz:'America/Chicago'},
+  {id:'SEA', series:'KXHIGHTSEA', label:'Seattle',   station:'KSEA', lat:47.4444, lon:-122.3139, tz:'America/Los_Angeles'},
+];
+// Normal CDF (Abramowitz & Stegun 7.1.26) — plenty accurate for a 1dp temperature.
+const _wxNormCdf=(z)=>{
+  const t=1/(1+0.2316419*Math.abs(z));
+  const d=0.3989422804014327*Math.exp(-z*z/2);
+  let p=d*t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));
+  return z>0?1-p:p;
+};
+// "86° or above" | "77° or below" | "84° to 85°"  ->  {lo,hi}
+const _wxParseBucket=(s)=>{
+  const txt=String(s||'').replace(/[^0-9a-zA-Z. ]/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
+  let m=txt.match(/^([\d.]+)\s*(?:or)?\s*above/);        if(m)return{lo:+m[1],hi:Infinity};
+  m=txt.match(/^([\d.]+)\s*(?:or)?\s*below/);            if(m)return{lo:-Infinity,hi:+m[1]};
+  m=txt.match(/^([\d.]+)\s*to\s*([\d.]+)/);              if(m)return{lo:+m[1],hi:+m[2]};
+  return null;
+};
+const _wxLocalParts=(tz,d)=>{
+  const f=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
+  const p={}; f.formatToParts(d).forEach(x=>{p[x.type]=x.value;});
+  return{date:`${p.year}-${p.month}-${p.day}`,hour:parseInt(p.hour,10)};
+};
+const _wxJson=async(url)=>{
+  const r=await fetch(url,{signal:AbortSignal.timeout(9000)});
+  if(!r.ok)return{ok:false,reason:'HTTP '+r.status};
+  const t=await r.text();
+  if(!t||t.trimStart().startsWith('<'))return{ok:false,reason:'HTML not JSON'};
+  try{return{ok:true,data:JSON.parse(t)};}catch(_e){return{ok:false,reason:'bad JSON'};}
+};
+
+function WeatherView({onClose}){
+  const[cityId,setCityId]=React.useState('NYC');
+  const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null});
+  const city=_WX_CITIES.find(c=>c.id===cityId)||_WX_CITIES[0];
+
+  const load=React.useCallback(async()=>{
+    setState(s=>({...s,loading:true,err:null}));
+    try{
+      const K='https://api.elections.kalshi.com/trade-api/v2';
+      const mk=await _wxJson(`${K}/markets?series_ticker=${city.series}&status=open&limit=60`);
+      if(!mk.ok)throw new Error('Kalshi: '+mk.reason);
+      const markets=(mk.data.markets||[]);
+      if(!markets.length)throw new Error('no open '+city.series+' market right now');
+
+      // NWS forecast: point -> gridpoint forecast -> today's DAYTIME high
+      const pt=await _wxJson(`https://api.weather.gov/points/${city.lat},${city.lon}`);
+      if(!pt.ok)throw new Error('NWS points: '+pt.reason);
+      const fcUrl=pt.data?.properties?.forecast;
+      const fcR=fcUrl?await _wxJson(fcUrl):{ok:false,reason:'no forecast url'};
+      if(!fcR.ok)throw new Error('NWS forecast: '+fcR.reason);
+      const periods=fcR.data?.properties?.periods||[];
+      const day=periods.find(p=>p.isDaytime);
+      const fc=day?Number(day.temperature):null;
+
+      // Observations -> running max for the LOCAL day (Kalshi's day, not UTC).
+      const ob=await _wxJson(`https://api.weather.gov/stations/${city.station}/observations?limit=48`);
+      let runMax=null,obsN=0,obsAt=null;
+      if(ob.ok){
+        const today=_wxLocalParts(city.tz,new Date()).date;
+        const toF=c=>c*9/5+32;
+        (ob.data.features||[]).forEach(f=>{
+          const c=f?.properties?.temperature?.value; const ts=f?.properties?.timestamp;
+          if(c==null||!ts)return;
+          if(_wxLocalParts(city.tz,new Date(ts)).date!==today)return;
+          const F=toF(c); obsN++;
+          if(runMax==null||F>runMax)runMax=F;
+          if(!obsAt||ts>obsAt)obsAt=ts;
+        });
+      }
+      if(runMax!=null)runMax=Math.round(runMax*10)/10;
+
+      // sigma: widest before peak heating (~4pm local), tightening after.
+      const hour=_wxLocalParts(city.tz,new Date()).hour;
+      const toPeak=16-hour;
+      const sigma=toPeak>0?Math.min(4,1.2+0.3*toPeak):Math.max(0.6,1.2+0.2*toPeak);
+
+      const mu=fc!=null?fc:(runMax!=null?runMax:null);
+      const rows=markets.map(m=>{
+        const sub=m.yes_sub_title||m.subtitle||'';
+        const b=_wxParseBucket(sub);
+        const bid=Math.round((+m.yes_bid_dollars||0)*100);
+        const ask=Math.round((+m.yes_ask_dollars||0)*100);
+        const oi=Math.round(+m.open_interest_fp||0);
+        let p=null,dead=false;
+        if(b&&mu!=null){
+          // A bucket topping out below the observed max can no longer be the high.
+          if(runMax!=null&&b.hi<runMax-0.05){dead=true;p=0;}
+          else{
+            const lo=b.lo===-Infinity?-Infinity:b.lo-0.5;
+            const hi=b.hi===Infinity?Infinity:b.hi+0.5;
+            const F=(x)=>x===Infinity?1:(x===-Infinity?0:_wxNormCdf((x-mu)/sigma));
+            let raw=F(hi)-F(lo);
+            if(runMax!=null){ // truncate: the high cannot land below what already happened
+              const floorP=F(runMax-0.5);
+              const lo2=Math.max(lo,runMax-0.5);
+              raw=Math.max(0,F(hi)-F(lo2))/Math.max(1e-6,1-floorP);
+            }
+            p=Math.max(0,Math.min(1,raw));
+          }
+        }
+        return{sub,b,bid,ask,oi,p,dead,
+          edgeBuy:(p!=null&&ask>0)?(p*100-ask):null,
+          // V13.4.217: a huge "edge" against a LIQUID book is evidence the model is
+          //   wrong, not that money is lying on the floor. Kalshi settles on The
+          //   Weather Company; this panel reads NWS. When the two disagree by a lot
+          //   on a market thousands of contracts deep, the crowd holding those
+          //   contracts is the better forecaster. Flag it instead of painting it green.
+          suspect:(p!=null&&ask>0&&oi>=500&&Math.abs(p*100-ask)>=15)};
+      }).filter(r=>r.b).sort((a,b)=>(b.b.lo===-Infinity?-999:b.b.lo)-(a.b.lo===-Infinity?-999:a.b.lo));
+
+      setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100});
+    }catch(e){setState(s=>({...s,loading:false,err:String(e.message||e).slice(0,140)}));}
+  },[city]);
+
+  React.useEffect(()=>{load();const iv=setInterval(load,120000);return()=>clearInterval(iv);},[load]);
+
+  const S=state;
+  const pct=(v)=>v==null?'—':(v*100).toFixed(0)+'%';
+  // Suspect rows are painted SIT-OUT gold, never green: the app's own colour
+  //   grammar (green=win, red=loss, gold=stand aside) already says "do not act".
+  const edgeColor=(e,suspect)=>e==null?'rgba(255,255,255,0.4)':suspect?'#D4A03A':e>=6?'#23B981':e<=-6?'#E8455E':'rgba(255,255,255,0.62)';
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#0A0C0F] overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose&&onClose();}}>
+      <div className="max-w-[1000px] mx-auto px-4 py-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] font-bold mb-1" style={{color:'rgba(255,255,255,0.85)'}}>Weather · daily high</div>
+            <h2 className="font-serif text-3xl text-white tracking-tight">Temperature <span style={{color:'rgba(255,255,255,0.3)'}}>·</span> Ladder</h2>
+          </div>
+          <button onClick={()=>onClose&&onClose()} className="p-2 rounded-lg text-xl" style={{color:'rgba(255,255,255,0.6)'}}>✕</button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          {_WX_CITIES.map(c=>(
+            <button key={c.id} onClick={()=>setCityId(c.id)}
+              className="px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] font-bold rounded-full border transition-colors"
+              style={cityId===c.id?{background:'rgba(255,255,255,0.10)',color:'rgba(255,255,255,0.92)',borderColor:'rgba(255,255,255,0.28)'}
+                                  :{background:'transparent',color:'rgba(255,255,255,0.45)',borderColor:'rgba(255,255,255,0.12)'}}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        {S.err?(
+          <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 text-[12px]" style={{color:'#E8455E'}}>{S.err}</div>
+        ):S.loading&&!S.rows.length?(
+          <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-6 text-center text-[12px]" style={{color:'rgba(255,255,255,0.45)'}}>loading…</div>
+        ):(
+          <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              {[['NWS forecast high',S.fc!=null?S.fc+'°F':'—'],
+                ['observed max today',S.runMax!=null?S.runMax.toFixed(1)+'°F':'—'],
+                ['observations',S.obsN+' · '+(S.hourLocal!=null?S.hourLocal+':00 local':'—')],
+                ['model spread (σ)',S.sigma!=null?'±'+S.sigma+'°':'—']].map(([k,v])=>(
+                <div key={k} className="bg-[#151A21] border border-[#24242E] rounded-xl p-3">
+                  <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-1" style={{color:'rgba(255,255,255,0.45)'}}>{k}</div>
+                  <div className="text-[16px] tabular-nums font-bold" style={{color:'rgba(255,255,255,0.92)'}}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-[#151A21] border border-[#24242E] rounded-xl overflow-hidden mb-4">
+              <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[9px] uppercase tracking-[0.14em] font-bold" style={{color:'rgba(255,255,255,0.45)',borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
+                <div className="col-span-4">bucket</div>
+                <div className="col-span-2 text-right">bid / ask</div>
+                <div className="col-span-2 text-right">model</div>
+                <div className="col-span-2 text-right">edge (buy)</div>
+                <div className="col-span-2 text-right">open int.</div>
+              </div>
+              {S.rows.map((r,i)=>(
+                <div key={i} className="grid grid-cols-12 gap-2 px-4 py-2 text-[12px] tabular-nums items-baseline"
+                     style={{borderTop:i?'1px solid rgba(255,255,255,0.05)':'none',opacity:r.dead?0.45:1}}>
+                  <div className="col-span-4" style={{color:'rgba(255,255,255,0.88)'}}>
+                    {r.sub}
+                    {r.dead&&<span className="ml-2 text-[9px] uppercase tracking-wider" style={{color:'#D4A03A'}}>passed</span>}
+                  </div>
+                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.6)'}}>{r.bid}/{r.ask}c</div>
+                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.88)'}}>{pct(r.p)}</div>
+                  <div className="col-span-2 text-right font-bold" style={{color:edgeColor(r.edgeBuy,r.suspect)}}>
+                    {r.edgeBuy==null?'—':(r.edgeBuy>0?'+':'')+r.edgeBuy.toFixed(0)+'c'}
+                    {r.suspect&&<span className="block text-[8px] uppercase tracking-wider font-bold" style={{color:'#D4A03A'}}>model off?</span>}
+                  </div>
+                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.4)'}}>{r.oi}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.55)'}}>
+              <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.85)'}}>Read this before trading it</div>
+              <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Basis risk.</span> Kalshi settles this series on <b>The Weather Company</b>. This panel reads <b>NWS {city.station}</b> — free and open, but a different source. They track closely and can still differ by a degree exactly at a bucket boundary, which is where the money is. &ldquo;Passed&rdquo; means passed on the NWS proxy, not settled fact.</div>
+              <div className="mb-1.5"><span style={{color:'#D4A03A'}}>No track record.</span> BTC has 1,000 logged calls behind its numbers. This lane has none. Every percentage here is a model output, not a measured edge — paper trade it before risking size.</div>
+              <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Big edges are a warning, not a gift.</span> Any row 15c+ away from a book with 500+ open interest is marked <b style={{color:'#D4A03A'}}>model off?</b> and painted gold rather than green. Thousands of contracts deep on the other side means the crowd is probably reading the day better than a plain normal curve is. Treat those rows as the model failing, not the market.</div>
+              <div>The model is deliberately plain: final high ~ Normal(NWS forecast, σ), truncated below today&rsquo;s observed max, with σ widest before peak heating (~4pm local) and tightening after. The genuinely solid part is the truncation — once the day has already hit {S.runMax!=null?S.runMax.toFixed(1)+'°F':'a given max'}, lower buckets are arithmetic, not forecasting.</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SportsView({onClose}){
   const[data,setData]=React.useState(null);
   const[err,setErr]=React.useState(null);
@@ -31600,6 +31828,7 @@ function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showStats,setShowStats]=useState(false); // V2.7: full stats analytics modal
   const[showSports,setShowSports]=useState(false); // v13.4.149: sports prediction record
+  const[showWeather,setShowWeather]=useState(false); // V13.4.217: weather lane — a market whose settlement number cannot be pushed around
   const[showBrain,setShowBrain]=useState(false); // V3.1.12: Tara's Brain — synthesized reasoning view
   const[syncState,setSyncState]=useState({active:false,stage:'',progress:0,complete:false,error:null}); // V134: sync progress overlay
   const[baselineDrift,setBaselineDrift]=useState(()=>{
@@ -48593,6 +48822,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <span className="text-sm leading-none" style={{color:showSports?T2_GOLD:'inherit'}}>🏆</span>
                 <span className="hidden sm:inline text-[10px]">Sports</span>
               </button>
+              {/* V13.4.217: weather lane */}
+              <button onClick={()=>setShowWeather(v=>!v)}
+                className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showWeather?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
+                style={showWeather?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
+                title="Daily-high temperature ladder"
+              >
+                <span className="text-sm leading-none" style={{color:showWeather?T2_GOLD:'inherit'}}>🌡</span>
+                <span className="hidden sm:inline text-[10px]">Weather</span>
+              </button>
             </div>
 
             {/* window fixed at 15m, 5m removed v13.3.0 */}
@@ -49325,6 +49563,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             it would tear down the price feeds, websocket tape and tick history
             and re-initialise them on every trip to Sports and back. */}
         {showSports&&<SportsView onClose={()=>setShowSports(false)}/>}
+        {showWeather&&<WeatherView onClose={()=>setShowWeather(false)}/>}
         <div className={showSports?'hidden':'contents'}>
 
         {/* V7.10.6: Market context strip */}
