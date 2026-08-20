@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.221-weather-picks-record';
-const TARA_VERSION_DISPLAY='Tara 13.4.221';
+const BASELINE_VERSION='2026.08.20-v13.4.222-weather-alert-backtest';
+const TARA_VERSION_DISPLAY='Tara 13.4.222';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28162,6 +28162,88 @@ const _wxTally=(picks,tier)=>{
 //   cannot beat the book, so scanning would burn requests to produce nothing.
 //   It also keeps the sweep to a handful of cities at any hour rather than all
 //   eleven, since they are spread across four time zones.
+// ============================================================================
+// V13.4.222 — ALERT ON A LIVE PICK
+//
+// The backtest is why this exists. Replaying 6 days across 10 cities against
+// real NWS observations and real Kalshi candlesticks:
+//
+//   * 64 buckets were called dead by the margin rule. All 64 settled NO. The
+//     arithmetic is sound.
+//   * 60 of those 64 were ALREADY priced at NO 100c by the time the signal
+//     existed. Nothing to buy. The market is fast.
+//   * 2 of 64 were tradeable under 95c. Both won: LA "75 to 76" at 94c, and
+//     Boston "78 or below" at 41c.
+//
+// That is ~2.3 opportunities per week across ten cities, and the Boston one
+// lasted about an hour: at 16:00 local the day had already reached 80.6F and
+// the book was still paying 59c for a bucket worth zero, with 1,583 contracts
+// traded in that hour. By 17:00 it was 0/1.
+//
+// A one-hour window twice a week cannot be caught by opening the app and
+// looking. Either it pages him or the lane is decorative. That is the entire
+// justification for this file.
+//
+// Deliberately standalone rather than routed through broadcastSignal: that path
+// is bound to the BTC asset's state and its embed cascade. This reads the same
+// webhook the app already persists and posts its own embed.
+// ============================================================================
+const _WX_ALERTED_KEY='tara_weather_alerted_v1';
+const _wxHook=()=>{
+  try{
+    const multi=JSON.parse(localStorage.getItem('taraV70Hooks')||'null');
+    if(multi&&multi.BTC)return multi.BTC;
+  }catch(_e){}
+  try{return localStorage.getItem('taraV110Hook')||'';}catch(_e){}
+  return '';
+};
+// One alert per pick, ever. The sweep re-runs every 5 minutes and the pick
+//   stands all day, so without this it would repost twelve times an hour.
+const _wxAlerted=()=>{
+  try{const a=JSON.parse(localStorage.getItem(_WX_ALERTED_KEY)||'[]');
+    return new Set(Array.isArray(a)?a:[]);}catch(_e){return new Set();}
+};
+const _wxMarkAlerted=(id)=>{
+  try{const s=_wxAlerted(); s.add(id);
+    localStorage.setItem(_WX_ALERTED_KEY,JSON.stringify(Array.from(s).slice(-200)));}catch(_e){}
+};
+const _wxAlert=async(p)=>{
+  const id=_wxPickId(p);
+  if(_wxAlerted().has(id))return false;
+  const hook=_wxHook();
+  if(!hook){_wxMarkAlerted(id);return false;}   // nothing to post to; do not retry forever
+  const gross=100-p.price-_wxFeeCents(p.price);
+  const be=_wxBreakeven(p.price);
+  const undo=((p.price+_wxFeeCents(p.price))/Math.max(1,gross)).toFixed(1);
+  const embed={
+    title:`▲  WEATHER · ${p.cityLabel} ${p.sub}`,
+    color:_DC_UP,
+    description:'```\n'+
+      `BUY NO   @ ${p.price}c\n`+
+      `MAKE     ${gross}c after the ${_wxFeeCents(p.price)}c fee\n`+
+      `CLEAR BY ${p.marginF}°F  (day already hit ${p.runMax}°F)\n`+
+      '```',
+    fields:[
+      {name:'Why',value:p.why,inline:false},
+      {name:'The shape of it',
+       value:`Needs ${be}% to break even. One loss undoes ${undo} wins. Size accordingly.`,inline:false},
+      {name:'Window',
+       value:'These reprice fast. In the backtest 60 of 64 signals were already at 100c and the one real gap lasted about an hour.',inline:false},
+      {name:'Ticker',value:'`'+p.ticker+'`',inline:false},
+    ],
+    footer:{text:`${TARA_VERSION_DISPLAY} · weather · ${p.station}`},
+    timestamp:new Date().toISOString(),
+  };
+  try{
+    const r=await fetch(hook,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:'Tara',embeds:[embed]})});
+    if(!r.ok){try{console.error('[weather-alert] HTTP',r.status,(await r.text()).slice(0,300));}catch(_e){}
+      return false;}   // leave it unmarked so a transient failure retries
+    _wxMarkAlerted(id);
+    return true;
+  }catch(e){try{console.error('[weather-alert]',e&&e.message);}catch(_e){} return false;}
+};
+
 function useWeatherPicks(){
   const[ledger,setLedger]=React.useState(_wxLedgerLoad);
   const[scanAt,setScanAt]=React.useState(null);
@@ -28200,6 +28282,8 @@ function useWeatherPicks(){
         }catch(_e){}
       }
 
+      // Alert only the LIVE tier. Paper calls are bookkeeping and must never page him.
+      for(const f of found) if(f.tier==="live") await _wxAlert(f);
       if(settled.length||found.length){
         setLedger(prev=>{
           const next=_wxLedgerMerge(prev,{picks:settled.concat(found)});
@@ -28467,6 +28551,47 @@ function WeatherView({onClose}){
                   </div>
                 ))}
               </div>
+              {/* V13.4.222: what a backtest says to expect, so the live record is
+                  read against something instead of against hope. Replayed over 6
+                  days x 10 cities on real NWS observations and real Kalshi
+                  candlesticks, walking each day forward hour by hour with no
+                  hindsight. */}
+              <div className="mt-3 pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.07)'}}>
+                <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.45)'}}>What to expect · backtested 6 days, 10 cities</div>
+                <div className="grid grid-cols-3 gap-2 mb-2">
+                  {[['signal','64 / 64','every bucket called dead settled at zero','#23B981'],
+                    ['already priced','60 / 64','NO was at 100c before the signal existed','#D4A03A'],
+                    ['tradeable','2 / 64','under 95c — both won','#23B981']].map(([k,v,note,col])=>(
+                    <div key={k}>
+                      <div className="text-[9px] uppercase tracking-[0.12em] mb-0.5" style={{color:'rgba(255,255,255,0.40)'}}>{k}</div>
+                      <div className="text-[15px] font-bold tabular-nums" style={{color:col}}>{v}</div>
+                      <div className="text-[9px] leading-snug mt-0.5" style={{color:'rgba(255,255,255,0.35)'}}>{note}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-[10px] leading-relaxed" style={{color:'rgba(255,255,255,0.48)'}}>
+                  So expect roughly <b style={{color:'rgba(255,255,255,0.75)'}}>two trades a week across all ten cities</b>, not one a day. The arithmetic is almost never wrong; the market is almost always already there. The money is in the gap between the thermometer and the repricing, and that gap is short — Boston 16 Aug sat at NO 41c for a bucket already 2°F dead, with 1,583 contracts trading that hour, and was 0/1 by the next. That is why a pick pages you on Discord instead of waiting to be found.
+                  <br/><span style={{color:'#D4A03A'}}>Two settled trades is not evidence of an edge.</span> It shows the mechanism is real and the gates let the right ones through. The record below is what will actually decide it.
+                </div>
+              </div>
+
+              {/* V13.4.222: the measurement the 2°F margin actually rests on.
+                  Everything in this lane assumes NWS is a usable stand-in for the
+                  settlement source. That was an assumption for four versions; this
+                  is it measured. */}
+              <div className="mt-3 pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.07)'}}>
+                <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.45)'}}>Why the margin is 2°F · measured over 60 city-days</div>
+                <div className="text-[10px] leading-relaxed" style={{color:'rgba(255,255,255,0.48)'}}>
+                  NWS and whatever Kalshi settles on land on the same degree only <b style={{color:'rgba(255,255,255,0.75)'}}>72%</b> of the time (43 of 60). That sounds fatal and mostly is not, because <b>direction decides it</b>. A dead call is only wrong when NWS reads <i>higher</i> than what settles.
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 mt-1.5 mb-1.5 tabular-nums">
+                    <span style={{color:'#E8455E'}}>NWS too high: 6 of 60 — every one by exactly 1°F, never 2</span>
+                    <span style={{color:'rgba(255,255,255,0.45)'}}>NWS too low: 11 of 60 — harmless, the bucket stays dead</span>
+                  </div>
+                  So a 2°F margin sits a full degree beyond the worst disagreement ever observed, and <b style={{color:'#23B981'}}>would have produced zero losing calls in 60 city-days</b>. A 1°F margin also scored zero, but with no headroom at all — which is why the gate is 2 and thin one-degree buckets are refused.
+                  <br/><span style={{color:'#D4A03A'}}>The limit of this:</span> 60 days is one weather regime and 6 adverse cases. A 2°F split is not impossible, it just has not happened yet. Denver's station reads consistently low (5 of its 6 days), so its dead calls are extra safe; Seattle read high twice. Per-city calibration needs far more than a week.
+                </div>
+              </div>
+
               {P.recent.length>0&&(
                 <div className="mt-3 pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.07)'}}>
                   <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.45)'}}>Settled</div>
