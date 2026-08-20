@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.222-weather-alert-backtest';
-const TARA_VERSION_DISPLAY='Tara 13.4.222';
+const BASELINE_VERSION='2026.08.20-v13.4.223-weather-nine-cities';
+const TARA_VERSION_DISPLAY='Tara 13.4.223';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27604,7 +27604,46 @@ const _WX_CITIES=[
   {id:'HOU', series:'KXHIGHHOU',  label:'Houston',     station:'KIAH', lat:29.9902, lon:-95.3368,  tz:'America/Chicago'},     // opens later in the day
   {id:'BOS', series:'KXHIGHTBOS', label:'Boston',      station:'KBOS', lat:42.3606, lon:-71.0097,  tz:'America/New_York'},    // oi ~2.6k, thin
   {id:'DC',  series:'KXHIGHTDC',  label:'Washington',  station:'KDCA', lat:38.8512, lon:-77.0402,  tz:'America/New_York'},    // oi ~2.1k, thin
+  // V13.4.223: nine more US cities, each one SCREENED before it was added rather
+  //   than guessed. The backtest said this lane only fires ~2.3 times a week
+  //   across ten cities, so coverage is the biggest lever on it — and three of
+  //   these (SFO 39k, PHX 37k, LV 35k open interest) are deeper books than almost
+  //   anything already on the list.
+  //
+  //   The screen: replay each city's settled days against its candidate station
+  //   and measure how often the station's rounded daily max lands inside the
+  //   bucket Kalshi actually settled. What matters is not exact agreement but the
+  //   WORST HIGH reading -- a dead call only fails when the station reads HIGHER
+  //   than what settles. Every city below is +1 at worst, so the 2°F margin still
+  //   has a full degree of headroom. Phoenix looks poor on exact agreement (1/6)
+  //   and is fine: it reads systematically LOW, which is the safe direction.
+  //
+  //   Dallas is why this is measured and not guessed. The ticker is KXHIGHTDAL,
+  //   so KDAL (Love Field) is the obvious read -- it scored 2/6 with a -2 miss,
+  //   while KDFW scored 5/6. Kalshi settles Dallas on DFW. Third time this
+  //   session that guessing was wrong and measuring was right.
+  {id:'SFO', series:'KXHIGHTSFO', label:'San Francisco', station:'KSFO', lat:37.6196, lon:-122.3656, tz:'America/Los_Angeles'}, // oi ~39k · 4/6 exact, worst-high +1
+  {id:'PHX', series:'KXHIGHTPHX', label:'Phoenix',       station:'KPHX', lat:33.4278, lon:-112.0035, tz:'America/Phoenix'},     // oi ~37k · reads low, safe direction
+  {id:'LV',  series:'KXHIGHTLV',  label:'Las Vegas',     station:'KLAS', lat:36.0719, lon:-115.1634, tz:'America/Los_Angeles'}, // oi ~35k · 6/6 exact
+  {id:'DAL', series:'KXHIGHTDAL', label:'Dallas',        station:'KDFW', lat:32.8974, lon:-97.0220,  tz:'America/Chicago'},     // oi ~4.3k · KDFW, NOT KDAL
+  {id:'OKC', series:'KXHIGHTOKC', label:'Oklahoma City', station:'KOKC', lat:35.3886, lon:-97.6003,  tz:'America/Chicago'},     // oi ~3.6k · 5/6 exact
+  {id:'ATL', series:'KXHIGHTATL', label:'Atlanta',       station:'KATL', lat:33.6403, lon:-84.4269,  tz:'America/New_York'},    // oi ~3.0k · 4/6 exact
+  {id:'MSY', series:'KXHIGHTNOLA',label:'New Orleans',   station:'KMSY', lat:29.9928, lon:-90.2508,  tz:'America/Chicago'},     // oi ~2.9k · 4/6 exact
+  {id:'SAT', series:'KXHIGHTSATX',label:'San Antonio',   station:'KSAT', lat:29.5328, lon:-98.4636,  tz:'America/Chicago'},     // oi ~1.8k · 5/6 exact
+  {id:'MSP', series:'KXHIGHTMIN', label:'Minneapolis',   station:'KMSP', lat:44.8831, lon:-93.2289,  tz:'America/Chicago'},     // oi ~1.6k · 4/6 exact
+  // DELIBERATELY LEFT OUT:
+  //   KXHIGHTSAN (San Diego) is trading but has zero settled days, so its station
+  //     cannot be screened yet. Adding an unscreened city would undo the point of
+  //     screening. Revisit once it has a week of history.
+  //   The European and Toronto series (EGLL/EDDB/EDDF/EBBR/EHAM/CYYZ) have no open
+  //     markets at all, and NWS does not cover them -- they would need a second
+  //     observation source with its own basis risk to measure.
 ];
+// Houston's KIAH pairing has never been screened: KXHIGHHOU has had no settled
+//   markets in the window, so there was nothing to measure it against. It sits in
+//   the list because the ladder does open sometimes, but treat its picks as
+//   unproven until it trades a week.
+const _WX_UNSCREENED=new Set(['HOU']);
 // Normal CDF (Abramowitz & Stegun 7.1.26) — plenty accurate for a 1dp temperature.
 const _wxNormCdf=(z)=>{
   const t=1/(1+0.2316419*Math.abs(z));
@@ -27712,11 +27751,16 @@ const _wxScan=async(city)=>{
         _all.length?`no ${city.series} ladder for ${_today} (${_all.length} open, all other days)`
                    :'no open '+city.series+' market right now');
 
-      // NWS forecast: point -> gridpoint forecast -> today's DAYTIME high
-      const pt=await _wxJson(`https://api.weather.gov/points/${city.lat},${city.lon}`);
-      if(!pt.ok)throw new Error('NWS points: '+pt.reason);
-      const fcUrl=pt.data?.properties?.forecast;
-      const fcR=fcUrl?await _wxJson(fcUrl):{ok:false,reason:'no forecast url'};
+      // NWS forecast: point -> gridpoint forecast -> today's DAYTIME high.
+      //   V13.4.223: the points lookup only translates a fixed lat/lon into a
+      //   gridpoint URL, so its answer can never change for a given city. It was
+      //   being refetched on every scan of every city. At ten cities that was
+      //   merely wasteful; at twenty, with the pick sweep running each of them
+      //   every five minutes, it is half the request volume for nothing. Cached
+      //   for the life of the page.
+      const fcUrl=await _wxGridUrl(city);
+      if(!fcUrl)throw new Error('NWS points: could not resolve gridpoint');
+      const fcR=await _wxJson(fcUrl);
       if(!fcR.ok)throw new Error('NWS forecast: '+fcR.reason);
       // V13.4.218: the forecast period must be TODAY's, matched on local date.
       //
@@ -28023,6 +28067,16 @@ const _wxMarketDay=(m,tz)=>{
   if(fromTicker&&fromClose)return fromTicker===fromClose?fromTicker:null;
   return fromTicker||fromClose;
 };
+// Gridpoint forecast URL for a city, resolved once. A failure is not cached, so
+//   a transient outage does not disable the city until reload.
+const _WX_GRID={};
+const _wxGridUrl=async(city)=>{
+  if(_WX_GRID[city.id])return _WX_GRID[city.id];
+  const pt=await _wxJson(`https://api.weather.gov/points/${city.lat},${city.lon}`);
+  const u=pt.ok?(pt.data&&pt.data.properties&&pt.data.properties.forecast):null;
+  if(u)_WX_GRID[city.id]=u;
+  return u||null;
+};
 const _wxDayKey=(city)=>_wxLocalParts(city.tz,new Date()).date;
 const _wxPickId=(p)=>`${p.ticker}|${p.side}`;
 
@@ -28036,7 +28090,12 @@ const _wxPickFrom=(scan)=>{
     station:scan.city.station,dayKey:day,runMax:scan.runMax,fc:scan.fc};
 
   // --- LIVE: arithmetic, with clearance ---
-  if(rmR!=null){
+  //   An unscreened city cannot produce a real-money pick. The whole live tier
+  //   rests on the station being a faithful stand-in for the settlement source,
+  //   and for these that has never been measured — there were no settled days to
+  //   measure against. It can still generate paper calls, which is exactly how it
+  //   earns its way onto the live tier.
+  if(rmR!=null&&!_WX_UNSCREENED.has(scan.city.id)){
     const arith=scan.rows
       .filter(r=>r.dead&&r.ticker&&r.b&&Number.isFinite(r.b.hi))
       .map(r=>({r,margin:rmR-r.b.hi}))
