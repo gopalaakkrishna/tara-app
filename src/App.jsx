@@ -5286,8 +5286,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.233-peer-build-visible';
-const TARA_VERSION_DISPLAY='Tara 13.4.233';
+const BASELINE_VERSION='2026.08.20-v13.4.234-armed-live-preflight';
+const TARA_VERSION_DISPLAY='Tara 13.4.234';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19290,6 +19290,38 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             'Stored in your browser only. Anthropic / Tara servers never see these values. Test calls /portfolio/balance.',
           ),
         ),
+        // V13.4.234: ARMED-LIVE PRE-FLIGHT. Found on the live personal deployment:
+        //   enabled true, dryRun FALSE, Kalshi credentials present — and every
+        //   filter switched off. minTier "any", minQualityScore 0, patient entry
+        //   disabled so there is no entry-price cap, and the entry ladder off so it
+        //   crosses the spread. On a lane measured at -2.07c per contract, where
+        //   resting instead of crossing is worth about 2.8c, that is the worst
+        //   available configuration pointed at real money.
+        //
+        //   It has also never fired: taraAutoExecLog_v1 does not exist and no call
+        //   carries autoExec:true, so nothing has ever exercised this path. "Armed,
+        //   funded, unfiltered and untested" is the state this warns about — the
+        //   danger is not what it has done, it is what it does the first time it
+        //   works.
+        (()=>{
+          const a=autoExecSettings||{};
+          if(!a.enabled||a.dryRun)return null;
+          const off=[];
+          if(!a.minTier||a.minTier==='any')off.push('no tier filter');
+          if(!(Number(a.minQualityScore)>0))off.push('no quality floor');
+          if(!a.patientEntryEnabled)off.push('no entry-price cap');
+          if(!a.entryLadderEnabled)off.push('crosses the spread instead of resting');
+          if(a.enabledWindowTypes&&a.enabledWindowTypes['5m'])off.push('5m enabled, a series with no open markets');
+          if(!off.length)return null;
+          return React.createElement('div',{className:'mb-3 p-3 rounded-lg',
+            style:{background:'rgba(232,69,94,0.07)',border:'1px solid rgba(232,69,94,0.32)'}},
+            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:'rgba(232,69,94,0.95)'}},
+              'armed live · dry-run is off'),
+            React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(255,255,255,0.66)'}},
+              'This will place real orders with your Kalshi key the first time a lock qualifies, and it is running with ',
+              React.createElement('b',{style:{color:'rgba(232,69,94,0.95)'}},off.join(', ')),
+              '. Applying Hawk sets a 70c entry cap and rests before taking, which is worth about 2.8c a contract on your own record — larger than the edge itself. Turn dry-run back on until you have watched it place correctly at least once.'));
+        })(),
         // V13.4.227: READINESS. A professional does not arm an algo without
         //   knowing its measured edge and its error bars, so the number goes
         //   directly above the switch that arms it. Computed from this account's
