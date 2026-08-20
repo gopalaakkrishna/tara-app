@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.228-execution-is-the-edge';
-const TARA_VERSION_DISPLAY='Tara 13.4.228';
+const BASELINE_VERSION='2026.08.20-v13.4.229-hourly-is-the-proven-lane';
+const TARA_VERSION_DISPLAY='Tara 13.4.229';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17102,6 +17102,35 @@ const _autoExecReadiness=(log)=>{
     verdict:(per-ci)>0?'proven':(per+ci)<0?'losing':'unproven'};
 };
 
+// V13.4.229: the hourly ladder measured on the same footing as the 15m lane.
+//   Measured at ship time: hourly n=500, +4.39c per contract, 95% range +0.15 to
+//   +8.64 — the only lane in the app whose interval clears zero. The 15m lane
+//   over the same period is -2.07c, range -6.29 to +2.14. The difference is the
+//   entry: hourly averages 55c against a 57% true break-even and wins 61%, while
+//   the 15m averages 68c against a 70% bar and wins 68%. Cheap entries are the
+//   whole edge, and the hourly's 40-54c band alone is +8.3c per contract.
+//
+//   This matters for arming: auto-exec's enabledWindowTypes covers 15m and 5m
+//   (5m has no open markets at all) and does NOT include the hourly. As shipped
+//   it is armed on the unproven lane and switched off on the proven one.
+const _hourlyLaneStats=()=>{
+  try{
+    const r=JSON.parse(localStorage.getItem('taraHourlyRecord_v1')||'null');
+    const H=((r&&r.history)||[]).filter(e=>e&&Number.isFinite(Number(e.cost))&&Number(e.cost)>0&&Number(e.cost)<100);
+    if(H.length<40)return null;
+    const p=H.map(e=>{const c=Number(e.cost);const f=_sitoutFee(c);
+      return e.won?(100-c-f):-(c+f);});
+    const m=p.reduce((a,b)=>a+b,0)/p.length;
+    const sd=Math.sqrt(p.reduce((a,x)=>a+Math.pow(x-m,2),0)/Math.max(1,p.length-1));
+    const ci=1.96*sd/Math.sqrt(p.length);
+    const cost=H.reduce((a,e)=>a+Number(e.cost),0)/H.length;
+    return{n:p.length,per:m,ci,total:m*p.length,
+      be:Math.round(cost+_sitoutFee(cost)),
+      wr:Math.round(H.filter(e=>e.won).length/H.length*100),
+      verdict:(m-ci)>0?'proven':(m+ci)<0?'losing':'unproven'};
+  }catch(_e){return null;}
+};
+
 const _sitoutFee=(p)=>Math.ceil(0.07*(p/100)*(1-p/100)*100);
 const _sitoutValue=(log)=>{
   if(!Array.isArray(log)||!log.length)return null;
@@ -19271,9 +19300,26 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 `Crossing the spread these same calls run ${r.per.toFixed(2)}c. Resting a cent inside instead, where Kalshi charges no maker fee, they run `,
                 React.createElement('b',{style:{color:r.makerPer>0?'#23B981':'#E8455E'}},`${r.makerPer>=0?'+':''}${r.makerPer.toFixed(2)}c`),
                 ` — a ${(r.makerPer-r.per).toFixed(2)}c swing per contract, which is larger than the edge itself. If auto-exec is armed to take, it automates the losing version. Turn the entry ladder on so it rests first.`),
-              r.fwdBps!=null&&React.createElement('div',null,
+              r.fwdBps!=null&&React.createElement('div',{className:'mb-1'},
                 React.createElement('b',{style:{color:T2_SITOUT_FG}},'Not a forward forecast. '),
                 `From the moment of lock, price moved the called way only ${r.fwdGoodPct}% of the time, averaging ${r.fwdBps.toFixed(2)} bps. The win rate comes from the strike being fixed at the window open, so the binary banks the move that already happened. An instrument without a fixed strike — a perp, spot, anything marked from entry — captures only this part and would lose.`),
+              // V13.4.229: which lane is actually worth arming.
+              (()=>{
+                const h=_hourlyLaneStats();
+                if(!h)return null;
+                const better=h.verdict==='proven'&&r.verdict!=='proven';
+                return React.createElement('div',{className:'mt-1.5 pt-1.5',
+                  style:{borderTop:'1px solid rgba(255,255,255,0.08)'}},
+                  React.createElement('b',{style:{color:better?'#23B981':'rgba(255,255,255,0.8)'}},
+                    better?'The hourly ladder is the proven lane, not this one. ':'Lane comparison. '),
+                  `Hourly: ${h.n} settled, `,
+                  React.createElement('b',{style:{color:h.per>0?'#23B981':'#E8455E'}},`${h.per>=0?'+':''}${h.per.toFixed(2)}c per contract`),
+                  ` (95% ${(h.per-h.ci).toFixed(2)} to ${(h.per+h.ci).toFixed(2)}), ${h.wr}% against a ${h.be}% break-even. `,
+                  `15-minute: ${r.n} settled, ${r.per>=0?'+':''}${r.per.toFixed(2)}c (95% ${(r.per-r.ci).toFixed(2)} to ${(r.per+r.ci).toFixed(2)}), ${r.wr}% against ${r.beTrue}%. `,
+                  better?React.createElement('span',{style:{color:T2_SITOUT_FG}},
+                    'The hourly wins because it enters cheap. Auto-exec’s window types cover 15m and 5m — 5m has no open markets at all, and the hourly is not on the list. As configured it would arm the unproven lane and skip the proven one.')
+                  :null);
+              })(),
             ),
           );
         })(),
