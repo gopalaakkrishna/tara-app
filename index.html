@@ -29,7 +29,7 @@
       //     therefore means DEPTH, TYPE, ACCENT and MOTION -- not putting the
       //     rejected hues back. Every non-signal family still collapses to
       //     grayscale below.
-      //   * Green and red keep their Kalshi-sampled values (#28CC95/#FF4D6A).
+      //   * Green and red keep their Kalshi-sampled values (#23B981/#E8455E).
       //     Those are functional signals matched to the exchange's own UI, not
       //     decoration, so they are the one thing a restyle must not touch.
       //
@@ -54,20 +54,20 @@
             colors: {
               // Signals — unchanged, exchange-matched.
               emerald: {
-                200: '#A8EDD4', 300: '#6EE0BC', 400: '#28CC95',
-                500: '#20A87A', 600: '#188060', 700: '#12604A', 900: '#093326',
+                200: '#9BE3C6', 300: '#5FD2AC', 400: '#23B981',
+                500: '#1B9B70', 600: '#147558', 700: '#0F5742', 900: '#082E22',
               },
-              teal: { 400: '#28CC95' },
+              teal: { 400: '#23B981' },
               rose: {
-                200: '#FFC1CC', 300: '#FF8FA3', 400: '#FF4D6A',
-                500: '#E8354F', 600: '#C22940',
+                200: '#F4B3BE', 300: '#EF8093', 400: '#E8455E',
+                500: '#D62E45', 600: '#B02439',
               },
-              red: { 400: '#FF4D6A' },
-              pink: { 400: '#FF4D6A' },
+              red: { 400: '#E8455E' },
+              pink: { 400: '#E8455E' },
               // Signature accent — unified + brightened.
-              amber: { 300: '#7EE0BF', 400: '#28CC95', 500: '#1FA277' },
-              orange: { 400: '#28CC95' },
-              yellow: { 400: '#28CC95' },
+              amber: { 300: '#6DD3B0', 400: '#23B981', 500: '#1A9770' },
+              orange: { 400: '#23B981' },
+              yellow: { 400: '#23B981' },
               // Everything else collapses to the cool grayscale ramp.
               indigo: { 100: '#E8E8ED', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
               sky: { 200: '#D6D6DE', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
@@ -122,18 +122,18 @@
         --ink-4: rgba(255,255,255,0.38);
 
         /* Signals + signature */
-        --up: #28CC95;
-        --down: #FF4D6A;
-        --accent: #28CC95;      /* = Kalshi --brand-primary */
-        --accent-hi: #5CD8AE;   /* = Kalshi --green-x40 */
-        --accent-glow: rgba(40, 204, 149, 0.16);
-        --accent-border: rgba(40, 204, 149, 0.42);
+        --up: #23B981;
+        --down: #E8455E;
+        --accent: #23B981;      /* = Kalshi --brand-primary */
+        --accent-hi: #4FC79E;   /* = Kalshi --green-x40 */
+        --accent-glow: rgba(35, 185, 129, 0.16);
+        --accent-border: rgba(35, 185, 129, 0.42);
 
         /* Elevation */
         --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.5);
         --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.5);
-        --glow-accent: 0 0 26px rgba(40, 204, 149, 0.18);
+        --glow-accent: 0 0 26px rgba(35, 185, 129, 0.18);
 
         /* Motion — one language, used everywhere */
         --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -162,7 +162,7 @@
         pointer-events: none;
         z-index: 0;
         background:
-          radial-gradient(1000px 480px at 50% -14%, rgba(40, 204, 149, 0.035), transparent 66%);
+          radial-gradient(1000px 480px at 50% -14%, rgba(35, 185, 129, 0.035), transparent 66%);
       }
 
       /* Film grain — kills banding on large dark gradients. Very low opacity. */
