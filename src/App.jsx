@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.226-pill-colours-sitout-value';
-const TARA_VERSION_DISPLAY='Tara 13.4.226';
+const BASELINE_VERSION='2026.08.20-v13.4.227-autoexec-readiness';
+const TARA_VERSION_DISPLAY='Tara 13.4.227';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17045,6 +17045,49 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
 //   100-kalshiAtLock on DOWN calls (avg 33 -> 67 vs 70). Reading it directly
 //   makes DOWN bets look ~34c cheaper than they were and flips the whole verdict
 //   from "sitting out is right" to "relax the gates", which is exactly backwards.
+// V13.4.227: measured edge of the strategy the auto-trader would be automating.
+//
+//   Measured on the real 1,000-call log at the time this shipped: 444 settled
+//   calls, 68% win rate, average entry 68c — and 68c needs 68% to break even, so
+//   the record was -806c, or -1.82c per contract with a 95% range of +/-4.20.
+//   Indistinguishable from zero.
+//
+//   Excluding the 70-84c band (blocked since v13.4.178, so mostly pre-gate
+//   history) it is +1.76c per contract on n=345 — still inside its own error
+//   bars. That is the whole point of putting this above the arm switch: the
+//   auto-trader is already well built, and none of its features change whether
+//   the thing it automates makes money.
+//
+//   Same pricing trap as the sit-out figures: kalshiAtLock is the UP price, so a
+//   DOWN call costs 100 minus it. 254 of 445 traded calls are DOWN; reading it
+//   directly flatters the record by roughly 34c on most entries.
+const _autoExecReadiness=(log)=>{
+  if(!Array.isArray(log)||!log.length)return null;
+  const t=log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN')
+    &&Number(e.kalshiAtLock)>0&&Number(e.kalshiAtLock)<100);
+  if(t.length<40)return null;
+  const pnl=[];let cost=0,wins=0;
+  for(const e of t){
+    const c=e.dir==='UP'?Number(e.kalshiAtLock):100-Number(e.kalshiAtLock);
+    const f=_sitoutFee(c), won=e.result==='WIN';
+    cost+=c; if(won)wins++;
+    pnl.push(won?(100-c-f):-(c+f));
+  }
+  const per=pnl.reduce((a,b)=>a+b,0)/pnl.length;
+  const sd=Math.sqrt(pnl.reduce((a,p)=>a+Math.pow(p-per,2),0)/Math.max(1,pnl.length-1));
+  const ci=1.96*sd/Math.sqrt(pnl.length);
+  // n needed for the interval to clear zero if this average holds
+  const needed=(per>0&&per<Infinity)?Math.max(0,Math.ceil(Math.pow(1.96*sd/per,2))-pnl.length):0;
+  const _avgCost=cost/pnl.length;
+  return{n:pnl.length,per,ci,sd,
+    wr:Math.round(wins/pnl.length*100),be:Math.round(_avgCost),
+    // The bar is price PLUS the fee. Winning at exactly the price is not flat —
+    //   it is down the fee on every contract, which is the whole of the -806c.
+    beTrue:Math.round(_avgCost+_sitoutFee(_avgCost)),
+    needed:per>0?needed:0,
+    verdict:(per-ci)>0?'proven':(per+ci)<0?'losing':'unproven'};
+};
+
 const _sitoutFee=(p)=>Math.ceil(0.07*(p/100)*(1-p/100)*100);
 const _sitoutValue=(log)=>{
   if(!Array.isArray(log)||!log.length)return null;
@@ -18880,7 +18923,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 // ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
 // Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
 // take-profit/cut-loss rules. All localStorage-only, per-device prefs.
-function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,mission,setMission,regimeDirCalibration,scalperSettings,setScalperSettings,kalshiAgreeMode,setKalshiAgreeMode}){
+function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,mission,setMission,regimeDirCalibration,scalperSettings,setScalperSettings,kalshiAgreeMode,setKalshiAgreeMode}){
   // V9.19.25: tap-to-reveal tooltip state. Each setting has a stable id; clicking
   //   the (?) icon opens its tooltip inline. Click again or click another to dismiss.
   const[_settingsTip,_setSettingsTip]=React.useState(null);
@@ -19176,6 +19219,37 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             'Stored in your browser only. Anthropic / Tara servers never see these values. Test calls /portfolio/balance.',
           ),
         ),
+        // V13.4.227: READINESS. A professional does not arm an algo without
+        //   knowing its measured edge and its error bars, so the number goes
+        //   directly above the switch that arms it. Computed from this account's
+        //   own settled calls, priced the way they actually filled.
+        (()=>{
+          const r=_autoExecReadiness(taraCallLog);
+          if(!r)return null;
+          const col=r.verdict==='proven'?'#23B981':r.verdict==='losing'?'#E8455E':T2_SITOUT_FG;
+          return React.createElement('div',{className:'mb-3 p-3 rounded-lg',
+            style:{background:r.verdict==='proven'?'rgba(35,185,129,0.06)':r.verdict==='losing'?'rgba(232,69,94,0.07)':'rgba(212,160,58,0.07)',
+                   border:`1px solid ${r.verdict==='proven'?'rgba(35,185,129,0.28)':r.verdict==='losing'?'rgba(232,69,94,0.30)':'rgba(212,160,58,0.28)'}`}},
+            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:col}},
+              r.verdict==='proven'?'edge measured · safe to arm'
+              :r.verdict==='losing'?'measured edge is negative · do not arm'
+              :'edge not established · arm in dry-run only'),
+            React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(255,255,255,0.62)'}},
+              `Your last ${r.n} settled calls ran `,
+              React.createElement('b',{style:{color:col}},`${r.per>=0?'+':''}${r.per.toFixed(2)}c per contract`),
+              ` (95% range ${(r.per-r.ci).toFixed(2)} to ${(r.per+r.ci).toFixed(2)}). `,
+              `Win rate ${r.wr}% against a `,
+              React.createElement('b',{style:{color:r.wr>=r.beTrue?'#23B981':'#E8455E'}},`${r.beTrue}% break-even`),
+              ` — your average entry is ${r.be}c and the taker fee adds ${r.beTrue-r.be} more, so ${r.be}% is not flat, it is down the fee on every contract.`,
+              r.verdict==='unproven'
+                ? ` The range still spans zero, so nothing here proves an edge either way. Automating it does not make it profitable — it only makes it faster. Leave dry-run ON until the range clears zero.`
+                : r.verdict==='losing'
+                ? ` The whole range sits below zero. Arming this places real money on a measured loser.`
+                : ` The range clears zero, so the edge is real at this sample size.`),
+            r.needed>0&&React.createElement('div',{className:'text-[10px] mt-1.5',style:{color:'rgba(255,255,255,0.40)'}},
+              `At the current spread of results it takes roughly ${r.needed} settled calls for the range to clear zero, if the average holds.`),
+          );
+        })(),
         // Master toggles
         React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#050508]'},
           React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mb-2'},
@@ -51166,6 +51240,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
         {/* V8.2: Trading settings modal — V9.3.0: now also Kalshi auto-exec controls */}
         <TradingSettingsModal
+          taraCallLog={taraCallLog}
           open={showTradingSettings}
           onClose={()=>setShowTradingSettings(false)}
           settings={tradingSettings}
