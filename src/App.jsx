@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.231-hawk-rests-before-taking';
-const TARA_VERSION_DISPLAY='Tara 13.4.231';
+const BASELINE_VERSION='2026.08.20-v13.4.232-hourly-record-is-a-window';
+const TARA_VERSION_DISPLAY='Tara 13.4.232';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16618,11 +16618,23 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
       <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] uppercase tracking-wider text-zinc-400">Hourly ladder <span className="text-zinc-600">KXBTCD</span></div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] tabular-nums">
+          {/* V13.4.232: this W-L is NOT a lifetime record, and not saying so made
+              two browsers look like they disagreed. _hrMerge slices history to the
+              last _HR_HISTORY_CAP (500) and then recounts w and l FROM that slice,
+              so the number is a rolling window. Each origin keeps its own
+              localStorage and syncs through Supabase with lag, so a device one
+              settlement ahead has a window shifted by one: it gains an entry at the
+              top and drops the oldest off the bottom. Gaining a win while dropping
+              a loss moves BOTH counters, which is why taracalls read 306W-194L
+              while tara1 read 305W-195L off the identical build — the two windows
+              started an hour apart (08-03 19:02 vs 18:04). The 15m record got this
+              same label in V13.4.162 for the same reason; the hourly never did. */}
+          <span className="text-[11px] tabular-nums" title={`Rolling window: the last ${_HR_HISTORY_CAP} settled hourly locks, not an all-time total. Two devices can differ by a few while they catch up on sync — each keeps its own copy and the window shifts as new settlements arrive.`}>
             <span className="text-emerald-400 font-semibold">{rec.w}W</span>
             <span className="text-zinc-600">-</span>
             <span className="text-rose-400 font-semibold">{rec.l}L</span>
             {(rec.w+rec.l)>0&&<span className="text-zinc-500"> ({Math.round(100*rec.w/(rec.w+rec.l))}%)</span>}
+            <span className="text-zinc-600"> · last {_HR_HISTORY_CAP}</span>
             {rec.pending.length>0&&<span className="text-amber-400/70"> +{rec.pending.length} open</span>}
           </span>
           <span className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</span>
