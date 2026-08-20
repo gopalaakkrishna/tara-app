@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.230-plain-language-settings';
-const TARA_VERSION_DISPLAY='Tara 13.4.230';
+const BASELINE_VERSION='2026.08.20-v13.4.231-hawk-rests-before-taking';
+const TARA_VERSION_DISPLAY='Tara 13.4.231';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19501,7 +19501,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply HAWK preset?\\n\\n"Confident lock + cheap entry" — for sure-shot trades:\\n\\n• Min tier: tape+ (Hunter base)\\n• Min qScoreV2: 50 (tighter than Hunter\'s 40)\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY\\n• Skip time-cap-commit: ON (with smart bypass V10.2.34)\\n• Skip marginal-caution: ON\\n\\n• PATIENT ENTRY: ON (max 70¢, wait 60s)\\n  → Tara locks, then waits for offer to drop to ≤70¢ before buying\\n  → If 60s passes without hitting threshold → sit out\\n  → "Patient" tier trades won 80% over last 60 / 66% lifetime\\n\\n• Take-profit: 88¢ (more patient than Hunter\'s 82¢)\\n• Stop-loss: 13¢\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE.\\n\\nExpected: 72-76% WR, ~4-7 trades/day.\\nThe disciplined-entry preset.'))return;
+                  if(!confirm('Apply HAWK preset?\\n\\n"Confident lock + cheap entry" — for sure-shot trades:\\n\\n• Min tier: tape+ (Hunter base)\\n• Min qScoreV2: 50 (tighter than Hunter\'s 40)\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY\\n• Skip time-cap-commit: ON (with smart bypass V10.2.34)\\n• Skip marginal-caution: ON\\n\\n• PATIENT ENTRY: ON (max 70¢, wait 60s)\\n  → Tara locks, then waits for offer to drop to ≤70¢ before buying\\n  → If 60s passes without hitting threshold → sit out\\n  → "Patient" tier trades won 80% over last 60 / 66% lifetime\\n\\n• ENTRY LADDER: ON (rest 3¢ inside, 2 tries, then take)\n  → resting instead of crossing is worth +2.8¢ a contract on your own record\n\n• Take-profit: 88¢\\n• Stop-loss: 13¢\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE.\\n\\nExpected: 72-76% WR, ~4-7 trades/day.\\nThe disciplined-entry preset.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
@@ -19515,6 +19515,17 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                     patientEntryEnabled:true,
                     patientEntryMaxCents:70,
                     patientEntryMaxWaitSec:60,
+                    // V13.4.231: REST BEFORE TAKING. Hawk had the right price cap and
+                    //   then crossed the spread to fill, which is the single thing the
+                    //   record says loses. Measured over 446 settled calls, capped at
+                    //   70c: crossing runs -0.24c per contract, resting a cent inside
+                    //   runs +2.76c. The execution swing is larger than the edge, and
+                    //   Kalshi charges no maker fee. A preset that takes automates the
+                    //   losing version of its own strategy.
+                    entryLadderEnabled:true,
+                    entryLadderUndercutCents:3,
+                    entryLadderStepSec:12,
+                    entryLadderMaxSteps:2,
                     // Exits — slightly more patient target than Hunter
                     autoExitOffer:88,
                     stopLossDeltaCents:13,
