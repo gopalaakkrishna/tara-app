@@ -27615,7 +27615,7 @@ const _wxJson=async(url)=>{
 
 function WeatherView({onClose}){
   const[cityId,setCityId]=React.useState('NYC');
-  const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null});
+  const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null,ready:false,biting:false});
   const city=_WX_CITIES.find(c=>c.id===cityId)||_WX_CITIES[0];
 
   const load=React.useCallback(async()=>{
@@ -27660,11 +27660,39 @@ function WeatherView({onClose}){
       const sigma=toPeak>0?Math.min(4,1.2+0.3*toPeak):Math.max(0.6,1.2+0.2*toPeak);
 
       const mu=fc!=null?fc:(runMax!=null?runMax:null);
+
+      // V13.4.217: READINESS GATE — the honest answer to "when does this model
+      //   know anything the market doesn't?"
+      //
+      // Live run at 01:00 local proved it does not know anything overnight. With
+      // sigma at its 4F cap around a ROUNDED INTEGER forecast (NWS published 80,
+      // which is itself +/-0.5 before any weather uncertainty), the curve printed
+      // FOUR buy signals against the live book: "77 or below" 16% vs 3c ask,
+      // "78-79" 21% vs 10c, "86 or above" 10% vs 1c, and "80-81" 22% vs 44c.
+      // Every one of those is the curve being too wide, not edge. The book had
+      // 707 / 3,134 / 8,538 / 3,625 contracts on the other side and it prices the
+      // Weather Company forecast plus full ensemble spread. A normal curve fitted
+      // to one rounded integer cannot beat that, and pretending otherwise would
+      // put fake green numbers on the one lane that exists because the BTC tape
+      // could not be trusted.
+      //
+      // What this model actually owns is the TRUNCATION, and truncation needs the
+      // day to have happened. At 1am the running max is an overnight reading and
+      // constrains nothing. By early afternoon it is a hard floor under the high.
+      // So: no edge shown until the day is underway. Percentages still render, so
+      // the shape is visible, but the buy column stays blank and says why.
+      const ready=(hour>=12&&obsN>=3);
+      // Truncation is BITING when the day has already climbed near its forecast --
+      //   that is when a dead bucket is arithmetic the market may still be slow on.
+      const biting=ready&&runMax!=null&&mu!=null&&runMax>=mu-3;
+
       const rows=markets.map(m=>{
         const sub=m.yes_sub_title||m.subtitle||'';
         const b=_wxParseBucket(sub);
         const bid=Math.round((+m.yes_bid_dollars||0)*100);
         const ask=Math.round((+m.yes_ask_dollars||0)*100);
+        const noBid=Math.round((+m.no_bid_dollars||0)*100);
+        const noAsk=Math.round((+m.no_ask_dollars||0)*100);
         const oi=Math.round(+m.open_interest_fp||0);
         let p=null,dead=false;
         if(b&&mu!=null){
@@ -27683,17 +27711,37 @@ function WeatherView({onClose}){
             p=Math.max(0,Math.min(1,raw));
           }
         }
-        return{sub,b,bid,ask,oi,p,dead,
-          edgeBuy:(p!=null&&ask>0)?(p*100-ask):null,
+        // V13.4.217: price BOTH sides. Showing only the YES edge buried the single
+        //   most valuable signal this lane has. Worked example off the live book:
+        //   the day hits 81.5F, so "80 to 81" can no longer be the high -- yet YES
+        //   still asks 44c. As a YES edge that renders "-44c" in red, which reads
+        //   as "avoid" when it actually means NO is on sale: NO asks 58c on a
+        //   contract worth a certain 100c, or +42c. Avoid and free money look
+        //   identical in a one-sided column, so show whichever side is actionable.
+        const eYes=(p!=null&&ask>0)?(p*100-ask):null;
+        const eNo =(p!=null&&noAsk>0)?((1-p)*100-noAsk):null;
+        const best=(eYes==null&&eNo==null)?null
+                  :(eNo==null||(eYes!=null&&eYes>=eNo))?{side:'YES',edge:eYes,price:ask}
+                                                       :{side:'NO',edge:eNo,price:noAsk};
+        // Model-vs-market disagreement, measured side-agnostically off the YES mid
+        //   so the bid/ask spread cannot flip the verdict.
+        const yesMid=(bid>0&&ask>0)?(bid+ask)/2:ask;
+        return{sub,b,bid,ask,noBid,noAsk,oi,p,dead,
+          // Dead buckets keep their edge even before the gate: "this bucket is
+          //   already impossible" is arithmetic off the observed max, not forecasting.
+          best:(best&&best.edge!=null&&(ready||dead))?best:null,
           // V13.4.217: a huge "edge" against a LIQUID book is evidence the model is
           //   wrong, not that money is lying on the floor. Kalshi settles on The
           //   Weather Company; this panel reads NWS. When the two disagree by a lot
           //   on a market thousands of contracts deep, the crowd holding those
           //   contracts is the better forecaster. Flag it instead of painting it green.
-          suspect:(p!=null&&ask>0&&oi>=500&&Math.abs(p*100-ask)>=15)};
+          //   Threshold lowered 15c -> 10c after the 01:00 run: the miscalibrated
+          //   rows sat at 9-13c, so a 15c gate let three of the four through.
+          //   A dead bucket is never "suspect" -- it is measured, not modelled.
+          suspect:(p!=null&&yesMid>0&&!dead&&oi>=500&&Math.abs(p*100-yesMid)>=10)};
       }).filter(r=>r.b).sort((a,b)=>(b.b.lo===-Infinity?-999:b.b.lo)-(a.b.lo===-Infinity?-999:a.b.lo));
 
-      setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100});
+      setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100,ready,biting});
     }catch(e){setState(s=>({...s,loading:false,err:String(e.message||e).slice(0,140)}));}
   },[city]);
 
@@ -27703,7 +27751,7 @@ function WeatherView({onClose}){
   const pct=(v)=>v==null?'—':(v*100).toFixed(0)+'%';
   // Suspect rows are painted SIT-OUT gold, never green: the app's own colour
   //   grammar (green=win, red=loss, gold=stand aside) already says "do not act".
-  const edgeColor=(e,suspect)=>e==null?'rgba(255,255,255,0.4)':suspect?'#D4A03A':e>=6?'#23B981':e<=-6?'#E8455E':'rgba(255,255,255,0.62)';
+  const edgeColor=(e,suspect)=>(e==null||e<1)?'rgba(255,255,255,0.4)':suspect?'#D4A03A':e>=6?'#23B981':'rgba(255,255,255,0.75)';
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0A0C0F] overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose&&onClose();}}>
@@ -27733,6 +27781,25 @@ function WeatherView({onClose}){
           <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-6 text-center text-[12px]" style={{color:'rgba(255,255,255,0.45)'}}>loading…</div>
         ):(
           <div>
+            {/* V13.4.217: the gate states its own case, so a blank edge column
+                never reads as a bug. */}
+            <div className="rounded-xl p-3 mb-4 flex items-start gap-3"
+                 style={S.ready?{background:'rgba(35,185,129,0.08)',border:'1px solid rgba(35,185,129,0.30)'}
+                              :{background:'rgba(212,160,58,0.08)',border:'1px solid rgba(212,160,58,0.30)'}}>
+              <div className="text-[15px] leading-none mt-0.5">{S.ready?'✓':'⏸'}</div>
+              <div className="text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.72)'}}>
+                <span className="uppercase tracking-[0.14em] font-bold text-[9px] block mb-1"
+                      style={{color:S.ready?'#23B981':'#D4A03A'}}>
+                  {S.ready?(S.biting?'live · truncation biting':'live · edges shown'):'standing down · too early'}
+                </span>
+                {S.ready
+                  ?(S.biting
+                    ?<>The day has already climbed to {S.runMax!=null?S.runMax.toFixed(1)+'°F':'near forecast'} against a {S.fc}°F forecast. Buckets below that are dead as <b>arithmetic</b>, and that is the one thing here worth more than the market&rsquo;s opinion.</>
+                    :<>Past midday with {S.obsN} readings in. Edges are shown, but the day has not climbed near {S.fc}°F yet, so the truncation is not doing much work — most of this is still a curve, not a fact.</>)
+                  :<>It is {S.hourLocal!=null?S.hourLocal+':00':'early'} local with {S.obsN} reading{S.obsN===1?'':'s'} logged. <b>Buy edges are deliberately hidden until midday.</b> Overnight the model is a normal curve fitted to one rounded integer forecast, and the book already prices that plus full ensemble spread — it would print edges that are just the curve being too wide. Percentages stay visible so you can see the shape. Already-passed buckets still show their edge, because that part is measured.</>}
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
               {[['NWS forecast high',S.fc!=null?S.fc+'°F':'—'],
                 ['observed max today',S.runMax!=null?S.runMax.toFixed(1)+'°F':'—'],
@@ -27748,9 +27815,9 @@ function WeatherView({onClose}){
             <div className="bg-[#151A21] border border-[#24242E] rounded-xl overflow-hidden mb-4">
               <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[9px] uppercase tracking-[0.14em] font-bold" style={{color:'rgba(255,255,255,0.45)',borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
                 <div className="col-span-4">bucket</div>
-                <div className="col-span-2 text-right">bid / ask</div>
+                <div className="col-span-2 text-right">yes / no ask</div>
                 <div className="col-span-2 text-right">model</div>
-                <div className="col-span-2 text-right">edge (buy)</div>
+                <div className="col-span-2 text-right">best side</div>
                 <div className="col-span-2 text-right">open int.</div>
               </div>
               {S.rows.map((r,i)=>(
@@ -27760,11 +27827,20 @@ function WeatherView({onClose}){
                     {r.sub}
                     {r.dead&&<span className="ml-2 text-[9px] uppercase tracking-wider" style={{color:'#D4A03A'}}>passed</span>}
                   </div>
-                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.6)'}}>{r.bid}/{r.ask}c</div>
+                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.6)'}}>{r.ask}c / {r.noAsk}c</div>
                   <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.88)'}}>{pct(r.p)}</div>
-                  <div className="col-span-2 text-right font-bold" style={{color:edgeColor(r.edgeBuy,r.suspect)}}>
-                    {r.edgeBuy==null?'—':(r.edgeBuy>0?'+':'')+r.edgeBuy.toFixed(0)+'c'}
-                    {r.suspect&&<span className="block text-[8px] uppercase tracking-wider font-bold" style={{color:'#D4A03A'}}>model off?</span>}
+                  <div className="col-span-2 text-right font-bold" style={{color:edgeColor(r.best?r.best.edge:null,r.suspect)}}>
+                    {/* A side label only appears when there is something to DO.
+                        Both sides non-positive means the spread ate it, so say
+                        "no edge" rather than printing "NO -0c" -- a side name
+                        next to a negative number reads like an instruction. */}
+                    {!r.best
+                      ?<span style={{color:'rgba(255,255,255,0.28)'}}>{S.ready?'no edge':'held'}</span>
+                      :r.best.edge<1
+                        ?<span style={{color:'rgba(255,255,255,0.28)'}}>no edge</span>
+                        :<><span className="text-[9px] uppercase tracking-wider mr-1" style={{opacity:0.75}}>{r.best.side}</span>{'+'+r.best.edge.toFixed(0)+'c'}</>}
+                    {r.best&&r.best.edge>=1&&r.suspect&&<span className="block text-[8px] uppercase tracking-wider font-bold" style={{color:'#D4A03A'}}>model off?</span>}
+                    {r.best&&r.best.edge>=1&&r.dead&&<span className="block text-[8px] uppercase tracking-wider font-bold" style={{color:'#23B981'}}>arithmetic</span>}
                   </div>
                   <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.4)'}}>{r.oi}</div>
                 </div>
@@ -27775,7 +27851,8 @@ function WeatherView({onClose}){
               <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.85)'}}>Read this before trading it</div>
               <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Basis risk.</span> Kalshi settles this series on <b>The Weather Company</b>. This panel reads <b>NWS {city.station}</b> — free and open, but a different source. They track closely and can still differ by a degree exactly at a bucket boundary, which is where the money is. &ldquo;Passed&rdquo; means passed on the NWS proxy, not settled fact.</div>
               <div className="mb-1.5"><span style={{color:'#D4A03A'}}>No track record.</span> BTC has 1,000 logged calls behind its numbers. This lane has none. Every percentage here is a model output, not a measured edge — paper trade it before risking size.</div>
-              <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Big edges are a warning, not a gift.</span> Any row 15c+ away from a book with 500+ open interest is marked <b style={{color:'#D4A03A'}}>model off?</b> and painted gold rather than green. Thousands of contracts deep on the other side means the crowd is probably reading the day better than a plain normal curve is. Treat those rows as the model failing, not the market.</div>
+              <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Big edges are a warning, not a gift.</span> Any row 10c+ away from a book with 500+ open interest is marked <b style={{color:'#D4A03A'}}>model off?</b> and painted gold rather than green. Thousands of contracts deep on the other side means the crowd is probably reading the day better than a plain normal curve is. Treat those rows as the model failing, not the market.</div>
+              <div className="mb-1.5"><span style={{color:'#23B981'}}>Arithmetic.</span> A row tagged <b style={{color:'#23B981'}}>arithmetic</b> is the one signal here that is not a forecast: the day has physically passed that bucket, so it settles at zero, and the NO side is worth a certain 100c. That is the reason this lane exists. It is still bounded by the basis note above — passed on NWS, not on the settlement source.</div>
               <div>The model is deliberately plain: final high ~ Normal(NWS forecast, σ), truncated below today&rsquo;s observed max, with σ widest before peak heating (~4pm local) and tightening after. The genuinely solid part is the truncation — once the day has already hit {S.runMax!=null?S.runMax.toFixed(1)+'°F':'a given max'}, lower buckets are arithmetic, not forecasting.</div>
             </div>
           </div>
