@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.217-weather-lane';
-const TARA_VERSION_DISPLAY='Tara 13.4.217';
+const BASELINE_VERSION='2026.08.20-v13.4.219-weather-obs-window';
+const TARA_VERSION_DISPLAY='Tara 13.4.219';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27580,10 +27580,30 @@ function SportsRow({r,grid,showResult}){
 //   3. THE MODEL IS DELIBERATELY SIMPLE. Final high ~ Normal(NWS forecast,
 //      sigma), truncated below the observed running max, sigma shrinking as
 //      the day approaches peak heating. No ensemble, no bias correction.
+// V13.4.218: every row below was checked against BOTH APIs before it shipped --
+//   the Kalshi series must return open markets, the NWS station must return real
+//   temperatures, and the lat/lon must resolve to a forecast for the right city.
+//   The first cut of this list guessed and got two of three wrong: 'KXHIGHOU' and
+//   'KXHIGHSEA' both returned zero markets, so Houston and Seattle were dead pills.
+//   Kalshi lists 47 daily-high series; the correct Houston ticker is KXHIGHHOU and
+//   Seattle is KXHIGHTSEA (some cities carry a T infix, some do not -- it is not
+//   guessable, so it is verified).
+//
+//   Liquidity noted from the live book at 2026-08-20 as a rough ordering; it moves,
+//   which is why the panel also hides any city with no open market rather than
+//   trusting this list to stay true.
 const _WX_CITIES=[
-  {id:'NYC', series:'KXHIGHNY',   label:'New York',  station:'KNYC', lat:40.7789, lon:-73.9692, tz:'America/New_York'},
-  {id:'HOU', series:'KXHIGHOU',   label:'Houston',   station:'KHOU', lat:29.6539, lon:-95.2775, tz:'America/Chicago'},
-  {id:'SEA', series:'KXHIGHTSEA', label:'Seattle',   station:'KSEA', lat:47.4444, lon:-122.3139, tz:'America/Los_Angeles'},
+  {id:'LA',  series:'KXHIGHLAX',  label:'Los Angeles', station:'KLAX', lat:33.9425, lon:-118.4081, tz:'America/Los_Angeles'}, // oi ~348k, deepest by far
+  {id:'CHI', series:'KXHIGHCHI',  label:'Chicago',     station:'KMDW', lat:41.7868, lon:-87.7522,  tz:'America/Chicago'},     // oi ~51k
+  {id:'AUS', series:'KXHIGHAUS',  label:'Austin',      station:'KAUS', lat:30.1975, lon:-97.6664,  tz:'America/Chicago'},     // oi ~49k
+  {id:'SEA', series:'KXHIGHTSEA', label:'Seattle',     station:'KSEA', lat:47.4444, lon:-122.3138, tz:'America/Los_Angeles'}, // oi ~46k
+  {id:'NYC', series:'KXHIGHNY',   label:'New York',    station:'KNYC', lat:40.7831, lon:-73.9662,  tz:'America/New_York'},    // oi ~23k, Central Park
+  {id:'DEN', series:'KXHIGHDEN',  label:'Denver',      station:'KDEN', lat:39.8561, lon:-104.6737, tz:'America/Denver'},      // oi ~22k
+  {id:'MIA', series:'KXHIGHMIA',  label:'Miami',       station:'KMIA', lat:25.7932, lon:-80.2906,  tz:'America/New_York'},    // oi ~16k
+  {id:'PHL', series:'KXHIGHPHIL', label:'Philadelphia',station:'KPHL', lat:39.8719, lon:-75.2411,  tz:'America/New_York'},    // oi ~10k
+  {id:'HOU', series:'KXHIGHHOU',  label:'Houston',     station:'KIAH', lat:29.9902, lon:-95.3368,  tz:'America/Chicago'},     // opens later in the day
+  {id:'BOS', series:'KXHIGHTBOS', label:'Boston',      station:'KBOS', lat:42.3606, lon:-71.0097,  tz:'America/New_York'},    // oi ~2.6k, thin
+  {id:'DC',  series:'KXHIGHTDC',  label:'Washington',  station:'KDCA', lat:38.8512, lon:-77.0402,  tz:'America/New_York'},    // oi ~2.1k, thin
 ];
 // Normal CDF (Abramowitz & Stegun 7.1.26) — plenty accurate for a 1dp temperature.
 const _wxNormCdf=(z)=>{
@@ -27601,16 +27621,76 @@ const _wxParseBucket=(s)=>{
   return null;
 };
 const _wxLocalParts=(tz,d)=>{
-  const f=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false});
+  const f=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
   const p={}; f.formatToParts(d).forEach(x=>{p[x.type]=x.value;});
-  return{date:`${p.year}-${p.month}-${p.day}`,hour:parseInt(p.hour,10)};
+  return{date:`${p.year}-${p.month}-${p.day}`,hour:parseInt(p.hour,10),min:parseInt(p.minute,10)};
+};
+// V13.4.218: instant of local midnight, as an ISO string NWS accepts for ?start=.
+//   Walking back hour+minute from now is DST-safe in the direction that matters:
+//   it can only ever reach slightly further back than midnight, never later, so
+//   the day is always fully covered. The local-date filter downstream discards
+//   any overshoot.
+const _wxDayStartISO=(tz)=>{
+  const now=new Date(), L=_wxLocalParts(tz,now);
+  return new Date(now.getTime()-L.hour*3600e3-L.min*60e3-120e3).toISOString().slice(0,19)+'Z';
 };
 const _wxJson=async(url)=>{
-  const r=await fetch(url,{signal:AbortSignal.timeout(9000)});
+  // Never throws. A rejected fetch (CORS, DNS, timeout) has to come back as a
+  //   value, not an exception, or it kills the whole race in _wxMarkets.
+  let r;
+  try{ r=await fetch(url,{signal:AbortSignal.timeout(9000)}); }
+  catch(e){ return{ok:false,reason:'net: '+String(e&&e.message||e).slice(0,40)}; }
   if(!r.ok)return{ok:false,reason:'HTTP '+r.status};
   const t=await r.text();
   if(!t||t.trimStart().startsWith('<'))return{ok:false,reason:'HTML not JSON'};
   try{return{ok:true,data:JSON.parse(t)};}catch(_e){return{ok:false,reason:'bad JSON'};}
+};
+// V13.4.217: Kalshi refuses cross-origin browser reads, so the market call goes
+//   through this app's own same-origin rewrites (/api/kalshi/* ->
+//   api.elections.kalshi.com/trade-api/v2/*, declared in vercel.json). Direct
+//   stays in the race because it costs nothing when it fails and does work from
+//   some origins.
+//
+//   Every path is validated for a real markets ARRAY, never on status alone.
+//   Under `vite dev` those rewrites do not exist -- Vercel applies them, not
+//   Vite -- so the dev server answers unmatched /api/* with 200 and index.html.
+//   A 200 here is not evidence of anything; only a parsed markets array is.
+const _wxMarkets=async(series,limit=60)=>{
+  const qs=`markets?series_ticker=${encodeURIComponent(series)}&status=open&limit=${limit}`;
+  const urls=[`/api/kalshi/${qs}`,`/api/kalshi-public/${qs}`,
+              `https://api.elections.kalshi.com/trade-api/v2/${qs}`];
+  const tried=await Promise.all(urls.map(async u=>{
+    const r=await _wxJson(u);
+    if(!r.ok)return{u,fail:r.reason};
+    const mk=(r.data&&Array.isArray(r.data.markets))?r.data.markets:null;
+    return (mk&&mk.length)?{u,markets:mk}:{u,fail:'no markets array'};
+  }));
+  const win=tried.find(x=>x.markets);
+  return win?{ok:true,markets:win.markets,via:win.u.split('?')[0]}
+            :{ok:false,
+              // `empty` separates "the API answered and there is nothing trading"
+              //   from "we could not reach it". Only the first is a fact about the
+              //   market; the second is a fact about the network, and the two must
+              //   never be shown to mean the same thing.
+              empty:tried.some(x=>x.fail==='no markets array'),
+              reason:tried.map(x=>x.u.split('?')[0]+': '+x.fail).join(' / ')};
+};
+// Probe one series for "is anything trading". Tries paths in ORDER and stops at
+//   the first definitive answer, rather than racing all three -- probing every
+//   city three ways at once fired 33 requests, some timed out, and cities that
+//   were genuinely open (Boston, 6 buckets) came back marked closed. Failing
+//   open is the right default: a wrong "closed" silently hides a tradeable
+//   market, while a wrong "open" just surfaces a real error when clicked.
+const _wxProbe=async(series)=>{
+  const qs=`markets?series_ticker=${encodeURIComponent(series)}&status=open&limit=1`;
+  for(const u of [`/api/kalshi/${qs}`,`/api/kalshi-public/${qs}`,
+                  `https://api.elections.kalshi.com/trade-api/v2/${qs}`]){
+    const r=await _wxJson(u);
+    if(!r.ok)continue;                       // unreachable: try the next path
+    if(!r.data||!Array.isArray(r.data.markets))continue;
+    return r.data.markets.length>0?'open':'closed';
+  }
+  return 'unknown';                          // never reached one; do not disable
 };
 
 function WeatherView({onClose}){
@@ -27621,10 +27701,9 @@ function WeatherView({onClose}){
   const load=React.useCallback(async()=>{
     setState(s=>({...s,loading:true,err:null}));
     try{
-      const K='https://api.elections.kalshi.com/trade-api/v2';
-      const mk=await _wxJson(`${K}/markets?series_ticker=${city.series}&status=open&limit=60`);
+      const mk=await _wxMarkets(city.series);
       if(!mk.ok)throw new Error('Kalshi: '+mk.reason);
-      const markets=(mk.data.markets||[]);
+      const markets=mk.markets;
       if(!markets.length)throw new Error('no open '+city.series+' market right now');
 
       // NWS forecast: point -> gridpoint forecast -> today's DAYTIME high
@@ -27633,15 +27712,46 @@ function WeatherView({onClose}){
       const fcUrl=pt.data?.properties?.forecast;
       const fcR=fcUrl?await _wxJson(fcUrl):{ok:false,reason:'no forecast url'};
       if(!fcR.ok)throw new Error('NWS forecast: '+fcR.reason);
+      // V13.4.218: the forecast period must be TODAY's, matched on local date.
+      //
+      //   `periods.find(p=>p.isDaytime)` -- the obvious version -- silently returns
+      //   TOMORROW once today's daytime period rolls off. NWS orders periods from
+      //   now: at 8pm the list reads ["Tonight" (N), "Friday" (Y), ...], so the
+      //   first daytime hit is the next day while the Kalshi ladder and the
+      //   observations are still today's. That lands in the evening, exactly when
+      //   sigma is tightest (0.6F) -- the model would be at maximum confidence
+      //   about the wrong day. A confident wrong answer is worse than no answer.
       const periods=fcR.data?.properties?.periods||[];
-      const day=periods.find(p=>p.isDaytime);
+      const todayLocal=_wxLocalParts(city.tz,new Date()).date;
+      const day=periods.find(p=>p.isDaytime&&p.startTime&&
+                               _wxLocalParts(city.tz,new Date(p.startTime)).date===todayLocal);
       const fc=day?Number(day.temperature):null;
+      //   No today-daytime period means peak heating has passed and NWS has moved
+      //   on to tonight. That is not an error: by then the observed max IS
+      //   essentially the answer, so the running max becomes the centre below.
+      const fcClosed=(fc==null);
 
       // Observations -> running max for the LOCAL day (Kalshi's day, not UTC).
-      const ob=await _wxJson(`https://api.weather.gov/stations/${city.station}/observations?limit=48`);
+      // V13.4.218: bound the window by TIME, not by count.
+      //
+      //   `limit=48` looked reasonable and was badly wrong. These stations report
+      //   far more often than hourly, and the API returns the most RECENT n -- so
+      //   late in the day the window slides right past the afternoon peak. Measured
+      //   at Long Beach at 22:00 local: limit=48 reached back only to 18:00 and
+      //   reported a max of 78.8F, while the true max for the day was 89.6F. Nearly
+      //   11F understated.
+      //
+      //   That silently destroys the truncation, which is the one thing in this
+      //   lane worth more than the market's opinion: buckets that are definitively
+      //   dead come back alive, and the model prices them as live. It also framed a
+      //   CORRECT station as broken -- LA read 71.6F against a market pricing
+      //   82-83F, which looked like KLAX being the wrong station until the window
+      //   was fixed and KLAX resolved to exactly 82.4F.
+      const ob=await _wxJson(`https://api.weather.gov/stations/${city.station}/observations`
+        +`?start=${encodeURIComponent(_wxDayStartISO(city.tz))}&limit=300`);
       let runMax=null,obsN=0,obsAt=null;
       if(ob.ok){
-        const today=_wxLocalParts(city.tz,new Date()).date;
+        const today=todayLocal; // same local day the forecast period was matched on
         const toF=c=>c*9/5+32;
         (ob.data.features||[]).forEach(f=>{
           const c=f?.properties?.temperature?.value; const ts=f?.properties?.timestamp;
@@ -27696,16 +27806,30 @@ function WeatherView({onClose}){
         const oi=Math.round(+m.open_interest_fp||0);
         let p=null,dead=false;
         if(b&&mu!=null){
-          // A bucket topping out below the observed max can no longer be the high.
-          if(runMax!=null&&b.hi<runMax-0.05){dead=true;p=0;}
+          // V13.4.219: compare in ROUNDED degrees, because that is how the
+          //   contract settles. Kalshi reports the daily high to the nearest
+          //   degree, so "81 to 82" covers real temperatures from 80.5 to 82.5.
+          //
+          //   The first version tested `b.hi < runMax-0.05` against the raw
+          //   reading, which killed a bucket the moment the thermometer edged past
+          //   its integer label. Caught live on LA: observed max 82.4F marked
+          //   "81 to 82" impossible while the market paid 52c for it -- and the
+          //   market was right, since 82.4 rounds to 82, squarely inside. That is
+          //   the failure landing exactly at a bucket boundary, which is the only
+          //   place the difference is worth anything.
+          //
+          //   Floor for the day's settled high, in rounded degrees:
+          const rmR=(runMax==null)?null:Math.round(runMax);
+          if(rmR!=null&&b.hi<rmR){dead=true;p=0;}
           else{
             const lo=b.lo===-Infinity?-Infinity:b.lo-0.5;
             const hi=b.hi===Infinity?Infinity:b.hi+0.5;
             const F=(x)=>x===Infinity?1:(x===-Infinity?0:_wxNormCdf((x-mu)/sigma));
             let raw=F(hi)-F(lo);
-            if(runMax!=null){ // truncate: the high cannot land below what already happened
-              const floorP=F(runMax-0.5);
-              const lo2=Math.max(lo,runMax-0.5);
+            if(rmR!=null){ // truncate: the high cannot settle below what already happened
+              const floor=rmR-0.5;
+              const floorP=F(floor);
+              const lo2=Math.max(lo,floor);
               raw=Math.max(0,F(hi)-F(lo2))/Math.max(1e-6,1-floorP);
             }
             p=Math.max(0,Math.min(1,raw));
@@ -27741,11 +27865,46 @@ function WeatherView({onClose}){
           suspect:(p!=null&&yesMid>0&&!dead&&oi>=500&&Math.abs(p*100-yesMid)>=10)};
       }).filter(r=>r.b).sort((a,b)=>(b.b.lo===-Infinity?-999:b.b.lo)-(a.b.lo===-Infinity?-999:a.b.lo));
 
-      setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100,ready,biting});
+      // V13.4.218: DATA-CONFLICT GUARD.
+      //
+      //   If a bucket is dead on my observations while the market pays 50c+ for it,
+      //   one of us is badly wrong. It is almost certainly me: the market has
+      //   thousands of contracts and the settlement feed, I have a free API and a
+      //   station I picked by hand. Every failure in this lane so far has been mine
+      //   -- the truncated observation window, guessed tickers -- and each one made
+      //   the model MORE confident, not less.
+      //
+      //   The exact shape of the LA failure: dead buckets everywhere, "76 or below"
+      //   at 100% model against a 1c ask, and the panel offering YES +99c. That is
+      //   not an edge, it is a broken reading, and it is the most expensive thing
+      //   this panel could ever print. So when observations and market disagree
+      //   this hard, no edges at all -- the reading is not trustworthy enough to
+      //   trade on either side.
+      const conflict=rows.find(r=>r.dead&&r.bid>=50)||null;
+      if(conflict)rows.forEach(r=>{r.best=null;});
+
+      setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100,
+        ready,biting,fcClosed,via:mk.via,conflict:conflict?{sub:conflict.sub,bid:conflict.bid}:null});
     }catch(e){setState(s=>({...s,loading:false,err:String(e.message||e).slice(0,140)}));}
   },[city]);
 
   React.useEffect(()=>{load();const iv=setInterval(load,120000);return()=>clearInterval(iv);},[load]);
+
+  // V13.4.218: probe which cities are actually trading right now. These ladders
+  //   open and close on their own schedule -- Houston had no open market at 01:45
+  //   while ten others did -- so a pill that looks identical to the rest and then
+  //   errors on click is a worse lie than a pill marked closed. Cheap probe:
+  //   limit=1, once per mount.
+  const[open,setOpen]=React.useState(null);
+  React.useEffect(()=>{let alive=true;
+    (async()=>{
+      const hits=await Promise.all(_WX_CITIES.map(async c=>
+        ({id:c.id,state:await _wxProbe(c.series)})));
+      // Only a definitive 'closed' disables a pill. 'unknown' stays enabled.
+      if(alive)setOpen(new Set(hits.filter(h=>h.state!=='closed').map(h=>h.id)));
+    })();
+    return()=>{alive=false;};
+  },[]);
 
   const S=state;
   const pct=(v)=>v==null?'—':(v*100).toFixed(0)+'%';
@@ -27764,15 +27923,22 @@ function WeatherView({onClose}){
           <button onClick={()=>onClose&&onClose()} className="p-2 rounded-lg text-xl" style={{color:'rgba(255,255,255,0.6)'}}>✕</button>
         </div>
 
-        <div className="flex gap-2 mb-4">
-          {_WX_CITIES.map(c=>(
-            <button key={c.id} onClick={()=>setCityId(c.id)}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {_WX_CITIES.map(c=>{
+            // null = probe still running, so treat every city as available rather
+            //   than flashing them all as closed for a second.
+            const closed=open!=null&&!open.has(c.id);
+            const sel=cityId===c.id;
+            return (
+            <button key={c.id} onClick={()=>setCityId(c.id)} disabled={closed}
+              title={closed?'no open market for this city right now':c.series+' · NWS '+c.station}
               className="px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] font-bold rounded-full border transition-colors"
-              style={cityId===c.id?{background:'rgba(255,255,255,0.10)',color:'rgba(255,255,255,0.92)',borderColor:'rgba(255,255,255,0.28)'}
-                                  :{background:'transparent',color:'rgba(255,255,255,0.45)',borderColor:'rgba(255,255,255,0.12)'}}>
-              {c.label}
-            </button>
-          ))}
+              style={closed?{background:'transparent',color:'rgba(255,255,255,0.20)',borderColor:'rgba(255,255,255,0.07)',cursor:'not-allowed'}
+                   :sel   ?{background:'rgba(255,255,255,0.10)',color:'rgba(255,255,255,0.92)',borderColor:'rgba(255,255,255,0.28)'}
+                          :{background:'transparent',color:'rgba(255,255,255,0.45)',borderColor:'rgba(255,255,255,0.12)'}}>
+              {c.label}{closed&&<span className="ml-1.5 text-[9px] normal-case tracking-normal" style={{color:'rgba(255,255,255,0.18)'}}>closed</span>}
+            </button>);
+          })}
         </div>
 
         {S.err?(
@@ -27784,24 +27950,28 @@ function WeatherView({onClose}){
             {/* V13.4.217: the gate states its own case, so a blank edge column
                 never reads as a bug. */}
             <div className="rounded-xl p-3 mb-4 flex items-start gap-3"
-                 style={S.ready?{background:'rgba(35,185,129,0.08)',border:'1px solid rgba(35,185,129,0.30)'}
-                              :{background:'rgba(212,160,58,0.08)',border:'1px solid rgba(212,160,58,0.30)'}}>
-              <div className="text-[15px] leading-none mt-0.5">{S.ready?'✓':'⏸'}</div>
+                 style={S.conflict?{background:'rgba(232,69,94,0.10)',border:'1px solid rgba(232,69,94,0.38)'}
+                      :S.ready   ?{background:'rgba(35,185,129,0.08)',border:'1px solid rgba(35,185,129,0.30)'}
+                                 :{background:'rgba(212,160,58,0.08)',border:'1px solid rgba(212,160,58,0.30)'}}>
+              <div className="text-[15px] leading-none mt-0.5">{S.conflict?'⚠':S.ready?'✓':'⏸'}</div>
               <div className="text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.72)'}}>
                 <span className="uppercase tracking-[0.14em] font-bold text-[9px] block mb-1"
-                      style={{color:S.ready?'#23B981':'#D4A03A'}}>
-                  {S.ready?(S.biting?'live · truncation biting':'live · edges shown'):'standing down · too early'}
+                      style={{color:S.conflict?'#E8455E':S.ready?'#23B981':'#D4A03A'}}>
+                  {S.conflict?'no edges · reading disagrees with the market'
+                   :S.ready?(S.biting?'live · truncation biting':'live · edges shown'):'standing down · too early'}
                 </span>
-                {S.ready
+                {S.conflict
+                  ?<>My reading says <b>{S.conflict.sub}</b> is already impossible, but the market pays <b>{S.conflict.bid}c</b> for it. One of us is badly wrong and it is probably me — the book has thousands of contracts and the settlement feed, this panel has a free weather API and a station picked by hand. <b>All edges are suppressed.</b> Most likely the NWS station for this city is not the one Kalshi settles on, or its observations are stale. Do not trade this city until the reading and the book agree.</>
+                  :S.ready
                   ?(S.biting
-                    ?<>The day has already climbed to {S.runMax!=null?S.runMax.toFixed(1)+'°F':'near forecast'} against a {S.fc}°F forecast. Buckets below that are dead as <b>arithmetic</b>, and that is the one thing here worth more than the market&rsquo;s opinion.</>
-                    :<>Past midday with {S.obsN} readings in. Edges are shown, but the day has not climbed near {S.fc}°F yet, so the truncation is not doing much work — most of this is still a curve, not a fact.</>)
+                    ?<>The day has already climbed to {S.runMax!=null?S.runMax.toFixed(1)+'°F':'near forecast'}{S.fc!=null?<> against a {S.fc}°F forecast</>:<>, and NWS has closed today&rsquo;s forecast period, so the observed max is now the centre</>}. Buckets below that are dead as <b>arithmetic</b>, and that is the one thing here worth more than the market&rsquo;s opinion.</>
+                    :<>Past midday with {S.obsN} readings in. Edges are shown, but the day has not climbed near {S.fc!=null?S.fc+'°F':'its peak'} yet, so the truncation is not doing much work — most of this is still a curve, not a fact.</>)
                   :<>It is {S.hourLocal!=null?S.hourLocal+':00':'early'} local with {S.obsN} reading{S.obsN===1?'':'s'} logged. <b>Buy edges are deliberately hidden until midday.</b> Overnight the model is a normal curve fitted to one rounded integer forecast, and the book already prices that plus full ensemble spread — it would print edges that are just the curve being too wide. Percentages stay visible so you can see the shape. Already-passed buckets still show their edge, because that part is measured.</>}
               </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              {[['NWS forecast high',S.fc!=null?S.fc+'°F':'—'],
+              {[['NWS forecast high',S.fc!=null?S.fc+'°F':(S.fcClosed?'period closed':'—')],
                 ['observed max today',S.runMax!=null?S.runMax.toFixed(1)+'°F':'—'],
                 ['observations',S.obsN+' · '+(S.hourLocal!=null?S.hourLocal+':00 local':'—')],
                 ['model spread (σ)',S.sigma!=null?'±'+S.sigma+'°':'—']].map(([k,v])=>(
