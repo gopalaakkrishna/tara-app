@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.225-reconcile-honesty';
-const TARA_VERSION_DISPLAY='Tara 13.4.225';
+const BASELINE_VERSION='2026.08.20-v13.4.226-pill-colours-sitout-value';
+const TARA_VERSION_DISPLAY='Tara 13.4.226';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17031,6 +17031,42 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
+// V13.4.226: price the sit-outs.
+//
+//   Measured across the last 1,000 calls: 554 sit-outs, of which 235 had no
+//   directional read at all (nothing to take) and 319 had one and were vetoed.
+//   Taking all 319 at the price recorded at lock would have LOST 251c. No price
+//   band beats its own break-even by more than its 95% interval — the apparent
+//   edges are all inside the noise.
+//
+//   The trap this measures around: `kalshiAtLock` is the UP (yes) price, so a
+//   DOWN lean costs 100 minus it, not it. Verified against traded entries —
+//   execCostAtLock matches kalshiAtLock on UP calls (avg 69 vs 71) and matches
+//   100-kalshiAtLock on DOWN calls (avg 33 -> 67 vs 70). Reading it directly
+//   makes DOWN bets look ~34c cheaper than they were and flips the whole verdict
+//   from "sitting out is right" to "relax the gates", which is exactly backwards.
+const _sitoutFee=(p)=>Math.ceil(0.07*(p/100)*(1-p/100)*100);
+const _sitoutValue=(log)=>{
+  if(!Array.isArray(log)||!log.length)return null;
+  const so=log.filter(e=>e&&e.result==='SITOUT');
+  if(!so.length)return null;
+  const withRead=so.filter(e=>e.confidence>0&&e.posterior!=null
+    &&Number(e.strike)>0&&Number(e.closingPrice)>0
+    &&Number(e.kalshiAtLock)>0&&Number(e.kalshiAtLock)<100);
+  if(withRead.length<20)return null;
+  let net=0,wins=0,cost=0;
+  for(const e of withRead){
+    const lean=e.posterior>50?'UP':'DOWN';
+    const won=(Number(e.closingPrice)>=Number(e.strike))===(lean==='UP');
+    const c=lean==='UP'?Number(e.kalshiAtLock):100-Number(e.kalshiAtLock);
+    cost+=c; if(won)wins++;
+    net+=won?(100-c-_sitoutFee(c)):-(c+_sitoutFee(c));
+  }
+  return{total:so.length,n:withRead.length,noRead:so.length-withRead.length,
+    netCents:net,wr:Math.round(wins/withRead.length*100),
+    be:Math.round(cost/withRead.length)};
+};
+
 function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
   if(!taraCall)return null;
     const tc=taraCall;
@@ -17773,11 +17809,42 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             </div>
             <div className="h-7 w-px bg-[#EDEDED]/10"></div>
             <div className="flex flex-col items-center">
-              <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_GOLD}}>{sc.sitouts||0}</span>
-              <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(35,185,129,0.6)'}}>sat out</span>
+              {/* V13.4.226: this tile was a white number under a GREEN label —
+                  T2_GOLD has been the neutral chrome white since v206, and the
+                  label was still on the win colour. So the one number that means
+                  "did not trade" was wearing the colour that means "won". */}
+              <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_SITOUT_FG}}>{sc.sitouts||0}</span>
+              <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(212,160,58,0.65)'}}>sat out</span>
             </div>
           </div>
         </div>
+
+        {/* V13.4.226: what the sit-outs were actually WORTH. A big number labelled
+            "sat out" reads as missed opportunity and nothing on screen said
+            otherwise, so the honest answer is to price them. Every sat-out window
+            where Tara still had a directional read is replayed at the price
+            recorded at lock — no hindsight beyond the outcome itself. */}
+        {(()=>{
+          const v=_sitoutValue(taraCallLog);
+          if(!v||v.n<20)return null;
+          const good=v.netCents<=0;   // negative = trading them would have lost = sitting out was right
+          return (
+            <div className="mt-2 px-3 py-2 rounded-lg text-[10px] leading-relaxed"
+                 style={{background:good?'rgba(35,185,129,0.06)':'rgba(212,160,58,0.07)',
+                         border:`1px solid ${good?'rgba(35,185,129,0.22)':'rgba(212,160,58,0.26)'}`,
+                         color:'rgba(255,255,255,0.58)'}}
+                 title="Replays every sat-out window that still had a directional read, buying the leaned side at the price recorded at lock, and settles it against what the window actually did.">
+              <span className="uppercase tracking-[0.14em] font-bold" style={{color:good?'rgba(35,185,129,0.9)':T2_SITOUT_FG}}>
+                {good?'sitting out is paying':'sit-outs are costing'}
+              </span>{' '}
+              — of {v.total} sit-outs, {v.noRead} had no signal at all. The other {v.n} had a read and were vetoed; taking every one of them at the price on the screen would have{' '}
+              <b style={{color:good?'rgba(35,185,129,0.9)':T2_SITOUT_FG}}>
+                {good?`lost ${Math.abs(Math.round(v.netCents))}c`:`made ${Math.round(v.netCents)}c`}
+              </b>{' '}
+              — right {v.wr}% of the time, but at an average {v.be}c to enter it needed {v.be}% just to break even.
+            </div>
+          );
+        })()}
 
         {/* V6.2.6: Force-call buttons. Only when Tara hasn't committed yet (SCANNING / WATCHING).
               Hidden after commit or sit-out — at that point the call is locked one-way and these
@@ -50385,9 +50452,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         /* Non-header micro-labels stay dim, so the section headers above are the
            only gold on screen and keep their meaning. :not() keeps these two
            rules from fighting over the same elements. */
-        [data-tara-theme="simple"] .text-\\[9px\\].uppercase:not([class*="tracking-["]),
-        [data-tara-theme="simple"] .text-\\[10px\\].uppercase:not([class*="tracking-["]),
-        [data-tara-theme="simple"] .text-\\[8px\\].uppercase:not([class*="tracking-["]) {
+        /* V13.4.226: must not repaint anything that chose its own colour. See the
+           note on the tracking rule below — these two !important rules were
+           stripping the colour off every WIN/LOSS/SITOUT pill in the app.
+           :not([style*="color"]) exempts elements with an inline colour, which is
+           exactly how every semantic pill sets its own. */
+        [data-tara-theme="simple"] .text-\\[9px\\].uppercase:not([class*="tracking-["]):not([style*="color"]),
+        [data-tara-theme="simple"] .text-\\[10px\\].uppercase:not([class*="tracking-["]):not([style*="color"]),
+        [data-tara-theme="simple"] .text-\\[8px\\].uppercase:not([class*="tracking-["]):not([style*="color"]) {
           color: var(--ink-3) !important;
         }
         /* (Section-header colour is owned by the V13.4.193 rule further down --
@@ -50537,13 +50609,29 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .text-\[8px\].uppercase[class*="tracking-"] {
           font-size: 9.5px !important;
         }
+        /* V13.4.226: :not([style*="color"]) added. This rule is for section
+           HEADERS, but it matched every small uppercase tracked element — which
+           includes the WIN / LOSS / SITOUT status pills in the log. Each of those
+           sets its own colour inline (WIN carries rgba(35,185,129,0.95)), and a
+           stylesheet !important beats an inline style, so all three pills computed
+           to the SAME muted white. Measured on the live page: WIN, LOSS and SITOUT
+           all rendered rgba(255,255,255,0.58) at 10px, separated only by a
+           background tint at 0.10-0.13 alpha that is nearly invisible on this
+           ground. That is the whole reason the colours were hard to tell apart —
+           the outcome pills had no colour at all. Fixing v193's headers is what
+           broke them, and this is the narrowest correction: chrome still gets
+           neutralised, anything that deliberately colours itself is left alone. */
+        /* Typography applies to ALL of them — pills should stay tracked caps. */
         [data-tara-theme="simple"] .uppercase.tracking-wider,
         [data-tara-theme="simple"] .uppercase.tracking-widest,
         [data-tara-theme="simple"] .uppercase.tracking-wide {
           text-transform: uppercase !important;
           letter-spacing: 0.12em !important;
           font-weight: 600 !important;
-          /* V13.4.206: MEASURED, not guessed. Counting coloured text on the live
+          opacity: 1;
+        }
+        /* Colour is the part that must skip self-coloured elements.
+           V13.4.206: MEASURED, not guessed. Counting coloured text on the live
              page: 111 green elements against 18 red -- 55 of the greens were
              THIS rule. Two different greens (#4FC79E chrome, #23B981 win) on
              86% of all coloured text meant green had stopped meaning anything;
@@ -50553,8 +50641,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
              neutrality. At 0.85 white with uppercase + 0.12em tracking + weight
              600 they read as authored headers, and green is handed back to the
              only thing that should own it: an actual result. */
+        [data-tara-theme="simple"] .uppercase.tracking-wider:not([style*="color"]),
+        [data-tara-theme="simple"] .uppercase.tracking-widest:not([style*="color"]),
+        [data-tara-theme="simple"] .uppercase.tracking-wide:not([style*="color"]) {
           color: rgba(255,255,255,0.85) !important;
-          opacity: 1;
         }
 
         /* ── ACCENT COLORS — KNOCK BACK 8-12% ─────────────── */
