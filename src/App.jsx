@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.219-weather-obs-window';
-const TARA_VERSION_DISPLAY='Tara 13.4.219';
+const BASELINE_VERSION='2026.08.20-v13.4.220-weather-quantisation';
+const TARA_VERSION_DISPLAY='Tara 13.4.220';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27749,7 +27749,7 @@ function WeatherView({onClose}){
       //   was fixed and KLAX resolved to exactly 82.4F.
       const ob=await _wxJson(`https://api.weather.gov/stations/${city.station}/observations`
         +`?start=${encodeURIComponent(_wxDayStartISO(city.tz))}&limit=300`);
-      let runMax=null,obsN=0,obsAt=null;
+      let runMax=null,maxC=null,obsN=0,obsAt=null,intC=0;
       if(ob.ok){
         const today=todayLocal; // same local day the forecast period was matched on
         const toF=c=>c*9/5+32;
@@ -27758,11 +27758,40 @@ function WeatherView({onClose}){
           if(c==null||!ts)return;
           if(_wxLocalParts(city.tz,new Date(ts)).date!==today)return;
           const F=toF(c); obsN++;
-          if(runMax==null||F>runMax)runMax=F;
+          if(Number.isInteger(c))intC++;          // see quantisation note below
+          if(runMax==null||F>runMax){runMax=F;maxC=c;}
           if(!obsAt||ts>obsAt)obsAt=ts;
         });
       }
       if(runMax!=null)runMax=Math.round(runMax*10)/10;
+      // V13.4.219: QUANTISATION MARGIN.
+      //
+      //   Several of these stations report whole degrees CELSIUS. KSEA is one --
+      //   its raw values come back 19, 19, 19, and a day of them peaks at exactly
+      //   28C, which is 82.4F. That is why four different cities all reported an
+      //   identical 82.4F max: not a bug, just several stations sitting on 28C.
+      //
+      //   But a whole-Celsius reading carries +/-0.9F of resolution, and the
+      //   buckets here are 1F wide. The reading is coarser than the thing being
+      //   measured. Worked case: a station reporting 27C reads as 80.6F, so the
+      //   naive floor is round(80.6)=81 and "79 to 80" is declared dead -- yet the
+      //   true temperature could be 79.7F, which settles at 80 and wins that
+      //   bucket outright.
+      //
+      //   So back the floor off by the half-step before rounding. This only ever
+      //   kills FEWER buckets, which is the safe direction: a bucket wrongly left
+      //   alive costs a missed trade, while a bucket wrongly killed says sell
+      //   something that can still win.
+      //
+      //   The test is about the MAX reading, not the whole series. Requiring every
+      //   reading of the day to be integer was too strict and silently disabled the
+      //   margin on the exact station that motivated it: KSEA came back 262 whole
+      //   and 22 fractional out of 284, so the all-or-nothing test said "not
+      //   quantised" while the day's max was sitting at a flat 28C. What matters is
+      //   whether THAT reading is quantised, on a station that mostly reports that
+      //   way.
+      const wholeC=(obsN>0&&maxC!=null&&Number.isInteger(maxC)&&(intC/obsN)>=0.7);
+      const runMaxFloor=(runMax==null)?null:(runMax-(wholeC?0.9:0));
 
       // sigma: widest before peak heating (~4pm local), tightening after.
       const hour=_wxLocalParts(city.tz,new Date()).hour;
@@ -27819,7 +27848,7 @@ function WeatherView({onClose}){
           //   place the difference is worth anything.
           //
           //   Floor for the day's settled high, in rounded degrees:
-          const rmR=(runMax==null)?null:Math.round(runMax);
+          const rmR=(runMaxFloor==null)?null:Math.round(runMaxFloor);
           if(rmR!=null&&b.hi<rmR){dead=true;p=0;}
           else{
             const lo=b.lo===-Infinity?-Infinity:b.lo-0.5;
@@ -27880,11 +27909,27 @@ function WeatherView({onClose}){
       //   this panel could ever print. So when observations and market disagree
       //   this hard, no edges at all -- the reading is not trustworthy enough to
       //   trade on either side.
-      const conflict=rows.find(r=>r.dead&&r.bid>=50)||null;
+      //   Two shapes, because the disagreement runs both ways.
+      //   (a) I call a bucket dead, the market still pays 50c+ for it.
+      //   (b) The market is effectively CERTAIN (90c bid) about a bucket and my
+      //       model is more than 30 points away from that. A 90c+ bid on real
+      //       open interest means the day is decided and the book knows the
+      //       answer; if my reading cannot see it, my reading is wrong.
+      //
+      //   Shape (b) was found on Seattle: the book paid 100c for "83 or above"
+      //   while KSEA topped out at 82.4F and the model said 46%. Nothing was
+      //   marked dead, so shape (a) stayed silent and every row was quietly
+      //   offering 37-53c of "edge". That is the basis risk in the caveats made
+      //   real -- Kalshi settles on The Weather Company, which had the day at 83F+
+      //   while NWS KSEA did not.
+      const conflict=rows.find(r=>r.dead&&r.bid>=50)
+                  ||rows.find(r=>r.p!=null&&r.bid>=90&&r.oi>=200&&Math.abs(r.bid-r.p*100)>=30)
+                  ||null;
       if(conflict)rows.forEach(r=>{r.best=null;});
 
       setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100,
-        ready,biting,fcClosed,via:mk.via,conflict:conflict?{sub:conflict.sub,bid:conflict.bid}:null});
+        ready,biting,fcClosed,via:mk.via,wholeC,
+        conflict:conflict?{sub:conflict.sub,bid:conflict.bid,model:conflict.dead?null:conflict.p}:null});
     }catch(e){setState(s=>({...s,loading:false,err:String(e.message||e).slice(0,140)}));}
   },[city]);
 
@@ -27961,7 +28006,7 @@ function WeatherView({onClose}){
                    :S.ready?(S.biting?'live · truncation biting':'live · edges shown'):'standing down · too early'}
                 </span>
                 {S.conflict
-                  ?<>My reading says <b>{S.conflict.sub}</b> is already impossible, but the market pays <b>{S.conflict.bid}c</b> for it. One of us is badly wrong and it is probably me — the book has thousands of contracts and the settlement feed, this panel has a free weather API and a station picked by hand. <b>All edges are suppressed.</b> Most likely the NWS station for this city is not the one Kalshi settles on, or its observations are stale. Do not trade this city until the reading and the book agree.</>
+                  ?<>The market pays <b>{S.conflict.bid}c</b> for <b>{S.conflict.sub}</b>, which my reading of the day cannot support{S.conflict.model!=null?<> (model says {Math.round(S.conflict.model*100)}%)</>:<> (already impossible on the observed max)</>}. One of us is badly wrong and it is probably me — the book has thousands of contracts and the settlement feed, this panel has a free weather API and a station picked by hand. <b>All edges are suppressed.</b> Most likely {city.station} is not the station Kalshi settles on for this city, or the two sources genuinely split at a bucket boundary. Do not trade this city until the reading and the book agree.</>
                   :S.ready
                   ?(S.biting
                     ?<>The day has already climbed to {S.runMax!=null?S.runMax.toFixed(1)+'°F':'near forecast'}{S.fc!=null?<> against a {S.fc}°F forecast</>:<>, and NWS has closed today&rsquo;s forecast period, so the observed max is now the centre</>}. Buckets below that are dead as <b>arithmetic</b>, and that is the one thing here worth more than the market&rsquo;s opinion.</>
@@ -27974,7 +28019,7 @@ function WeatherView({onClose}){
               {[['NWS forecast high',S.fc!=null?S.fc+'°F':(S.fcClosed?'period closed':'—')],
                 ['observed max today',S.runMax!=null?S.runMax.toFixed(1)+'°F':'—'],
                 ['observations',S.obsN+' · '+(S.hourLocal!=null?S.hourLocal+':00 local':'—')],
-                ['model spread (σ)',S.sigma!=null?'±'+S.sigma+'°':'—']].map(([k,v])=>(
+                ['model spread (σ)',(S.sigma!=null?'±'+S.sigma+'°':'—')+(S.wholeC?' · ±0.9 read':'')]].map(([k,v])=>(
                 <div key={k} className="bg-[#151A21] border border-[#24242E] rounded-xl p-3">
                   <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-1" style={{color:'rgba(255,255,255,0.45)'}}>{k}</div>
                   <div className="text-[16px] tabular-nums font-bold" style={{color:'rgba(255,255,255,0.92)'}}>{v}</div>
@@ -28023,6 +28068,7 @@ function WeatherView({onClose}){
               <div className="mb-1.5"><span style={{color:'#D4A03A'}}>No track record.</span> BTC has 1,000 logged calls behind its numbers. This lane has none. Every percentage here is a model output, not a measured edge — paper trade it before risking size.</div>
               <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Big edges are a warning, not a gift.</span> Any row 10c+ away from a book with 500+ open interest is marked <b style={{color:'#D4A03A'}}>model off?</b> and painted gold rather than green. Thousands of contracts deep on the other side means the crowd is probably reading the day better than a plain normal curve is. Treat those rows as the model failing, not the market.</div>
               <div className="mb-1.5"><span style={{color:'#23B981'}}>Arithmetic.</span> A row tagged <b style={{color:'#23B981'}}>arithmetic</b> is the one signal here that is not a forecast: the day has physically passed that bucket, so it settles at zero, and the NO side is worth a certain 100c. That is the reason this lane exists. It is still bounded by the basis note above — passed on NWS, not on the settlement source.</div>
+              {S.wholeC&&<div className="mb-1.5"><span style={{color:'#D4A03A'}}>Coarse station.</span> {city.station} is reporting whole degrees <b>Celsius</b> today, so each reading carries ±0.9°F — wider than these 1°F buckets. The passed-bucket floor is backed off by that half-step, which kills fewer buckets on purpose: a bucket wrongly left alive costs a missed trade, one wrongly killed tells you to sell something that can still win.</div>}
               <div>The model is deliberately plain: final high ~ Normal(NWS forecast, σ), truncated below today&rsquo;s observed max, with σ widest before peak heating (~4pm local) and tightening after. The genuinely solid part is the truncation — once the day has already hit {S.runMax!=null?S.runMax.toFixed(1)+'°F':'a given max'}, lower buckets are arithmetic, not forecasting.</div>
             </div>
           </div>
