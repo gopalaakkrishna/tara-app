@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.215-deeper-signals';
-const TARA_VERSION_DISPLAY='Tara 13.4.215';
+const BASELINE_VERSION='2026.08.19-v13.4.216-comment-repair';
+const TARA_VERSION_DISPLAY='Tara 13.4.216';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5962,7 +5962,7 @@ const PRICE_SOURCE_DEFAULT='coinbase';
 //   Emerald  — wins, UP locks, profit (unchanged)
 //   Rose     — losses, DOWN locks, adverse (unchanged)
 //   These coexist — copper sits between green and red as a "watch but don't alarm" tier.
-/* V13.4.206: the chrome accent must NOT be a signal colour. This constant is used 94 times for modal headings, active pills and stamps; after the Kalshi migration all of it rendered in #23B981 -- the exact WIN green -- so chrome and outcomes were indistinguishable. Neutral now: green and red are left to mean only what they measure. */
+/* V13.4.206: the chrome accent must NOT be a signal colour. This constant is used 94 times for modal headings, active pills and stamps; after the Kalshi migration all of it rendered in the exact WIN green (#28CC95 at the time, #23B981 since V13.4.215) -- so chrome and outcomes were indistinguishable. Neutral now: green and red are left to mean only what they measure. */
 const T2_GOLD='rgba(255,255,255,0.90)';
 // V13.4.207: SIT-OUT amber. Its own named colour so the four render sites cannot
 //   drift apart again (they already did once: green in three of them, neutral in a
@@ -5978,7 +5978,10 @@ const T2_COPPER='#C97D4A';
 //   the SAME hexes used on screen, so a DOWN lock is the same rose in both places.
 const _DC_UP=0x23B981;      // emerald  — UP / buying (V13.4.215: deepened with the app)
 const _DC_DOWN=0xE8455E;    // rose     — DOWN / selling (V13.4.215: deepened with the app)
-const _DC_GOLD=0xD4A03A;    // amber — caution / skipped / watch. Deliberately NOT the app accent: V13.4.198 moved that to Kalshi brand green, and green in a Discord embed reads as a WIN.
+const _DC_GOLD=0xD4A03A;    // gold — caution / skipped / watch. Deliberately NOT the
+                            //   WIN green: green in a Discord embed reads as a win.
+                            //   Tracks T2_SITOUT so the embeds and the UI agree on
+                            //   what "sat out" looks like.
 const _DC_DIM=0x6B6B6B;     // grey     — informational
 // Compact money: 1_022_000 -> "$1.0M", 506_000 -> "$506K". Keeps columns narrow so the
 //   monospace blocks below stay aligned on a phone.

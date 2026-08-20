@@ -29,9 +29,11 @@
       //     therefore means DEPTH, TYPE, ACCENT and MOTION -- not putting the
       //     rejected hues back. Every non-signal family still collapses to
       //     grayscale below.
-      //   * Green and red keep their Kalshi-sampled values (#23B981/#E8455E).
-      //     Those are functional signals matched to the exchange's own UI, not
-      //     decoration, so they are the one thing a restyle must not touch.
+      //   * Green and red are FUNCTIONAL SIGNALS, not decoration -- they are
+      //     the one thing a restyle must not blur. They were Kalshi-sampled
+      //     (#28CC95 / #FF4D6A) from V13.4.198 until V13.4.215 deepened them to
+      //     #23B981 / #E8455E for legibility on this ground; see that note for
+      //     the trade-off. Still signals-only, still never used for chrome.
       //
       // What DID change:
       //   * Base moved off flat neutral black to a layered near-black with a
@@ -40,8 +42,13 @@
       //     invisible in the mode actually in use -- see the V13.4.190 note on
       //     the tokens below. Corrected to a real 18/255 page-vs-card
       //     separation, roughly double what the app had before.
-      //   * The signature is VIOLET as of V13.4.197 (was a gold lineage:
-      //     #C9A961/#D4A24C -> #E5C07B -> #F5C960 -> #A78BFA). See the token block.
+      //   * Accent lineage, for anyone wondering why it moved so much:
+      //     gold (#C9A961/#D4A24C -> #E5C07B -> #F5C960) -> violet #A78BFA
+      //     (V13.4.197, rejected) -> Kalshi brand green (V13.4.198) -> and then
+      //     V13.4.206 made CHROME NEUTRAL entirely, because the accent had
+      //     become the same colour as WIN and the two were indistinguishable.
+      //     There is deliberately no chrome accent hue now: green and red mean
+      //     outcomes, gold means sat-out, everything else is white at a tier.
       //   * Display typography: Space Grotesk is mapped onto `serif`, which
       //     restyles all 43 existing font-serif headings with zero component
       //     edits -- the single highest-leverage line in this file.
@@ -52,7 +59,8 @@
         theme: {
           extend: {
             colors: {
-              // Signals — unchanged, exchange-matched.
+              // Signals. Deepened in V13.4.215 from the Kalshi-sampled originals
+              //   so the three states separate by brightness as well as hue.
               emerald: {
                 200: '#9BE3C6', 300: '#5FD2AC', 400: '#23B981',
                 500: '#1B9B70', 600: '#147558', 700: '#0F5742', 900: '#082E22',
@@ -64,7 +72,10 @@
               },
               red: { 400: '#E8455E' },
               pink: { 400: '#E8455E' },
-              // Signature accent — unified + brightened.
+              // These families are aliased onto the WIN green so no stray amber/
+              //   orange/yellow can appear from a Tailwind class. Sit-out gold is
+              //   NOT here -- it lives in T2_SITOUT in App.jsx, deliberately, so a
+              //   utility class can never accidentally paint something sit-out.
               amber: { 300: '#6DD3B0', 400: '#23B981', 500: '#1A9770' },
               orange: { 400: '#23B981' },
               yellow: { 400: '#23B981' },
@@ -124,8 +135,11 @@
         /* Signals + signature */
         --up: #23B981;
         --down: #E8455E;
-        --accent: #23B981;      /* = Kalshi --brand-primary */
-        --accent-hi: #4FC79E;   /* = Kalshi --green-x40 */
+        /* NOTE: --accent is the same value as --up on purpose; it is used only
+           where an accent IS a positive signal. Chrome does not use it at all
+           since V13.4.206 -- see the lineage note above. */
+        --accent: #23B981;      /* deepened WIN green (was Kalshi #28CC95) */
+        --accent-hi: #4FC79E;   /* deepened bright tier (was Kalshi #5CD8AE) */
         --accent-glow: rgba(35, 185, 129, 0.16);
         --accent-border: rgba(35, 185, 129, 0.42);
 
