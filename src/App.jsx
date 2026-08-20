@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.223-weather-nine-cities';
-const TARA_VERSION_DISPLAY='Tara 13.4.223';
+const BASELINE_VERSION='2026.08.20-v13.4.224-responsive-clipping';
+const TARA_VERSION_DISPLAY='Tara 13.4.224';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14524,9 +14524,15 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
     :isEmerging
     ?'bg-amber-500/10 border-amber-500/30 text-amber-400'
     :'border-[#24242E] text-[#EDEDED]/40 hover:text-purple-400';
+  // V13.4.224: `cls` used to be a two-value mode switch — anything other than the
+  //   exact string 'hidden sm:flex' was thrown away. The mobile bar asked for
+  //   `flex-1 min-w-0` so the three buttons would share the row evenly, and it was
+  //   silently dropped: FLOW and THEORY sized to their labels while the one button
+  //   that did honour flex-1 stretched to 171px next to their 74px. Caller classes
+  //   are now appended rather than discarded.
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
-    :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
+    :'items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all '+(cls||'flex')+' ';
   return(
     <button onClick={onClick} className={baseCls+colorCls} title={scoreStr}>
       FLOW
@@ -14541,9 +14547,15 @@ const TheoryLabBtn=({active,onClick,cls})=>{
   const colorCls=active
     ?'bg-violet-500/20 border-violet-500/40 text-violet-400'
     :'border-[#24242E] text-[#EDEDED]/40 hover:text-violet-400';
+  // V13.4.224: `cls` used to be a two-value mode switch — anything other than the
+  //   exact string 'hidden sm:flex' was thrown away. The mobile bar asked for
+  //   `flex-1 min-w-0` so the three buttons would share the row evenly, and it was
+  //   silently dropped: FLOW and THEORY sized to their labels while the one button
+  //   that did honour flex-1 stretched to 171px next to their 74px. Caller classes
+  //   are now appended rather than discarded.
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
-    :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
+    :'items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all '+(cls||'flex')+' ';
   return(
     <button onClick={onClick} className={baseCls+colorCls} title="Theory Lab — shadow signals, weight 0">
       THEORY
@@ -28425,7 +28437,12 @@ function WeatherView({onClose}){
           <button onClick={()=>onClose&&onClose()} className="p-2 rounded-lg text-xl" style={{color:'rgba(255,255,255,0.6)'}}>✕</button>
         </div>
 
-        <div className="flex gap-2 mb-4 flex-wrap">
+        {/* V13.4.224: twenty pills wrapping cost 391px of height at 320px — the
+            whole first screen was a city list before a single number appeared.
+            On a phone they become one horizontal strip you swipe; the strip is a
+            real overflow-x:auto scroller, so nothing is ever unreachable. They
+            still wrap normally at sm and up, where the height is affordable. */}
+        <div className="flex gap-2 mb-4 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible -mx-1 px-1 pb-1">
           {_WX_CITIES.map(c=>{
             // null = probe still running, so treat every city as available rather
             //   than flashing them all as closed for a second.
@@ -28434,7 +28451,7 @@ function WeatherView({onClose}){
             return (
             <button key={c.id} onClick={()=>setCityId(c.id)} disabled={closed}
               title={closed?'no open market for this city right now':c.series+' · NWS '+c.station}
-              className="px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] font-bold rounded-full border transition-colors"
+              className="shrink-0 whitespace-nowrap px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] font-bold rounded-full border transition-colors"
               style={closed?{background:'transparent',color:'rgba(255,255,255,0.20)',borderColor:'rgba(255,255,255,0.07)',cursor:'not-allowed'}
                    :sel   ?{background:'rgba(255,255,255,0.10)',color:'rgba(255,255,255,0.92)',borderColor:'rgba(255,255,255,0.28)'}
                           :{background:'transparent',color:'rgba(255,255,255,0.45)',borderColor:'rgba(255,255,255,0.12)'}}>
@@ -28533,38 +28550,70 @@ function WeatherView({onClose}){
             </div>
 
             <div className="bg-[#151A21] border border-[#24242E] rounded-xl overflow-hidden mb-4">
-              <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[9px] uppercase tracking-[0.14em] font-bold" style={{color:'rgba(255,255,255,0.45)',borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
+              {/* V13.4.224: below sm this stops being a table. Measured at 320px,
+                  the 12-column grid handed each data column 22px while its
+                  contents needed 28-45px, so "YES +5c" and the open-interest
+                  figures were crushed inside their own cells. Shrinking type
+                  further would only have made an unreadable table smaller.
+                  On a phone each bucket becomes a two-line block instead: the
+                  bucket and the thing to DO on the first line, the supporting
+                  numbers on a second. The table returns intact at sm and up. */}
+              <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 text-[9px] uppercase tracking-[0.14em] font-bold" style={{color:'rgba(255,255,255,0.45)',borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
                 <div className="col-span-4">bucket</div>
                 <div className="col-span-2 text-right">yes / no ask</div>
                 <div className="col-span-2 text-right">model</div>
                 <div className="col-span-2 text-right">best side</div>
                 <div className="col-span-2 text-right">open int.</div>
               </div>
-              {S.rows.map((r,i)=>(
-                <div key={i} className="grid grid-cols-12 gap-2 px-4 py-2 text-[12px] tabular-nums items-baseline"
-                     style={{borderTop:i?'1px solid rgba(255,255,255,0.05)':'none',opacity:r.dead?0.45:1}}>
-                  <div className="col-span-4" style={{color:'rgba(255,255,255,0.88)'}}>
-                    {r.sub}
-                    {r.dead&&<span className="ml-2 text-[9px] uppercase tracking-wider" style={{color:'#D4A03A'}}>passed</span>}
+              {S.rows.map((r,i)=>{
+                const side=(!r.best
+                  ?<span style={{color:'rgba(255,255,255,0.28)'}}>{S.ready?'no edge':'held'}</span>
+                  :r.best.edge<1
+                    ?<span style={{color:'rgba(255,255,255,0.28)'}}>no edge</span>
+                    :<><span className="text-[9px] uppercase tracking-wider mr-1" style={{opacity:0.75}}>{r.best.side}</span>{'+'+r.best.edge.toFixed(0)+'c'}</>);
+                const tag=r.best&&r.best.edge>=1&&r.suspect
+                  ?<span className="text-[8px] uppercase tracking-wider font-bold" style={{color:'#D4A03A'}}>model off?</span>
+                  :r.best&&r.best.edge>=1&&r.dead
+                    ?<span className="text-[8px] uppercase tracking-wider font-bold" style={{color:'#23B981'}}>arithmetic</span>
+                    :null;
+                return(
+                <div key={i} style={{borderTop:i?'1px solid rgba(255,255,255,0.05)':'none',opacity:r.dead?0.45:1}}>
+                  {/* phone: two lines, action first */}
+                  <div className="sm:hidden px-3 py-2.5 text-[12px] tabular-nums">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="min-w-0 truncate" style={{color:'rgba(255,255,255,0.88)'}}>
+                        {r.sub}
+                        {r.dead&&<span className="ml-1.5 text-[9px] uppercase tracking-wider" style={{color:'#D4A03A'}}>passed</span>}
+                      </span>
+                      <span className="shrink-0 font-bold text-right" style={{color:edgeColor(r.best?r.best.edge:null,r.suspect)}}>{side}</span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2 mt-1 text-[10px]">
+                      <span style={{color:'rgba(255,255,255,0.45)'}}>
+                        yes {r.ask}c · no {r.noAsk}c · model {pct(r.p)} · oi {r.oi}
+                      </span>
+                      {tag}
+                    </div>
                   </div>
-                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.6)'}}>{r.ask}c / {r.noAsk}c</div>
-                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.88)'}}>{pct(r.p)}</div>
-                  <div className="col-span-2 text-right font-bold" style={{color:edgeColor(r.best?r.best.edge:null,r.suspect)}}>
+                  {/* sm and up: the table */}
+                  <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 text-[12px] tabular-nums items-baseline">
+                    <div className="col-span-4" style={{color:'rgba(255,255,255,0.88)'}}>
+                      {r.sub}
+                      {r.dead&&<span className="ml-2 text-[9px] uppercase tracking-wider" style={{color:'#D4A03A'}}>passed</span>}
+                    </div>
+                    <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.6)'}}>{r.ask}c / {r.noAsk}c</div>
+                    <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.88)'}}>{pct(r.p)}</div>
                     {/* A side label only appears when there is something to DO.
                         Both sides non-positive means the spread ate it, so say
                         "no edge" rather than printing "NO -0c" -- a side name
                         next to a negative number reads like an instruction. */}
-                    {!r.best
-                      ?<span style={{color:'rgba(255,255,255,0.28)'}}>{S.ready?'no edge':'held'}</span>
-                      :r.best.edge<1
-                        ?<span style={{color:'rgba(255,255,255,0.28)'}}>no edge</span>
-                        :<><span className="text-[9px] uppercase tracking-wider mr-1" style={{opacity:0.75}}>{r.best.side}</span>{'+'+r.best.edge.toFixed(0)+'c'}</>}
-                    {r.best&&r.best.edge>=1&&r.suspect&&<span className="block text-[8px] uppercase tracking-wider font-bold" style={{color:'#D4A03A'}}>model off?</span>}
-                    {r.best&&r.best.edge>=1&&r.dead&&<span className="block text-[8px] uppercase tracking-wider font-bold" style={{color:'#23B981'}}>arithmetic</span>}
+                    <div className="col-span-2 text-right font-bold" style={{color:edgeColor(r.best?r.best.edge:null,r.suspect)}}>
+                      {side}
+                      {tag&&<span className="block">{tag}</span>}
+                    </div>
+                    <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.4)'}}>{r.oi}</div>
                   </div>
-                  <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.4)'}}>{r.oi}</div>
-                </div>
-              ))}
+                </div>);
+              })}
             </div>
 
             {/* V13.4.221: the record. Two tiers kept apart on purpose — mixing a
@@ -29269,18 +29318,37 @@ const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setS
     {id:'logs',label:'LOGS'},
     {id:'chart',label:'CHART'},
   ];
+  // V13.4.224: same clipping bug as the other two mobile bars, and the same fix.
+  //   Seven items in one row wanted 452px inside 323px at 375px wide, so Brain,
+  //   Stats and Sports sat past the edge with nothing able to scroll to them. The
+  //   four tab buttons carry `flex-1` but default min-width:auto, so they will not
+  //   shrink below their own labels ("TARGETS") and the whole shortfall lands on
+  //   the shrink-0 icons after them.
+  //
+  //   The tabs get their own row; the three shortcuts get another. These three
+  //   exist ONLY because the header hides them at this width, so clipping them
+  //   here left no way to reach Brain, Stats or Sports on a phone at all.
   return(
-    <div className="md:hidden flex gap-1 mb-2 shrink-0">
-      {tabs.map(t=>{
-        const active=mobileTab===t.id;
-        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#23B981] border-[#23B981]/40':'text-[#EDEDED]/40 border-[#24242E]');
-        const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}:{boxShadow:'0 2px 6px rgba(0,0,0,0.25)'};
-        return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
-      })}
-      {/* V3.2.2: Brain + Stats access on mobile — header buttons hidden at this width */}
-      <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}} title="Tara's Brain">🧠</button>
-      <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}} title="Stats">📊</button>
-      <button onClick={()=>setShowSports&&setShowSports(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}} title="Sports picks">🏆</button>
+    <div className="md:hidden flex flex-col gap-1 mb-2 shrink-0">
+      <div className="flex gap-1">
+        {tabs.map(t=>{
+          const active=mobileTab===t.id;
+          const cls='flex-1 min-w-0 truncate px-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#23B981] border-[#23B981]/40':'text-[#EDEDED]/40 border-[#24242E]');
+          const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}:{boxShadow:'0 2px 6px rgba(0,0,0,0.25)'};
+          return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
+        })}
+      </div>
+      <div className="flex gap-1">
+        {[{k:'brain',icon:'🧠',label:'Brain',fn:()=>setShowBrain&&setShowBrain(true)},
+          {k:'stats',icon:'📊',label:'Stats',fn:()=>setShowStats&&setShowStats(true)},
+          {k:'sports',icon:'🏆',label:'Sports',fn:()=>setShowSports&&setShowSports(true)}].map(b=>(
+          <button key={b.k} onClick={b.fn} title={b.label}
+            className={'flex-1 min-w-0 flex items-center justify-center gap-1 px-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all'}
+            style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}}>
+            <span className="text-xs leading-none">{b.icon}</span><span className="truncate">{b.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 })
@@ -49631,7 +49699,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: Learning toast removed — was crashing on minified prod build, will revisit */}
       {/* ── STICKY HEADER — V10.7.44b CLEAN ── */}
       <header className={'sticky top-0 z-40 bg-[#050508] backdrop-blur-md border-b border-[#24242E] px-2 sm:px-4 py-2 shrink-0'}>
-        <div className="max-w-[1600px] mx-auto flex items-center gap-1.5 sm:gap-2">
+        {/* V13.4.224: wraps instead of clipping. At 375px this row holds "Tara"
+            (27px), the P&L pill (102px) and five icon buttons (230px) = 359px of
+            content in 323px of space, and the excess was being cut off by the
+            app shell's overflow-x:hidden rather than scrolled or wrapped. The
+            badges are already hidden below sm and none of what remains is safe to
+            drop -- the lane nav is how you change lane and the P&L is what you
+            check most -- so the row is allowed to take a second line on narrow
+            screens. It never wraps at sm and above, where it all fits. */}
+        <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-1.5 sm:gap-2">
 
           {/* LEFT: Logo + version + balance */}
           <div className="flex items-center gap-1.5 shrink-0">
@@ -50944,16 +51020,38 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         />
 
         {/* MOBILE TAB NAV */}
-        <div className={'flex lg:hidden bg-[#101014] border border-[#24242E] rounded-xl p-1 gap-1 shrink-0'}>
-          {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
-            <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}>
-              {tab.icon}{tab.label}
+        {/* V13.4.224: this bar is `lg:hidden` -- it exists FOR phones -- and on a
+            phone it was cutting its own contents off. Six items in one row wanted
+            533px inside a 321px box, so FLOW, THEORY and the Discord link sat past
+            the edge, clipped by an ancestor's overflow-x:hidden. Not scrolled off,
+            not squeezed: unreachable. Measured at 375px.
+
+            Two causes. `flex-1` children have min-width:auto by default, so they
+            refuse to shrink below their own label ("Analytics" being the long
+            one) no matter how little room there is. And six targets never fit one
+            375px row at a legible size anyway.
+
+            Fixed by splitting the roles that were already distinct: the three
+            view tabs get their own row, the three utilities get another. Nothing
+            is clipped at any width, and each target keeps a real tap area. */}
+        <div className={'flex lg:hidden flex-col gap-1 shrink-0'}>
+          <div className={'flex bg-[#101014] border border-[#24242E] rounded-xl p-1 gap-1'}>
+            {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4 shrink-0"/>},
+              {id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4 shrink-0"/>},
+              {id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4 shrink-0"/>}].map(tab=>(
+              <button key={tab.id} onClick={()=>setMobileTab(tab.id)}
+                className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}>
+                {tab.icon}<span className="truncate">{tab.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className={'flex bg-[#101014] border border-[#24242E] rounded-xl p-1 gap-1'}>
+            <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex flex-1 min-w-0 justify-center"/>
+            <TheoryLabBtn active={showTheoryLab} onClick={()=>setShowTheoryLab(!showTheoryLab)} cls="flex flex-1 min-w-0 justify-center"/>
+            <button onClick={()=>setShowSettings(true)} className={'flex-1 min-w-0 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide text-[#EDEDED]/40 hover:text-indigo-400 transition-all'} title="Discord settings">
+              <IC.Link className="w-4 h-4 shrink-0"/><span className="truncate">Discord</span>
             </button>
-          ))}
-          {/* Mobile-only quick access row for hidden header buttons */}
-          <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex"/>
-          <TheoryLabBtn active={showTheoryLab} onClick={()=>setShowTheoryLab(!showTheoryLab)} cls="flex"/>
-          <button onClick={()=>setShowSettings(true)} className={'flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#EDEDED]/30 hover:text-indigo-400 transition-all'} title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
+          </div>
         </div>
 
         {/* V5.3: pendingStrike confirmation banner removed per user request.
