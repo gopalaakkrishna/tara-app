@@ -376,6 +376,22 @@ const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','histo
 //   when there is genuinely newer data elsewhere - never on a blind timer, and never
 //   once the two devices have converged.
 const _SYNC_HEARTBEAT_PATH='state/syncHeartbeat';
+// V13.4.233: last peer device seen on the shared state, and whether its build is
+//   behind this one. Module-level because the sync panel mounts on demand and
+//   only needs the latest value, not a subscription.
+const _PEER_BUILD={by:null,version:null,at:0};
+const _buildNum=(v)=>{const m=String(v||'').match(/v?13\.4\.(\d+)/);return m?parseInt(m[1],10):null;};
+const _notePeerBuild=(by,version)=>{
+  if(!by||by===_taraDeviceId)return;
+  _PEER_BUILD.by=by; _PEER_BUILD.version=version||null; _PEER_BUILD.at=Date.now();
+};
+const _peerBuildLag=()=>{
+  const mine=_buildNum(typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null);
+  const theirs=_buildNum(_PEER_BUILD.version);
+  if(mine==null||theirs==null||!_PEER_BUILD.by)return null;
+  return{by:_PEER_BUILD.by,theirs,mine,behind:mine-theirs,at:_PEER_BUILD.at,
+    version:_PEER_BUILD.version};
+};
 // Stable per-device id, persisted so a device keeps its identity across reloads.
 const _taraDeviceId=(()=>{
   try{
@@ -5270,8 +5286,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.232-hourly-record-is-a-window';
-const TARA_VERSION_DISPLAY='Tara 13.4.232';
+const BASELINE_VERSION='2026.08.20-v13.4.233-peer-build-visible';
+const TARA_VERSION_DISPLAY='Tara 13.4.233';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26691,7 +26707,21 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
           ),
           React.createElement('div',{className:'text-[10px] text-[#EDEDED]/40 mt-1.5'},
             'The old per-device designation is retired (V13.4.165) - it silently muted locks on any device that was not the designated one.'
-          )
+          ),
+          // V13.4.233: every device and every deployment writes to the SAME doc
+          //   paths in the same Supabase project. There is no per-user scoping, so
+          //   anyone on a shared link is in this first-write-wins pool too.
+          (()=>{
+            const p=_peerBuildLag();
+            if(!p)return null;
+            const stale=p.behind>0;
+            return React.createElement('div',{className:'mt-2 pt-2 text-[10px] leading-relaxed',
+              style:{borderTop:'1px solid rgba(237,237,237,0.10)',
+                     color:stale?'rgba(212,160,58,0.95)':'rgba(237,237,237,0.45)'}},
+              stale
+                ? `Another device (${p.by}) is writing to this same shared record on build 13.4.${p.theirs}, ${p.behind} behind yours. It shares your locks, your call log and your hourly record — and it does not have the gates added since. Refresh Tara on that device.`
+                : `Another device (${p.by}) is on build 13.4.${p.theirs}, level with yours. It shares your locks and your record.`);
+          })(),
         ),
         // V9.2.0: SIDE-BY-SIDE diagnostic — shared (cloud) vs local (this device only).
         //   Tara's calls + memory are SHARED across all devices/users via Firestore.
@@ -36225,6 +36255,16 @@ function TaraApp(){
       if(!d||!d.sig)return;
       // Ignore our own beats (we are already at or above that signature).
       if(d.by===_taraDeviceId)return;
+      // V13.4.233: the heartbeat has always carried the peer's build and nothing
+      //   ever read it. Every device writes to the SAME doc paths — there is no
+      //   per-device or per-deployment scoping — so a device on an old build is
+      //   writing its locks and settlements into the same shared record as this
+      //   one. That matters because the gates that made this profitable landed in
+      //   specific versions (the 70-84c dead-zone block in v13.4.178, the
+      //   wrong-day weather ladder fix in v13.4.219), and a device below those is
+      //   still making the trades they were built to stop. Recorded here so the
+      //   sync panel can say so; comparison is on the v13.4.N build number.
+      try{_notePeerBuild(d.by,d.version);}catch(_){}
       const _localSig=_computeLogSig(taraCallLogRef.current);
       if(_sigBehind(_localSig,d.sig)){
         _doCatchUpPull('heartbeat from '+(d.by||'?'));
