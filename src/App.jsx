@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.227-autoexec-readiness';
-const TARA_VERSION_DISPLAY='Tara 13.4.227';
+const BASELINE_VERSION='2026.08.20-v13.4.228-execution-is-the-edge';
+const TARA_VERSION_DISPLAY='Tara 13.4.228';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17066,12 +17066,24 @@ const _autoExecReadiness=(log)=>{
   const t=log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN')
     &&Number(e.kalshiAtLock)>0&&Number(e.kalshiAtLock)<100);
   if(t.length<40)return null;
-  const pnl=[];let cost=0,wins=0;
+  const pnl=[];let cost=0,wins=0,maker=0,fwd=0,fwdN=0,fwdGood=0;
   for(const e of t){
     const c=e.dir==='UP'?Number(e.kalshiAtLock):100-Number(e.kalshiAtLock);
     const f=_sitoutFee(c), won=e.result==='WIN';
     cost+=c; if(won)wins++;
     pnl.push(won?(100-c-f):-(c+f));
+    // Same calls, resting 1c inside instead of crossing. Kalshi's maker fee is 0,
+    //   so this drops both the fee and a cent of spread.
+    const cm=c-1;
+    maker+=won?(100-cm):-cm;
+    // What a PERPETUAL would have captured: the move from the lock onward. The
+    //   binary settles against the window's open, so it also banks whatever moved
+    //   before the lock; a perp marks from where you enter and cannot.
+    if(Number(e.spotAtLock)>0&&Number(e.closingPrice)>0){
+      const sign=e.dir==='UP'?1:-1;
+      const bps=((Number(e.closingPrice)-Number(e.spotAtLock))/Number(e.spotAtLock))*10000*sign;
+      fwd+=bps; fwdN++; if(bps>0)fwdGood++;
+    }
   }
   const per=pnl.reduce((a,b)=>a+b,0)/pnl.length;
   const sd=Math.sqrt(pnl.reduce((a,p)=>a+Math.pow(p-per,2),0)/Math.max(1,pnl.length-1));
@@ -17084,6 +17096,8 @@ const _autoExecReadiness=(log)=>{
     // The bar is price PLUS the fee. Winning at exactly the price is not flat —
     //   it is down the fee on every contract, which is the whole of the -806c.
     beTrue:Math.round(_avgCost+_sitoutFee(_avgCost)),
+    makerPer:maker/pnl.length,
+    fwdBps:fwdN?fwd/fwdN:null, fwdGoodPct:fwdN?Math.round(fwdGood/fwdN*100):null,
     needed:per>0?needed:0,
     verdict:(per-ci)>0?'proven':(per+ci)<0?'losing':'unproven'};
 };
@@ -19248,6 +19262,19 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 : ` The range clears zero, so the edge is real at this sample size.`),
             r.needed>0&&React.createElement('div',{className:'text-[10px] mt-1.5',style:{color:'rgba(255,255,255,0.40)'}},
               `At the current spread of results it takes roughly ${r.needed} settled calls for the range to clear zero, if the average holds.`),
+            // V13.4.228: the two measurements that decide whether arming this is
+            //   sane, and they are not about the model at all.
+            React.createElement('div',{className:'mt-2 pt-2 text-[10px] leading-relaxed',
+              style:{borderTop:'1px solid rgba(255,255,255,0.10)',color:'rgba(255,255,255,0.55)'}},
+              React.createElement('div',{className:'mb-1'},
+                React.createElement('b',{style:{color:r.makerPer>0?'#23B981':'rgba(255,255,255,0.8)'}},'Execution is the whole margin. '),
+                `Crossing the spread these same calls run ${r.per.toFixed(2)}c. Resting a cent inside instead, where Kalshi charges no maker fee, they run `,
+                React.createElement('b',{style:{color:r.makerPer>0?'#23B981':'#E8455E'}},`${r.makerPer>=0?'+':''}${r.makerPer.toFixed(2)}c`),
+                ` — a ${(r.makerPer-r.per).toFixed(2)}c swing per contract, which is larger than the edge itself. If auto-exec is armed to take, it automates the losing version. Turn the entry ladder on so it rests first.`),
+              r.fwdBps!=null&&React.createElement('div',null,
+                React.createElement('b',{style:{color:T2_SITOUT_FG}},'Not a forward forecast. '),
+                `From the moment of lock, price moved the called way only ${r.fwdGoodPct}% of the time, averaging ${r.fwdBps.toFixed(2)} bps. The win rate comes from the strike being fixed at the window open, so the binary banks the move that already happened. An instrument without a fixed strike — a perp, spot, anything marked from entry — captures only this part and would lose.`),
+            ),
           );
         })(),
         // Master toggles
