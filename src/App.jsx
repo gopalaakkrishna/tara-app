@@ -5286,8 +5286,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.235-autoexec-is-not-wired';
-const TARA_VERSION_DISPLAY='Tara 13.4.235';
+const BASELINE_VERSION='2026.08.20-v13.4.236-lock-conflict-and-phase';
+const TARA_VERSION_DISPLAY='Tara 13.4.236';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15763,10 +15763,60 @@ function useHourlyRecord(){
     const iv=setInterval(_hrHydrate,5*60000); // V13.4.176: re-pull every 5 min, not just at mount
     return()=>clearInterval(iv);
   },[_hrHydrate]);
-  const addLock=React.useCallback((lk)=>{
+  // V13.4.236: CONTRADICTION RE-CHECK AGAINST FRESH CLOUD STATE.
+  //
+  //   Seen live on 2026-08-20: NO @72599.99 and YES @72599.99 both open on the
+  //   same 23:00 close. Those cannot both win — NO@K needs close<K and YES@K
+  //   needs close>=K — so one was a guaranteed loss plus fees on both.
+  //
+  //   The guard in HourlyLadderPanel is correct; it just could not see. Writes
+  //   are urgent (1.5s since V13.4.202) but memory/hourlyRecord is in
+  //   _NO_REALTIME_PATHS, so the only way a device learns of another's lock is
+  //   the 5-MINUTE hydrate interval. The two locks were ONE MINUTE apart. A
+  //   guard that depends on peers' state cannot run on a read cycle 5x slower
+  //   than the thing it guards against — and with two deployments sharing one
+  //   record, there is always a peer.
+  //
+  //   Fix is a fresh read at the moment of committing, not a faster interval:
+  //   it fires at most MAX_LOCKS times an hour instead of every 5 minutes for
+  //   every client, and it shrinks the blind window from 5 minutes to one round
+  //   trip. If the read fails the lock still proceeds on local state — refusing
+  //   to trade because a network call failed would be worse than the race.
+  const _lockConflictsWith=(pending,lk)=>{
+    if(!Array.isArray(pending))return false;
+    return pending.some(x=>{
+      if(!x||x.closeMs!==lk.closeMs)return false;
+      if(x.ticker===lk.ticker&&x.side===lk.side)return true;   // exact dupe
+      if(x.side===lk.side)return false;
+      const yesK=lk.side==='YES'?Number(lk.strike):Number(x.strike);
+      const noK =lk.side==='YES'?Number(x.strike):Number(lk.strike);
+      return Number.isFinite(yesK)&&Number.isFinite(noK)&&yesK>=noK;
+    });
+  };
+  const addLock=React.useCallback(async(lk)=>{
+    try{
+      if(typeof cloudSupabaseRead==='function'){
+        const _fresh=await cloudSupabaseRead(_HR_CLOUD_PATH);
+        if(_fresh&&_lockConflictsWith(_fresh.pending,lk)){
+          try{console.warn('[hourly] lock refused — another device already holds a conflicting position this hour:',lk.side,lk.strike);}catch(_e){}
+          setRec(prev=>{const m=_hrMerge(prev,_fresh);_hrSave(m);return m;});
+          return false;
+        }
+      }
+    }catch(_e){/* network failed — fall through and use local state */}
+    // Decide from the persisted record, not from the setRec updater. A useState
+    //   updater is not guaranteed to run synchronously (and StrictMode runs it
+    //   twice), so a flag set inside it cannot be read reliably on the next line.
+    //   _hrLoad reads localStorage, which _hrSave writes on every change, so it is
+    //   both synchronous and current.
+    const _cur=_hrLoad();
+    const _dupe=_cur.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side)
+             || _cur.history.some(x=>x.ticker===lk.ticker&&x.side===lk.side);
+    if(_dupe||_lockConflictsWith(_cur.pending,lk))return false;
     setRec(prev=>{
       if(prev.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
       if(prev.history.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
+      if(_lockConflictsWith(prev.pending,lk))return prev;
       // V13.4.169: persist the WHOLE lock, not six fields of it. The old shape dropped
       //   conf / model / mktPct / minsAtLock / band, so the moment a lock was rehydrated
       //   from storage (any reload, any tab foreground -- see the V13.4.164 hydration
@@ -15787,6 +15837,7 @@ function useHourlyRecord(){
                                       //   the cloud fast, since every other device's
                                       //   contradiction guard depends on seeing it.
     });
+    return true;
   },[]);
   React.useEffect(()=>{
     let alive=true;
@@ -16612,10 +16663,16 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
   React.useEffect(()=>{
     const top=LOCKS[0];
     if(!top||!top.ticker||!top.closeMs)return;
-    addLock(top);
     const _key=top.ticker+'|'+top.side;
     if(_hrSentRef.current.has(_key))return;
     _hrSentRef.current.add(_key);
+    // V13.4.236: addLock is async now (it re-reads the cloud to catch a
+    //   conflicting position taken on another device), and it can REFUSE. The
+    //   alert has to wait for that answer — firing it first would page about a
+    //   lock that was then rejected, which is worse than not alerting at all.
+    (async()=>{
+    const _accepted=await addLock(top);
+    if(!_accepted){_hrSentRef.current.delete(_key);return;}
     if(typeof onHourlyLock==='function'){
       try{
         onHourlyLock({
@@ -16627,6 +16684,7 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
         });
       }catch(_e){/* an alert must never break the lock machine */}
     }
+    })();
   },[LOCKS.length,addLock,onHourlyLock,spot,rec.w,rec.l]);
   if(!on)return null; // V13.4.120 FIX: moved from above the useEffect (see note above) -- panel still hides the same way, hook now always runs
   return(
@@ -17326,7 +17384,21 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     // V6.0.5: WATCHING gets its own phase label so user can see formation state.
     // V7.9: NO_TRADE label.
     // V10.7.47: phase reflects override state honestly.
-    const phaseLabel=snap?(isOverrideSitOut?'SITTING OUT':isOverrideNoTrade?'NO TRADE':isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'LEANING':_isLikelySitOut?'LIKELY SIT OUT':'SCANNING';
+    // V13.4.236: phase used `snap ? (...) : ...` and fell through to 'LOCKED' for
+    //   ANY snapshot. Having a snapshot is not the same as being locked, so a
+    //   snapshot that was not locked / no-go / sat-out / watching rendered
+    //   "TARA'S CALL · SCANNING" directly above "PHASE · LOCKED". Reported as
+    //   "I can't tell if she already sat it out or is still scanning" — and it was
+    //   unreadable because the two lines genuinely disagreed.
+    //   Phase now mirrors callLabel's own cascade, keyed on isLockedSnap.
+    const phaseLabel=isOverrideSitOut?'SITTING OUT'
+      :isOverrideNoTrade?'NO TRADE'
+      :isLockedSnap?'LOCKED'
+      :isNoGoSnap?'NO TRADE'
+      :isSatOutSnap?'SITTING OUT'
+      :isWatching?'LEANING'
+      :_isLikelySitOut?'LIKELY SIT OUT'
+      :'SCANNING';
     const samplesLeft=Math.max(0,(tc.needSamples||180)-(tc.samples||0));
     // Window timing
     const _totalSec=windowType==='15m'?900:300;
