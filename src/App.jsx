@@ -360,7 +360,7 @@ const cloudSupabaseRead=async(path)=>{
 const _KFEED_HEALTH={};
 // V13.4.212: one-shot audit flag for the _MINI_KEEP drift guard below.
 let _MINI_AUDITED=false;
-const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows','memory/hourlyRecord']);
+const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows','memory/hourlyRecord','memory/weatherPicks']);
 
 // V12.8: MULTI-DEVICE SYNC HEARTBEAT ──────────────────────────────────────────
 //   Problem this solves: memory/taraCallLog is in _NO_REALTIME_PATHS (the 2.6MB doc
@@ -5270,8 +5270,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.220-weather-quantisation';
-const TARA_VERSION_DISPLAY='Tara 13.4.220';
+const BASELINE_VERSION='2026.08.20-v13.4.221-weather-picks-record';
+const TARA_VERSION_DISPLAY='Tara 13.4.221';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27693,18 +27693,24 @@ const _wxProbe=async(series)=>{
   return 'unknown';                          // never reached one; do not disable
 };
 
-function WeatherView({onClose}){
-  const[cityId,setCityId]=React.useState('NYC');
-  const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null,ready:false,biting:false});
-  const city=_WX_CITIES.find(c=>c.id===cityId)||_WX_CITIES[0];
-
-  const load=React.useCallback(async()=>{
-    setState(s=>({...s,loading:true,err:null}));
+// V13.4.221: module level, so the pick scanner can run this for EVERY open city
+//   rather than only the one on screen. Returns a plain result object; the
+//   component adapts it to its own state shape. Body is otherwise untouched.
+const _wxScan=async(city)=>{
+  {
     try{
       const mk=await _wxMarkets(city.series);
       if(!mk.ok)throw new Error('Kalshi: '+mk.reason);
-      const markets=mk.markets;
-      if(!markets.length)throw new Error('no open '+city.series+' market right now');
+      // Keep ONLY the ladder for the day actually being measured. See the
+      //   _wxMarketDay note: two ladders are open at once for part of every day,
+      //   and merging them prices tomorrow's buckets against today's thermometer.
+      const _today=_wxLocalParts(city.tz,new Date()).date;
+      const _all=mk.markets;
+      const markets=_all.filter(m=>_wxMarketDay(m,city.tz)===_today);
+      const _otherDays=_all.length-markets.length;
+      if(!markets.length)throw new Error(
+        _all.length?`no ${city.series} ladder for ${_today} (${_all.length} open, all other days)`
+                   :'no open '+city.series+' market right now');
 
       // NWS forecast: point -> gridpoint forecast -> today's DAYTIME high
       const pt=await _wxJson(`https://api.weather.gov/points/${city.lat},${city.lon}`);
@@ -27879,7 +27885,7 @@ function WeatherView({onClose}){
         // Model-vs-market disagreement, measured side-agnostically off the YES mid
         //   so the bid/ask spread cannot flip the verdict.
         const yesMid=(bid>0&&ask>0)?(bid+ask)/2:ask;
-        return{sub,b,bid,ask,noBid,noAsk,oi,p,dead,
+        return{sub,b,bid,ask,noBid,noAsk,oi,p,dead,ticker:m.ticker,
           // Dead buckets keep their edge even before the gate: "this bucket is
           //   already impossible" is arithmetic off the observed max, not forecasting.
           best:(best&&best.edge!=null&&(ready||dead))?best:null,
@@ -27927,10 +27933,311 @@ function WeatherView({onClose}){
                   ||null;
       if(conflict)rows.forEach(r=>{r.best=null;});
 
-      setState({loading:false,err:null,rows,fc,runMax,obsN,obsAt,hourLocal:hour,sigma:Math.round(sigma*100)/100,
-        ready,biting,fcClosed,via:mk.via,wholeC,
-        conflict:conflict?{sub:conflict.sub,bid:conflict.bid,model:conflict.dead?null:conflict.p}:null});
-    }catch(e){setState(s=>({...s,loading:false,err:String(e.message||e).slice(0,140)}));}
+      return{ok:true,city,rows,fc,runMax,runMaxFloor,obsN,obsAt,hourLocal:hour,
+        sigma:Math.round(sigma*100)/100,ready,biting,fcClosed,via:mk.via,wholeC,
+        ladderDay:_today,otherDayRows:_otherDays,
+        conflict:conflict?{sub:conflict.sub,bid:conflict.bid,model:conflict.dead?null:conflict.p}:null};
+    }catch(e){return{ok:false,city,err:String(e.message||e).slice(0,140)};}
+  }
+};
+
+// ============================================================================
+// V13.4.221 — WEATHER PICKS AND RECORD
+//
+// The ladder made you do the choosing. This turns it into "be on this market,
+// this side, at this price" and then keeps score of whether that was right.
+//
+// TWO TIERS, and the split is the whole point.
+//
+//   LIVE  — arithmetic only. The day has already climbed past a bucket, so that
+//           bucket settles at zero and its NO side is worth a certain 100c.
+//           This is the only thing in the lane that is measured rather than
+//           forecast, so it is the only thing offered as a real trade.
+//
+//   PAPER — the model's own opinion. Logged, scored, never presented as a
+//           trade. Everything found while building this lane says the forecast
+//           half cannot beat the book: it is a normal curve fitted to one
+//           rounded integer while the market prices The Weather Company plus
+//           full ensemble spread. Rather than assert that, log it and let the
+//           record settle the argument. Same treatment as the sports value
+//           lane -- paper until the numbers earn promotion.
+//
+// The LIVE tier carries a MARGIN requirement, which is the guard that matters.
+// Kalshi settles on The Weather Company; this reads NWS. A bucket that is dead
+// by a tenth of a degree is one basis disagreement away from being alive, and
+// that is exactly where the money would go. Requiring 2 rounded degrees of
+// clearance means a full degree of source disagreement still leaves the pick
+// dead. Thin ones (1 degree) are shown as watch-only and never logged live.
+// ============================================================================
+const _WX_LEDGER_PATH='memory/weatherPicks';
+const _WX_LEDGER_KEY='tara_weather_picks_v1';
+const _WX_PICK_CAP=400;
+// LIVE tier gates
+const _WX_MIN_MARGIN=2;     // rounded degrees a dead bucket must clear
+const _WX_MAX_PRICE=95;     // never pay 96c+ for 100c; the 4c is not worth the tail
+const _WX_MIN_OI=200;       // needs a real book to fill against
+const _WX_MIN_EDGE=3;       // cents
+// PAPER tier gates
+const _WX_PAPER_MIN_EDGE=5;
+
+// Kalshi taker fee for one contract at price p (cents), rounded UP to the cent
+//   the way Kalshi charges it.
+const _wxFeeCents=(p)=>Math.ceil(0.07*(p/100)*(1-p/100)*100);
+// The bar a pick has to clear. Buying at p to win 100 needs a win rate of
+//   (p + fee)/100 just to break even -- at 86c that is 87%, not 50%. This is the
+//   number that decides whether the strategy is worth running, so it goes on the
+//   card next to the price rather than being left for the record to reveal later.
+const _wxBreakeven=(p)=>(p+_wxFeeCents(p));
+// V13.4.221: WHICH DAY IS THIS LADDER FOR.
+//
+//   Kalshi keeps TWO daily-high ladders open at once for part of every day --
+//   the one being decided now and tomorrow's, which starts trading early. A
+//   plain status=open fetch returns both, and merging them prices tomorrow's
+//   buckets against today's thermometer.
+//
+//   That is not cosmetic. Live on LA at 23:31 local it produced a "be on this"
+//   card reading BUY NO @ 81c on tomorrow's "79 to 80" -- marked already-passed
+//   because TODAY had reached 82.4F. Tomorrow had not happened; that bucket was
+//   entirely live and the trade was close to a coin flip sold as a certainty.
+//   The duplicate rows in the Seattle ladder were the same thing, two days of
+//   the same bucket sitting on top of each other.
+//
+//   Kalshi's ticker carries the weather day: KXHIGHLAX-26AUG19-B79.5. Verified
+//   across five cities that it always agrees with the day derived independently
+//   from close_time (these close at 01:00 local the following morning). Parse
+//   the ticker, cross-check against close_time, and DROP anything where the two
+//   disagree rather than guessing which is right.
+const _WX_MON={JAN:'01',FEB:'02',MAR:'03',APR:'04',MAY:'05',JUN:'06',
+               JUL:'07',AUG:'08',SEP:'09',OCT:'10',NOV:'11',DEC:'12'};
+const _wxTickerDay=(t)=>{
+  const m=String(t||'').match(/-(\d{2})([A-Z]{3})(\d{2})-/);
+  return (m&&_WX_MON[m[2]])?`20${m[1]}-${_WX_MON[m[2]]}-${m[3]}`:null;
+};
+const _wxMarketDay=(m,tz)=>{
+  const fromTicker=_wxTickerDay(m&&m.ticker);
+  let fromClose=null;
+  if(m&&m.close_time){
+    const c=new Date(m.close_time);
+    if(!isNaN(c))fromClose=_wxLocalParts(tz,new Date(c.getTime()-2*3600e3)).date;
+  }
+  if(fromTicker&&fromClose)return fromTicker===fromClose?fromTicker:null;
+  return fromTicker||fromClose;
+};
+const _wxDayKey=(city)=>_wxLocalParts(city.tz,new Date()).date;
+const _wxPickId=(p)=>`${p.ticker}|${p.side}`;
+
+// Choose at most one pick from a scanned city. Returns null when there is
+//   nothing worth doing, which is the normal answer and not a failure.
+const _wxPickFrom=(scan)=>{
+  if(!scan||!scan.ok||!scan.ready||scan.conflict)return null;
+  const rmR=(scan.runMaxFloor==null)?null:Math.round(scan.runMaxFloor);
+  const day=_wxDayKey(scan.city);
+  const base={city:scan.city.id,cityLabel:scan.city.label,series:scan.city.series,
+    station:scan.city.station,dayKey:day,runMax:scan.runMax,fc:scan.fc};
+
+  // --- LIVE: arithmetic, with clearance ---
+  if(rmR!=null){
+    const arith=scan.rows
+      .filter(r=>r.dead&&r.ticker&&r.b&&Number.isFinite(r.b.hi))
+      .map(r=>({r,margin:rmR-r.b.hi}))
+      .filter(x=>x.margin>=_WX_MIN_MARGIN)
+      .filter(x=>x.r.noAsk>0&&x.r.noAsk<=_WX_MAX_PRICE&&x.r.oi>=_WX_MIN_OI)
+      .map(x=>({...x,edge:100-x.r.noAsk}))
+      .filter(x=>x.edge>=_WX_MIN_EDGE)
+      // cheapest certainty first: the most edge per cent risked
+      .sort((a,b)=>(b.edge/Math.max(1,b.r.noAsk))-(a.edge/Math.max(1,a.r.noAsk)));
+    if(arith.length){
+      const w=arith[0];
+      return{...base,tier:'live',ticker:w.r.ticker,sub:w.r.sub,side:'NO',
+        price:w.r.noAsk,edge:w.edge,marginF:w.margin,oi:w.r.oi,model:0,
+        why:`the day already reached ${scan.runMax}°F, which is ${w.margin}° clear of the top of this bucket`};
+    }
+  }
+
+  // --- PAPER: the model's best call, never offered as a trade ---
+  const model=scan.rows
+    .filter(r=>r.best&&r.ticker&&!r.dead&&!r.suspect&&r.best.edge>=_WX_PAPER_MIN_EDGE&&r.oi>=_WX_MIN_OI)
+    .sort((a,b)=>b.best.edge-a.best.edge);
+  if(model.length){
+    const m=model[0];
+    return{...base,tier:'paper',ticker:m.ticker,sub:m.sub,side:m.best.side,
+      price:m.best.price,edge:Math.round(m.best.edge),marginF:null,oi:m.oi,model:m.p,
+      why:`model reads ${Math.round(m.p*100)}% against a ${m.best.price}c ask`};
+  }
+  return null;
+};
+
+// ---- ledger persistence: localStorage first, Supabase mirrored ----
+// V13.4.221: a pick is only trustworthy if its ticker is for the day it claims.
+//   The wrong-day bug wrote one real entry before it was caught -- LA's
+//   KXHIGHLAX-26AUG20-B79.5 logged under dayKey 2026-08-19 -- and a bad row in a
+//   record is worse than no record, because every later number is computed from
+//   it. Rather than delete it by hand on one machine, drop the mismatch wherever
+//   the ledger is read. It cleans itself here, on the phone, and in the cloud doc
+//   at the next save, and it will catch any recurrence instead of silently
+//   scoring it.
+const _wxLedgerClean=(l)=>({picks:(l&&Array.isArray(l.picks)?l.picks:[])
+  .filter(p=>{
+    if(!p||!p.ticker||!p.dayKey)return false;
+    const td=_wxTickerDay(p.ticker);
+    if(td&&td!==p.dayKey){
+      try{console.warn('[weather] dropping pick from the wrong day:',p.ticker,'logged under',p.dayKey);}catch(_e){}
+      return false;
+    }
+    return true;
+  })});
+const _wxLedgerLoad=()=>{
+  try{const j=JSON.parse(localStorage.getItem(_WX_LEDGER_KEY)||'null');
+    if(j&&Array.isArray(j.picks))return _wxLedgerClean(j);}catch(_e){}
+  return{picks:[]};
+};
+const _wxLedgerSave=(l)=>{
+  const payload={picks:(_wxLedgerClean(l).picks||[]).slice(-_WX_PICK_CAP)};
+  try{localStorage.setItem(_WX_LEDGER_KEY,JSON.stringify(payload));}catch(_e){}
+  try{if(typeof cloudWriteDebounced==='function')cloudWriteDebounced(_WX_LEDGER_PATH,payload,4000);}catch(_e){}
+  return payload;
+};
+// Union by ticker|side. A settled pick always beats an open one, and the totals
+//   are recounted from the merged list rather than summed -- adding two devices'
+//   counters is how you get a record that matches neither.
+const _wxLedgerMerge=(a,b)=>{
+  const by=new Map();
+  for(const src of [a,b]) for(const p of (src&&Array.isArray(src.picks)?src.picks:[])){
+    if(!p||!p.ticker)continue;
+    const k=_wxPickId(p), cur=by.get(k);
+    if(!cur||(p.result&&!cur.result))by.set(k,p);
+  }
+  return _wxLedgerClean({picks:Array.from(by.values()).sort((x,y)=>(x.atMs||0)-(y.atMs||0)).slice(-_WX_PICK_CAP)});
+};
+
+// Settle one open pick against Kalshi's own result. Deliberately NOT settled
+//   from my own observations: the whole basis-risk problem is that this panel
+//   reads a different source than the contract does, so scoring against NWS
+//   would grade the model against the wrong answer key and hide the exact error
+//   that costs money.
+const _wxSettleOne=async(pick)=>{
+  const j=await _wxJson(`/api/kalshi/markets/${encodeURIComponent(pick.ticker)}`);
+  const m=j.ok?(j.data&&j.data.market):null;
+  if(!m){
+    const d=await _wxJson(`https://api.elections.kalshi.com/trade-api/v2/markets/${encodeURIComponent(pick.ticker)}`);
+    if(!d.ok||!d.data||!d.data.market)return null;
+    return _wxGrade(pick,d.data.market);
+  }
+  return _wxGrade(pick,m);
+};
+const _wxGrade=(pick,m)=>{
+  const st=String(m.status||'').toLowerCase();
+  if(st!=='settled'&&st!=='finalized')return null;
+  const res=String(m.result||'').toLowerCase();
+  if(res!=='yes'&&res!=='no')return{...pick,result:'void',settledAt:Date.now(),settledResult:res||'none',pnl:0};
+  const won=(pick.side==='YES')?(res==='yes'):(res==='no');
+  // Kalshi pays 100c a contract. Taker fee is charged on entry only, and Kalshi
+  //   rounds it UP to the next cent per contract -- so 0.84c becomes 1c. Using the
+  //   unrounded figure flatters every result in the ledger by a fraction of a cent,
+  //   which is exactly the direction a record must never lean.
+  const fee=_wxFeeCents(pick.price);
+  const pnl=won?(100-pick.price-fee):(-pick.price-fee);
+  return{...pick,result:won?'win':'loss',settledAt:Date.now(),settledResult:res,
+    pnl:Math.round(pnl*100)/100};
+};
+
+const _wxTally=(picks,tier)=>{
+  const t=picks.filter(p=>p.tier===tier);
+  const done=t.filter(p=>p.result==='win'||p.result==='loss');
+  const w=done.filter(p=>p.result==='win').length;
+  const l=done.filter(p=>p.result==='loss').length;
+  const pnl=done.reduce((a,p)=>a+(Number(p.pnl)||0),0);
+  const paid=done.reduce((a,p)=>a+(Number(p.price)||0),0);
+  return{w,l,open:t.filter(p=>!p.result).length,n:done.length,
+    hit:done.length?w/done.length:null,
+    pnl:Math.round(pnl*10)/10,
+    breakeven:done.length?paid/done.length:null};
+};
+
+// V13.4.221: scan every city that could produce a pick, log one per city per
+//   day, and settle the open ones against Kalshi's own result.
+//
+//   Only cities past their local midday are scanned. That is not an
+//   optimisation, it is the readiness gate: before midday the model provably
+//   cannot beat the book, so scanning would burn requests to produce nothing.
+//   It also keeps the sweep to a handful of cities at any hour rather than all
+//   eleven, since they are spread across four time zones.
+function useWeatherPicks(){
+  const[ledger,setLedger]=React.useState(_wxLedgerLoad);
+  const[scanAt,setScanAt]=React.useState(null);
+  const busy=React.useRef(false);
+
+  // hydrate from the cloud once, then merge rather than overwrite
+  React.useEffect(()=>{let alive=true;(async()=>{
+    try{
+      if(typeof cloudSupabaseRead!=='function')return;
+      const c=await cloudSupabaseRead(_WX_LEDGER_PATH);
+      if(!c||!alive)return;
+      setLedger(prev=>{const m=_wxLedgerMerge(prev,c);_wxLedgerSave(m);return m;});
+    }catch(_e){}
+  })();return()=>{alive=false;};},[]);
+
+  const sweep=React.useCallback(async()=>{
+    if(busy.current)return; busy.current=true;
+    try{
+      // 1. settle anything still open
+      const open=(_wxLedgerLoad().picks||[]).filter(p=>!p.result);
+      const settled=[];
+      for(const p of open){
+        try{const g=await _wxSettleOne(p); if(g)settled.push(g);}catch(_e){}
+      }
+
+      // 2. look for a new pick in every city whose day is underway
+      const due=_WX_CITIES.filter(c=>_wxLocalParts(c.tz,new Date()).hour>=12);
+      const found=[];
+      for(const c of due){
+        const have=(_wxLedgerLoad().picks||[]).some(p=>p.city===c.id&&p.dayKey===_wxDayKey(c));
+        if(have)continue;                       // one pick per city per day, and it stands
+        try{
+          const scan=await _wxScan(c);
+          const pick=_wxPickFrom(scan);
+          if(pick)found.push({...pick,atMs:Date.now(),result:null});
+        }catch(_e){}
+      }
+
+      if(settled.length||found.length){
+        setLedger(prev=>{
+          const next=_wxLedgerMerge(prev,{picks:settled.concat(found)});
+          _wxLedgerSave(next);
+          return next;
+        });
+      }
+      setScanAt(Date.now());
+    } finally { busy.current=false; }
+  },[]);
+
+  React.useEffect(()=>{sweep();const iv=setInterval(sweep,300000);return()=>clearInterval(iv);},[sweep]);
+
+  const picks=ledger.picks||[];
+  return{
+    picks,
+    scanAt,
+    live:_wxTally(picks,'live'),
+    paper:_wxTally(picks,'paper'),
+    openLive:picks.filter(p=>p.tier==='live'&&!p.result).sort((a,b)=>b.atMs-a.atMs),
+    openPaper:picks.filter(p=>p.tier==='paper'&&!p.result).sort((a,b)=>b.atMs-a.atMs),
+    recent:picks.filter(p=>p.result).sort((a,b)=>(b.settledAt||0)-(a.settledAt||0)).slice(0,25),
+  };
+}
+
+function WeatherView({onClose}){
+  const[cityId,setCityId]=React.useState('NYC');
+  const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null,ready:false,biting:false});
+  const city=_WX_CITIES.find(c=>c.id===cityId)||_WX_CITIES[0];
+
+  const load=React.useCallback(async()=>{
+    setState(s=>({...s,loading:true,err:null}));
+    const r=await _wxScan(city);
+    if(!r.ok){setState(s=>({...s,loading:false,err:r.err}));return;}
+    setState({loading:false,err:null,rows:r.rows,fc:r.fc,runMax:r.runMax,obsN:r.obsN,
+      obsAt:r.obsAt,hourLocal:r.hourLocal,sigma:r.sigma,ready:r.ready,biting:r.biting,
+      fcClosed:r.fcClosed,via:r.via,wholeC:r.wholeC,conflict:r.conflict,
+      ladderDay:r.ladderDay,otherDayRows:r.otherDayRows});
   },[city]);
 
   React.useEffect(()=>{load();const iv=setInterval(load,120000);return()=>clearInterval(iv);},[load]);
@@ -27951,6 +28258,7 @@ function WeatherView({onClose}){
     return()=>{alive=false;};
   },[]);
 
+  const P=useWeatherPicks();
   const S=state;
   const pct=(v)=>v==null?'—':(v*100).toFixed(0)+'%';
   // Suspect rows are painted SIT-OUT gold, never green: the app's own colour
@@ -27962,7 +28270,13 @@ function WeatherView({onClose}){
       <div className="max-w-[1000px] mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.18em] font-bold mb-1" style={{color:'rgba(255,255,255,0.85)'}}>Weather · daily high</div>
+            {/* The ladder's day is on screen permanently now. A wrong-day ladder
+                looked identical to a right one until it produced a trade. */}
+            <div className="text-[10px] uppercase tracking-[0.18em] font-bold mb-1" style={{color:'rgba(255,255,255,0.85)'}}>
+              Weather · daily high
+              {S.ladderDay&&<span style={{color:'rgba(255,255,255,0.38)'}}> · {S.ladderDay} in {city.label}</span>}
+              {S.otherDayRows>0&&<span style={{color:'#D4A03A'}}> · {S.otherDayRows} other-day contract{S.otherDayRows===1?'':'s'} excluded</span>}
+            </div>
             <h2 className="font-serif text-3xl text-white tracking-tight">Temperature <span style={{color:'rgba(255,255,255,0.3)'}}>·</span> Ladder</h2>
           </div>
           <button onClick={()=>onClose&&onClose()} className="p-2 rounded-lg text-xl" style={{color:'rgba(255,255,255,0.6)'}}>✕</button>
@@ -27984,6 +28298,54 @@ function WeatherView({onClose}){
               {c.label}{closed&&<span className="ml-1.5 text-[9px] normal-case tracking-normal" style={{color:'rgba(255,255,255,0.18)'}}>closed</span>}
             </button>);
           })}
+        </div>
+
+        {/* V13.4.221: the answer to "what should I be on", above everything else.
+            Scanned across every city whose day is underway, not just the pill
+            that happens to be selected. */}
+        <div className="rounded-xl p-4 mb-4"
+             style={P.openLive.length?{background:'rgba(35,185,129,0.09)',border:'1px solid rgba(35,185,129,0.34)'}
+                                     :{background:'rgba(212,160,58,0.07)',border:'1px solid rgba(212,160,58,0.26)'}}>
+          <div className="flex items-baseline justify-between mb-2">
+            <span className="uppercase tracking-[0.16em] font-bold text-[9px]"
+                  style={{color:P.openLive.length?'#23B981':'#D4A03A'}}>
+              {P.openLive.length?'be on this':'nothing to be on'}
+            </span>
+            <span className="text-[9px] uppercase tracking-[0.12em]" style={{color:'rgba(255,255,255,0.30)'}}>
+              {P.scanAt?'scanned '+new Date(P.scanAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'scanning…'}
+            </span>
+          </div>
+          {P.openLive.length?P.openLive.map(p=>(
+            <div key={_wxPickId(p)} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2 last:mb-0">
+              <span className="text-[17px] font-bold" style={{color:'rgba(255,255,255,0.95)'}}>
+                {p.cityLabel} <span style={{color:'rgba(255,255,255,0.35)'}}>·</span> {p.sub}
+              </span>
+              <span className="px-2 py-0.5 rounded-md text-[11px] uppercase tracking-[0.1em] font-bold"
+                    style={{background:'rgba(35,185,129,0.20)',color:'#23B981'}}>
+                buy {p.side} @ {p.price}c
+              </span>
+              <span className="text-[11px] tabular-nums" style={{color:'#23B981'}}>+{p.edge}c</span>
+              <span className="text-[11px] font-mono" style={{color:'rgba(255,255,255,0.30)'}}>{p.ticker}</span>
+              <div className="basis-full text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.60)'}}>
+                {p.why}. It only loses if The Weather Company disagrees with {p.station} by {p.marginF}°F or more.
+              </div>
+              {/* The shape of the bet, stated before it is taken. A cheap-looking
+                  +Nc on a high price is a lopsided trade and the numbers should
+                  say so on the card, not turn up later in the record. */}
+              <div className="basis-full text-[11px] leading-relaxed rounded-lg px-2.5 py-2 mt-1"
+                   style={{background:'rgba(0,0,0,0.25)',color:'rgba(255,255,255,0.55)'}}>
+                Risking <b style={{color:'rgba(255,255,255,0.85)'}}>{p.price}c</b> to make{' '}
+                <b style={{color:'#23B981'}}>{100-p.price-_wxFeeCents(p.price)}c</b> after the {_wxFeeCents(p.price)}c fee.{' '}
+                Needs a <b style={{color:'rgba(255,255,255,0.85)'}}>{_wxBreakeven(p.price)}%</b> win rate just to break even, and{' '}
+                <b style={{color:'#E8455E'}}>one loss undoes {(( p.price+_wxFeeCents(p.price))/Math.max(1,100-p.price-_wxFeeCents(p.price))).toFixed(1)} wins</b>.{' '}
+                Size it like that, not like a coin flip.
+              </div>
+            </div>
+          )):(
+            <div className="text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.60)'}}>
+              No city has a bucket that is both already passed and still paying. That is the normal answer most of the day — this lane only offers a trade when the arithmetic is there, and it refuses to invent one from the forecast. {P.openPaper.length>0&&<>The model has {P.openPaper.length} paper call{P.openPaper.length===1?'':'s'} running below; those are being scored, not traded.</>}
+            </div>
+          )}
         </div>
 
         {S.err?(
@@ -28060,6 +28422,71 @@ function WeatherView({onClose}){
                   <div className="col-span-2 text-right" style={{color:'rgba(255,255,255,0.4)'}}>{r.oi}</div>
                 </div>
               ))}
+            </div>
+
+            {/* V13.4.221: the record. Two tiers kept apart on purpose — mixing a
+                measured edge with a model's opinion produces a number that
+                describes neither. */}
+            <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 mb-4">
+              <div className="flex items-baseline justify-between mb-3">
+                <span className="text-[9px] uppercase tracking-[0.14em] font-bold" style={{color:'rgba(255,255,255,0.85)'}}>Record</span>
+                <span className="text-[9px] uppercase tracking-[0.12em]" style={{color:'rgba(255,255,255,0.28)'}}>settled by Kalshi, not by this panel</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[['live · arithmetic',P.live,'#23B981','Trades actually offered. A bucket the day had already passed, bought on the NO side.'],
+                  ['paper · model',P.paper,'#D4A03A','Never offered as a trade. Logged to find out whether the forecast half is worth anything.']]
+                  .map(([label,t,col,blurb])=>(
+                  <div key={label} className="rounded-lg p-3" style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)'}}>
+                    <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-1.5" style={{color:col}}>{label}</div>
+                    {t.n===0?(
+                      <div className="text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.45)'}}>
+                        Nothing settled yet{t.open?` · ${t.open} open`:''}. A record starts the first time one of these resolves.
+                      </div>
+                    ):(<>
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-[19px] font-bold tabular-nums" style={{color:'rgba(255,255,255,0.95)'}}>{t.w}–{t.l}</span>
+                        <span className="text-[12px] tabular-nums" style={{color:'rgba(255,255,255,0.55)'}}>{Math.round(t.hit*100)}%</span>
+                        <span className="text-[12px] tabular-nums font-bold" style={{color:t.pnl>=0?'#23B981':'#E8455E'}}>
+                          {t.pnl>=0?'+':''}{t.pnl}c
+                        </span>
+                        {t.open>0&&<span className="text-[10px]" style={{color:'rgba(255,255,255,0.35)'}}>{t.open} open</span>}
+                      </div>
+                      {/* Win rate alone is meaningless here: every pick is bought at a
+                          different price, so the bar to clear moves with it. */}
+                      <div className="text-[10px] mt-1 tabular-nums" style={{color:'rgba(255,255,255,0.42)'}}>
+                        breakeven {Math.round(t.breakeven)}% at the average price paid ·{' '}
+                        <span style={{color:t.hit*100>=t.breakeven?'#23B981':'#E8455E'}}>
+                          {t.hit*100>=t.breakeven?'ahead of it':'behind it'}
+                        </span>
+                      </div>
+                      {t.n<30&&<div className="text-[10px] mt-1" style={{color:'rgba(255,255,255,0.35)'}}>
+                        {t.n} settled. Far too few to mean anything — this is bookkeeping, not evidence.
+                      </div>}
+                    </>)}
+                    <div className="text-[10px] mt-2 leading-relaxed" style={{color:'rgba(255,255,255,0.32)'}}>{blurb}</div>
+                  </div>
+                ))}
+              </div>
+              {P.recent.length>0&&(
+                <div className="mt-3 pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.07)'}}>
+                  <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.45)'}}>Settled</div>
+                  <div className="space-y-1">
+                    {P.recent.slice(0,8).map(p=>(
+                      <div key={_wxPickId(p)} className="flex items-baseline gap-2 text-[11px] tabular-nums flex-wrap">
+                        <span className="uppercase tracking-wider text-[8px] font-bold px-1.5 py-0.5 rounded"
+                              style={p.tier==='live'?{background:'rgba(35,185,129,0.15)',color:'#23B981'}
+                                                    :{background:'rgba(212,160,58,0.15)',color:'#D4A03A'}}>{p.tier}</span>
+                        <span style={{color:'rgba(255,255,255,0.70)'}}>{p.cityLabel} {p.sub}</span>
+                        <span style={{color:'rgba(255,255,255,0.40)'}}>{p.side} @{p.price}c</span>
+                        <span className="font-bold" style={{color:p.result==='win'?'#23B981':p.result==='loss'?'#E8455E':'#D4A03A'}}>
+                          {p.result==='win'?'WIN':p.result==='loss'?'LOSS':'VOID'}
+                        </span>
+                        <span style={{color:(p.pnl||0)>=0?'#23B981':'#E8455E'}}>{(p.pnl||0)>=0?'+':''}{p.pnl}c</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.55)'}}>
