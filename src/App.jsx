@@ -5298,8 +5298,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.239-contract-peak-logging';
-const TARA_VERSION_DISPLAY='Tara 13.4.239';
+const BASELINE_VERSION='2026.08.21-v13.4.240-trailing-exit-alert';
+const TARA_VERSION_DISPLAY='Tara 13.4.240';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18603,9 +18603,24 @@ function BestPracticesModal({open,onClose}){
 //     3. ACCELERATION detection (last 10s velocity vs prior 30s) — sharper alert
 //        than just "risk elevated" because it reflects what's happening RIGHT
 //        NOW, not what conditions look like.
+// ── V13.4.240: TRAILING EXIT THRESHOLDS ─────────────────────────────────────
+// Derived by replaying all 454 settled 15m calls against their own Kalshi
+// candlestick history (tickers rebuilt from windowId; the log never stored one).
+// These are the contract's real bid path, not the underlying's move.
+//
+// Arm once the position is worth >= ARM, then alert if it gives back >= GIVEBACK
+// from its own high. Scored on the 359 calls outside the 70-84c dead zone that
+// v13.4.178 now blocks, since that band is no longer reachable:
+//   +242c vs holding (+0.67c/contract). Fires on 31 of 359.
+//   saves 710c across 12 that went on to lose; costs 468c across 19 that won.
+// The (85..95 arm x 5..10 giveback) neighbourhood is positive in 8 of 9 cells,
+// so this is a region rather than one lucky cell.
+const TRAIL_ARM_C=90;
+const TRAIL_GIVEBACK_C=8;
+
 function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert,reversalRisk,onClearAutoOrder,liveCoachReversalRef}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
-  const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
+  const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0,valPeak:-1,valArmed:false});
   // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
   const _lastCoachBeepRef=React.useRef({key:'',at:0});
   // V9.8.16: Discord broadcast tracking — separate dedup ref with longer throttle (90s)
@@ -18617,7 +18632,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     const _curPos=userPosition;
     const _ref=_peakBpsRef.current;
     if(_curPos!==_ref.pos){
-      _peakBpsRef.current={pos:_curPos,peak:-Infinity,trough:Infinity,openTime:Date.now()};
+      _peakBpsRef.current={pos:_curPos,peak:-Infinity,trough:Infinity,openTime:Date.now(),valPeak:-1,valArmed:false};
     }
   },[userPosition]);
   if(!userPosition)return null; // only shows during a trade
@@ -18829,6 +18844,40 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 
     if(cards.length===0){
       cards.push({tone:'info',icon:'·',title:'Position open · all clear',body:`${userPosition} from $${(targetMargin||0).toFixed(0)}, ${_winning?'+':''}${Math.round(_favoredGap)}bps. ${Math.floor(_secLeft/60)}m ${_secLeft%60}s left. Tara ${_taraAligned?'aligned':_taraOpposed?'opposed':'neutral'}. No active alerts.`});
+    }
+
+    // ── V13.4.240: TRAILING EXIT ALERT ──────────────────────────────────────
+    // What the replay KILLED, so it does not get re-added:
+    //   fixed take-profit — negative at 8 of 9 levels tested (70..95c). 99% of
+    //     WINS touch 80c+ against 34% of losses, so a fixed TP truncates nearly
+    //     every winner to spare a third of the losers, and books a second fee.
+    //   fixed cut-loss    — negative at all 7 levels tested (10..40c).
+    //   Both stay off. Do NOT revive them on the "94% of losses were ahead at
+    //   some point" stat: winners are ahead too, so it does not separate them.
+    //
+    // HONEST LIMIT: the 95% bootstrap CI on the trailing rule is -261c to
+    // +1030c — an 11% chance it is worth nothing. Shipped anyway because the
+    // bad end is bounded (-0.73c/contract) and it targets the loss mode that is
+    // actually costing money. Re-score once n is materially larger.
+    //
+    // Tara cannot place orders (engine removed in v13.4.75), so this ALERTS.
+    const _tsVal=(Number.isFinite(_kalshi)&&_kalshi>0&&_kalshi<100)
+      ?(_isUP?_kalshi:100-_kalshi):null;
+    let _tsFired=false,_tsGiveback=0;
+    if(_tsVal!=null&&_peakBpsRef.current.pos===userPosition){
+      const _tr=_peakBpsRef.current;
+      if(_tsVal>_tr.valPeak)_tr.valPeak=_tsVal;
+      if(_tsVal>=TRAIL_ARM_C)_tr.valArmed=true;
+      if(_tr.valArmed&&_tr.valPeak>0){
+        _tsGiveback=_tr.valPeak-_tsVal;
+        if(_tsGiveback>=TRAIL_GIVEBACK_C)_tsFired=true;
+      }
+    }
+    if(_tsFired){
+      cards.unshift({tone:'urgent',icon:'\u2935',title:'Trailing exit \u00b7 take it now',
+        body:`Worth ${Math.round(_tsVal)}c, down ${Math.round(_tsGiveback)}c from its ${Math.round(_peakBpsRef.current.valPeak)}c high. `+
+          `Sell the ${userPosition} contract. On 454 replayed calls, exiting here beat holding by 0.67c/contract. `+
+          `${Math.floor(_secLeft/60)}m ${_secLeft%60}s left.`});
     }
 
     // V9.2.1: Sound trigger — beep when a NEW urgent card appears.
