@@ -5298,8 +5298,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.241-urgent-cards-reach-phone';
-const TARA_VERSION_DISPLAY='Tara 13.4.241';
+const BASELINE_VERSION='2026.08.21-v13.4.242-adapter-telemetry-survives';
+const TARA_VERSION_DISPLAY='Tara 13.4.242';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35662,6 +35662,17 @@ function TaraApp(){
       //   move alone forced the take-profit question to be estimated instead of
       //   measured. Two ints.
       'postLockPeakValueC','postLockFirstValueC','postLockPeakBps','postLockReversed',
+      // V13.4.242: ADAPTER TELEMETRY. Sixth instance of the drift bug the notes
+      //   below describe. Every field that records whether an adaptive layer
+      //   actually fired was stripped here, so "is Tara learning" could only be
+      //   answered from the handful of entries that had not yet round-tripped
+      //   (52 of 457). regimeCal is the one loop demonstrably doing work --
+      //   applied on 51 of 52, keyed per regime+direction, shifting on n=176..459
+      //   samples -- and its evidence was being deleted on every reload.
+      //   All small scalars; regimeCalKey is ~16 bytes ("RANGE-CHOP|DOWN").
+      'regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN',
+      'reversalDamperApplied','reversalDamperMult',
+      'fgtCounterApplied','convBeforeFgtCap','urgencyApplied','ulpApplied',
       // V13.1: telemetry must survive the deep-cache minify (was the local lean source)
       'regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock',
       'isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock',
