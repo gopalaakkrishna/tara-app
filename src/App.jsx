@@ -358,6 +358,18 @@ const cloudSupabaseRead=async(path)=>{
 //   survives re-renders; a path failing 3+ times in a row is benched for 90s
 //   and then re-probed, so an outage never becomes permanent.
 const _KFEED_HEALTH={};
+// V13.4.238: long string fields we drop from the cloud copy DELIBERATELY, so the
+//   drift guard can stay quiet about them without also going quiet about the next
+//   `reason`. Everything here is either reconstructable, verbose prose, or purely
+//   cosmetic. If a field is not on this list and not in _MINI_KEEP, the guard
+//   should complain — that is the whole point.
+const _MINI_DROP_OK=new Set([
+  'reasoning',        // multi-line engine narrative, regenerated every tick
+  'engineLog',        // same
+  'caution',          // duplicated into `reason`
+  'at','time',        // display strings derived from id/resolvedAt
+  'callSubLabel','band','whenStr','phaseLabel',
+]);
 // V13.4.212: one-shot audit flag for the _MINI_KEEP drift guard below.
 let _MINI_AUDITED=false;
 const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows','memory/hourlyRecord','memory/weatherPicks']);
@@ -5286,8 +5298,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.237-audit-fixes';
-const TARA_VERSION_DISPLAY='Tara 13.4.237';
+const BASELINE_VERSION='2026.08.20-v13.4.238-minify-drift-blindspot';
+const TARA_VERSION_DISPLAY='Tara 13.4.238';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17227,6 +17239,12 @@ const _deriveSitoutCategory=(snap)=>{
     ||snap.wasOverriddenSitOut===true||snap.wasOverriddenNoTrade===true;
   if(!isSit)return null;
   const t=String(snap.reason||snap.caution||'').toLowerCase();
+  // V13.4.238: `tier` survives the cloud minify while `reason` does not, so on any
+  //   entry that has been through a round-trip it is the only surviving clue. All
+  //   94 of the live log's reason-less sit-outs carry one (time-cap-commit 60,
+  //   gap-opposed-timecap-sitout 22, directional-lock 10). Used before the
+  //   no-signal fallback so a real gate name always beats a shrug.
+  if(!t&&snap.tier)return String(snap.tier);
   // No reason AND no directional read means no gate ever fired — Tara simply
   //   never formed a view. That is a different thing from "a gate vetoed this and
   //   did not say which", and lumping them together is what made the 145 look
@@ -35610,7 +35628,25 @@ function TaraApp(){
             if(_MINI_KEEP.has(k))continue;
             if(k.charAt(0)==='_')continue;           // internal/debug, dropped on purpose
             const v=e[k];const t=typeof v;
-            const _scalar=(v===null||t==='number'||t==='boolean'||(t==='string'&&v.length<=40));
+            // V13.4.238: the 40-char cutoff was itself a silent miss. `reason` is
+            //   the field that explains every decision this app makes, and a
+            //   typical one runs ~70 chars ("V10.7.97 gap guard: directional-lock
+            //   needs gap>=10 aligned, got 0pt (flat)"), so it sat just above the
+            //   line and was never flagged. Measured consequence: 94 sit-outs in
+            //   the live log carry tier and confidence but no reason at all — they
+            //   went through the cloud round-trip and came back stripped. Two
+            //   analyses this session stalled on exactly that.
+            //
+            //   Guessing intent from length is what created the hole. Long strings
+            //   that are dropped ON PURPOSE are now named in _MINI_DROP_OK, and
+            //   anything else gets flagged regardless of size. A field being
+            //   verbose is not evidence that losing it was intended.
+            //   The explicit list is the whole test for strings — no length term.
+            //   Keeping `v.length<=40` alongside it would OR the two, so a short
+            //   deliberate drop like `caution` or `time` would still be flagged and
+            //   the noise would train the warning to be ignored.
+            const _scalar=(v===null||t==='number'||t==='boolean'
+              ||(t==='string'&&!_MINI_DROP_OK.has(k)));
             // V13.4.212b: also flag SMALL PLAIN OBJECTS. The scalar rule alone
             //   missed V13.4.31 (signalScoresAtLock) -- the very first instance
             //   of this bug -- because it is an object. Arrays stay excluded:
