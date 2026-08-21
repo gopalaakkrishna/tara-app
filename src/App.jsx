@@ -5298,8 +5298,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.242-adapter-telemetry-survives';
-const TARA_VERSION_DISPLAY='Tara 13.4.242';
+const BASELINE_VERSION='2026.08.21-v13.4.243-pattern-score-survives';
+const TARA_VERSION_DISPLAY='Tara 13.4.243';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35670,6 +35670,10 @@ function TaraApp(){
       //   applied on 51 of 52, keyed per regime+direction, shifting on n=176..459
       //   samples -- and its evidence was being deleted on every reload.
       //   All small scalars; regimeCalKey is ~16 bytes ("RANGE-CHOP|DOWN").
+      // V13.4.243: pattern-engine summary. The full patternsAtLockV9_11_0 is
+      //   deliberately NOT whitelisted -- ~600 bytes with perTF. These three
+      //   scalars carry the part that is actually being scored.
+      'patDirScore','patConfluence','patDominantDir',
       'regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN',
       'reversalDamperApplied','reversalDamperMult',
       'fgtCounterApplied','convBeforeFgtCap','urgencyApplied','ulpApplied',
@@ -45385,6 +45389,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   patternsAtLock above remains for backward compat; new analysis should
         //   read patternsAtLockV9_11_0 (per-TF + confluence) and futuresAtLock.
         patternsAtLockV9_11_0:analysis?.patternsV9_11_0||null,
+        // V13.4.243: 3-scalar mirror of the line above. The fat object is
+        //   stripped by the deep-cache minify, so the pattern engine's own
+        //   telemetry survives on well under half the log. These three are on
+        //   the _MINI_KEEP list and cost ~15 bytes.
+        patDirScore:(()=>{const _v=Number(analysis?.patternsV9_11_0?.directionalScore);return Number.isFinite(_v)?Math.round(_v):null;})(),
+        patConfluence:(()=>{const _v=Number(analysis?.patternsV9_11_0?.confluence);return Number.isFinite(_v)?_v:null;})(),
+        patDominantDir:analysis?.patternsV9_11_0?.dominantDirection||null,
           // V9.15: stamp K-nearest historical analogs at lock time. Stored compactly
           //   (top 3 entries + summary) to keep log size manageable. The full 12-entry
           //   list is exposed via the live `analysis.historicalAnalogs` for UI only.
@@ -45580,6 +45591,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   patternsAtLock above remains for backward compat; new analysis should
         //   read patternsAtLockV9_11_0 (per-TF + confluence) and futuresAtLock.
         patternsAtLockV9_11_0:analysis?.patternsV9_11_0||null,
+        // V13.4.243: 3-scalar mirror of the line above. The fat object is
+        //   stripped by the deep-cache minify, so the pattern engine's own
+        //   telemetry survives on well under half the log. These three are on
+        //   the _MINI_KEEP list and cost ~15 bytes.
+        patDirScore:(()=>{const _v=Number(analysis?.patternsV9_11_0?.directionalScore);return Number.isFinite(_v)?Math.round(_v):null;})(),
+        patConfluence:(()=>{const _v=Number(analysis?.patternsV9_11_0?.confluence);return Number.isFinite(_v)?_v:null;})(),
+        patDominantDir:analysis?.patternsV9_11_0?.dominantDirection||null,
           // V9.15: stamp K-nearest historical analogs at lock time. Stored compactly
           //   (top 3 entries + summary) to keep log size manageable. The full 12-entry
           //   list is exposed via the live `analysis.historicalAnalogs` for UI only.
@@ -46404,6 +46422,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   patternsAtLock above remains for backward compat; new analysis should
         //   read patternsAtLockV9_11_0 (per-TF + confluence) and futuresAtLock.
         patternsAtLockV9_11_0:analysis?.patternsV9_11_0||null,
+        // V13.4.243: 3-scalar mirror of the line above. The fat object is
+        //   stripped by the deep-cache minify, so the pattern engine's own
+        //   telemetry survives on well under half the log. These three are on
+        //   the _MINI_KEEP list and cost ~15 bytes.
+        patDirScore:(()=>{const _v=Number(analysis?.patternsV9_11_0?.directionalScore);return Number.isFinite(_v)?Math.round(_v):null;})(),
+        patConfluence:(()=>{const _v=Number(analysis?.patternsV9_11_0?.confluence);return Number.isFinite(_v)?_v:null;})(),
+        patDominantDir:analysis?.patternsV9_11_0?.dominantDirection||null,
           // V9.15: stamp K-nearest historical analogs at lock time. Stored compactly
           //   (top 3 entries + summary) to keep log size manageable. The full 12-entry
           //   list is exposed via the live `analysis.historicalAnalogs` for UI only.
@@ -48483,6 +48508,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   patternsAtLock above remains for backward compat; new analysis should
         //   read patternsAtLockV9_11_0 (per-TF + confluence) and futuresAtLock.
         patternsAtLockV9_11_0:analysis?.patternsV9_11_0||null,
+        // V13.4.243: 3-scalar mirror of the line above. The fat object is
+        //   stripped by the deep-cache minify, so the pattern engine's own
+        //   telemetry survives on well under half the log. These three are on
+        //   the _MINI_KEEP list and cost ~15 bytes.
+        patDirScore:(()=>{const _v=Number(analysis?.patternsV9_11_0?.directionalScore);return Number.isFinite(_v)?Math.round(_v):null;})(),
+        patConfluence:(()=>{const _v=Number(analysis?.patternsV9_11_0?.confluence);return Number.isFinite(_v)?_v:null;})(),
+        patDominantDir:analysis?.patternsV9_11_0?.dominantDirection||null,
           // V9.15: stamp K-nearest historical analogs at lock time. Stored compactly
           //   (top 3 entries + summary) to keep log size manageable. The full 12-entry
           //   list is exposed via the live `analysis.historicalAnalogs` for UI only.
