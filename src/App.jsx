@@ -4050,6 +4050,23 @@ const DEFAULT_WEIGHTS={gap:55.00,momentum:28.00,structure:35.00,flow:40.00,techn
   //   - spotPerpDiv: ±8 raw, multiplier tunes effective strength
   calendarRisk:1.00,tapeAccel:1.00,spotPerpDiv:1.00};
 
+// V13.4.244: resolve a signal weight without the falsy-zero trap.
+//   `W.k||1.0` turns a DELIBERATE zero into full weight, which silently undid
+//   V10.8.1's decision to switch htfPatterns off. It also cannot fall back to
+//   DEFAULT_WEIGHTS when a key is simply absent from the learned store -- and
+//   htfPatterns/futures ARE absent from it, since updateWeights only ever
+//   writes the seven core keys.
+//   Order: learned value if numeric (0 included) -> DEFAULT_WEIGHTS -> 1.0.
+//   Type-check rather than Number(): Number(null) is 0 and 0 is finite, so a
+//   null/absent W would have resolved EVERY signal to zero weight and muted the
+//   whole model. Same Number(null)===0 sentinel trap that has bitten here before.
+const _weightOf=(W,key)=>{
+  const _v=(W&&typeof W==='object')?W[key]:undefined;
+  if(typeof _v==='number'&&Number.isFinite(_v))return _v;
+  const _d=DEFAULT_WEIGHTS[key];
+  return (typeof _d==='number'&&Number.isFinite(_d))?_d:1.0;
+};
+
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
 // V143: Per-regime weight defaults pre-trained from 379 seed trades. Previously all four
@@ -5298,8 +5315,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.243-pattern-score-survives';
-const TARA_VERSION_DISPLAY='Tara 13.4.243';
+const BASELINE_VERSION='2026.08.21-v13.4.244-htf-zeroing-restored';
+const TARA_VERSION_DISPLAY='Tara 13.4.244';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -12567,7 +12584,7 @@ const computeV99Posterior=(params)=>{
   //   specifically chop-predictive (mark range edges). In RANGE-CHOP regime,
   //   raise cap to ±35 when dominant pattern is a double-top or double-bottom.
   //   Other patterns and other regimes stay at ±20.
-  const _patternAdjUncapped=Math.round((_htfPatterns.totalAdj||0)*(W.htfPatterns||1.0));
+  const _patternAdjUncapped=Math.round((_htfPatterns.totalAdj||0)*_weightOf(W,'htfPatterns'));
   const _isChopDoublePattern=regime==='RANGE-CHOP'&&_htfPatterns?.detail&&(/doubleTop/i.test(_htfPatterns.detail)||/doubleBottom/i.test(_htfPatterns.detail));
   const _cap=_isChopDoublePattern?35:20;
   const patternAdj=Math.max(-_cap,Math.min(_cap,_patternAdjUncapped));
@@ -12577,7 +12594,7 @@ const computeV99Posterior=(params)=>{
   if(patternAdj!==0){
     const _capLabel=_isChopDoublePattern?`V10.2.50 chop±35`:`V10.2.41 ±20`;
     const _capNote=Math.abs(_patternAdjUncapped)>_cap?` (capped from ${_patternAdjUncapped}, ${_capLabel})`:'';
-    reasoning.push(`[HTF-PATTERNS] ${_htfPatterns.detail} → ${patternAdj>0?'+':''}${patternAdj} (W:${(W.htfPatterns||1.0).toFixed(2)})${_capNote}`);
+    reasoning.push(`[HTF-PATTERNS] ${_htfPatterns.detail} → ${patternAdj>0?'+':''}${patternAdj} (W:${_weightOf(W,'htfPatterns').toFixed(2)})${_capNote}`);
   }
   totalScore+=patternAdj;
 
@@ -12615,9 +12632,9 @@ const computeV99Posterior=(params)=>{
     drift1m,
   });
   const _futAdjRaw=_futuresSignals.totalAdj||0;
-  const _futAdj=Math.round(_futAdjRaw*(W.futures||1.0));
+  const _futAdj=Math.round(_futAdjRaw*_weightOf(W,'futures'));
   if(_futAdj!==0){
-    reasoning.push(`[FUTURES] ${_futuresSignals.details.join(' | ')} → ${_futAdj>0?'+':''}${_futAdj} (W:${(W.futures||1.0).toFixed(2)})`);
+    reasoning.push(`[FUTURES] ${_futuresSignals.details.join(' | ')} → ${_futAdj>0?'+':''}${_futAdj} (W:${_weightOf(W,'futures').toFixed(2)})`);
   }
   totalScore+=_futAdj;
   // V9.11.0 LAYER 3: register the new signals in rawSignalScores so the learning
