@@ -4038,7 +4038,25 @@ const DEFAULT_WEIGHTS={gap:55.00,momentum:28.00,structure:35.00,flow:40.00,techn
   //   All-time delta was +1.7 (noise). Recent 50 trades: delta -9.0 (actively inverted).
   //   Losses have MORE htfPatterns signal than wins. Dampening to 0.15× wasn't enough.
   //   Zero it entirely. It can be re-enabled if future data shows it recovers.
-  htfPatterns:0.00,futures:1.00,
+  //
+  // V13.4.245 REVERTED TO 1.00 -- READ THIS BEFORE ZEROING IT AGAIN.
+  //   The V10.8.1 zeroing never actually took effect: the weight was read as
+  //   `W.htfPatterns||1.0`, and `0||1.0` is 1.0. v13.4.244 fixed that read and
+  //   the zero finally applied. Live result over the next 13 calls: the sit-out
+  //   rate jumped to 77%, against 34% on v230-239 and 43% on v220-229.
+  //
+  //   Why: htfPatterns contributes a capped ±20 (±35 in the htfChop branch) to
+  //   totalScore on 81% of calls. Every downstream conviction and edge gate was
+  //   tuned, over months, against a totalScore that INCLUDED that contribution.
+  //   Removing it shifts the whole score distribution down, so calls stop
+  //   clearing gates that nobody re-tuned, and Tara sits out instead of trading.
+  //
+  //   So V10.8.1's finding may still be correct -- the signal does look inverted,
+  //   and |directionalScore|>=150 runs 52-58% WR against ~74% below it -- but the
+  //   weight CANNOT be dropped on its own. Zeroing it must ship together with a
+  //   recalibration of the conviction/edge thresholds, measured, in one change.
+  //   Until that work is done this stays at 1.00.
+  htfPatterns:1.00,futures:1.00,
   // V9.12: macroShock is also a multiplier — raw signal already produces ±10. The
   //   weight learning loop tunes how much that ±10 nudge influences the final score.
   //   Starts neutral; if 4-asset shocks reliably predict outcome direction, it'll buff
@@ -5315,8 +5333,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.244-htf-zeroing-restored';
-const TARA_VERSION_DISPLAY='Tara 13.4.244';
+const BASELINE_VERSION='2026.08.21-v13.4.245-revert-htf-zero-sitout-spike';
+const TARA_VERSION_DISPLAY='Tara 13.4.245';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
