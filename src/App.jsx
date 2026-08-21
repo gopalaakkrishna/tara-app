@@ -5298,8 +5298,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.240-trailing-exit-alert';
-const TARA_VERSION_DISPLAY='Tara 13.4.240';
+const BASELINE_VERSION='2026.08.21-v13.4.241-urgent-cards-reach-phone';
+const TARA_VERSION_DISPLAY='Tara 13.4.241';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18627,12 +18627,18 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
   //   so we don't spam Discord on the same condition. Sound beep can fire every 10s
   //   for the same key (audio fade is short); Discord shouldn't.
   const _lastDiscordAlertRef=React.useRef({key:'',at:0});
+  // V13.4.241: cards that stand for the entire trade (reversal risk, trailing
+  //   exit) must not re-fire on the time-based throttles below. Namespaced per
+  //   channel so a beep does not consume the Discord page. Cleared on position
+  //   change, same as the peak refs.
+  const _oncePagedRef=React.useRef({pos:null,keys:{}});
   React.useEffect(()=>{
     // When position opens or flips, reset
     const _curPos=userPosition;
     const _ref=_peakBpsRef.current;
     if(_curPos!==_ref.pos){
       _peakBpsRef.current={pos:_curPos,peak:-Infinity,trough:Infinity,openTime:Date.now(),valPeak:-1,valArmed:false};
+      _oncePagedRef.current={pos:_curPos,keys:{}};
     }
   },[userPosition]);
   if(!userPosition)return null; // only shows during a trade
@@ -18846,6 +18852,31 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       cards.push({tone:'info',icon:'·',title:'Position open · all clear',body:`${userPosition} from $${(targetMargin||0).toFixed(0)}, ${_winning?'+':''}${Math.round(_favoredGap)}bps. ${Math.floor(_secLeft/60)}m ${_secLeft%60}s left. Tara ${_taraAligned?'aligned':_taraOpposed?'opposed':'neutral'}. No active alerts.`});
     }
 
+    // V9.9.0: Persistent reversal-risk card. Surfaces the risk flag throughout the
+    //   trade so the user sees it not just at lock but all the way through. Inserted
+    //   at the front of the cards array (highest priority spot) when EXPECTED, just
+    //   below urgent cards when WATCH. NONE keeps the coach visually clean.
+    if(reversalRisk&&reversalRisk.flag&&reversalRisk.flag!=='NONE'){
+      const _isExp=reversalRisk.flag==='EXPECTED';
+      const _topSig=(reversalRisk.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,2);
+      const _signalSummary=_topSig.length>0?_topSig.map(s=>s.reason).join(' · '):'No specific factors fired';
+      const _reversalCard={
+        tone:_isExp?'urgent':'watch',
+        once:true, // V13.4.241: stands for the whole trade — fire one alert, not one per throttle window
+        icon:_isExp?'⚠':'⚡',
+        title:_isExp?`Reversal expected · entered with caution`:`Reversal watch · monitor closely`,
+        body:`${_signalSummary}. Score ${reversalRisk.score}/100. ${_isExp?'Tighten exit before peak adverse — these patterns reverse mid-window historically.':'Watch for retracement after favorable move.'}`,
+      };
+      // Insert position: EXPECTED goes first (highest urgency); WATCH goes after any
+      //   pre-existing urgent cards (price-spike, stop-hit) but before info/good cards.
+      if(_isExp){cards.unshift(_reversalCard);}
+      else {
+        const _firstNonUrgent=cards.findIndex(c=>c.tone!=='urgent');
+        if(_firstNonUrgent<0)cards.push(_reversalCard);
+        else cards.splice(_firstNonUrgent,0,_reversalCard);
+      }
+    }
+
     // ── V13.4.240: TRAILING EXIT ALERT ──────────────────────────────────────
     // What the replay KILLED, so it does not get re-added:
     //   fixed take-profit — negative at 8 of 9 levels tested (70..95c). 99% of
@@ -18874,11 +18905,23 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       }
     }
     if(_tsFired){
-      cards.unshift({tone:'urgent',icon:'\u2935',title:'Trailing exit \u00b7 take it now',
+      cards.unshift({tone:'urgent',once:true,icon:'\u2935',title:'Trailing exit \u00b7 take it now',
         body:`Worth ${Math.round(_tsVal)}c, down ${Math.round(_tsGiveback)}c from its ${Math.round(_peakBpsRef.current.valPeak)}c high. `+
           `Sell the ${userPosition} contract. On 454 replayed calls, exiting here beat holding by 0.67c/contract. `+
           `${Math.floor(_secLeft/60)}m ${_secLeft%60}s left.`});
     }
+
+    // V13.4.241: returns true if this card may fire on this channel, and marks
+    //   it consumed. Has a side effect, so it must be the LAST term of any &&.
+    const _onceOk=(_card,_chan)=>{
+      if(!_card||!_card.once)return true;
+      const _r=_oncePagedRef.current;
+      if(_r.pos!==userPosition){_r.pos=userPosition;_r.keys={};}
+      const _k=_chan+':'+_card.title;
+      if(_r.keys[_k])return false;
+      _r.keys[_k]=true;
+      return true;
+    };
 
     // V9.2.1: Sound trigger — beep when a NEW urgent card appears.
     //   Uses the first card's title as the dedup key. Only fires if >5s since last beep
@@ -18886,7 +18929,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     if(cards.length>0&&cards[0].tone==='urgent'){
       const _cardKey=cards[0].title;
       const _now2=Date.now();
-      if(_cardKey!==_lastCoachBeepRef.current.key||_now2-_lastCoachBeepRef.current.at>10000){
+      if((_cardKey!==_lastCoachBeepRef.current.key||_now2-_lastCoachBeepRef.current.at>10000)&&_onceOk(cards[0],'beep')){
         _lastCoachBeepRef.current={key:_cardKey,at:_now2};
         if(cards[0].title.includes('spiking')&&cards[0].title.includes('against')){
           _taraSpikeBeep(); // triple descending for spike-against
@@ -18912,7 +18955,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     if(cards.length>0&&cards[0].tone==='urgent'&&typeof onUrgentCoachAlert==='function'){
       const _cardKey=cards[0].title;
       const _nowD=Date.now();
-      if(_cardKey!==_lastDiscordAlertRef.current.key||_nowD-_lastDiscordAlertRef.current.at>90000){
+      if((_cardKey!==_lastDiscordAlertRef.current.key||_nowD-_lastDiscordAlertRef.current.at>90000)&&_onceOk(cards[0],'discord')){
         _lastDiscordAlertRef.current={key:_cardKey,at:_nowD};
         try{
           onUrgentCoachAlert({
@@ -18927,30 +18970,6 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             clock:`${timeState?.minsRemaining||0}m ${timeState?.secsRemaining||0}s`,
           });
         }catch(_){}
-      }
-    }
-
-    // V9.9.0: Persistent reversal-risk card. Surfaces the risk flag throughout the
-    //   trade so the user sees it not just at lock but all the way through. Inserted
-    //   at the front of the cards array (highest priority spot) when EXPECTED, just
-    //   below urgent cards when WATCH. NONE keeps the coach visually clean.
-    if(reversalRisk&&reversalRisk.flag&&reversalRisk.flag!=='NONE'){
-      const _isExp=reversalRisk.flag==='EXPECTED';
-      const _topSig=(reversalRisk.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,2);
-      const _signalSummary=_topSig.length>0?_topSig.map(s=>s.reason).join(' · '):'No specific factors fired';
-      const _reversalCard={
-        tone:_isExp?'urgent':'watch',
-        icon:_isExp?'⚠':'⚡',
-        title:_isExp?`Reversal expected · entered with caution`:`Reversal watch · monitor closely`,
-        body:`${_signalSummary}. Score ${reversalRisk.score}/100. ${_isExp?'Tighten exit before peak adverse — these patterns reverse mid-window historically.':'Watch for retracement after favorable move.'}`,
-      };
-      // Insert position: EXPECTED goes first (highest urgency); WATCH goes after any
-      //   pre-existing urgent cards (price-spike, stop-hit) but before info/good cards.
-      if(_isExp){cards.unshift(_reversalCard);}
-      else {
-        const _firstNonUrgent=cards.findIndex(c=>c.tone!=='urgent');
-        if(_firstNonUrgent<0)cards.push(_reversalCard);
-        else cards.splice(_firstNonUrgent,0,_reversalCard);
       }
     }
 
