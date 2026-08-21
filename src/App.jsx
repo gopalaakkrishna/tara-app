@@ -5298,8 +5298,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.238-minify-drift-blindspot';
-const TARA_VERSION_DISPLAY='Tara 13.4.238';
+const BASELINE_VERSION='2026.08.21-v13.4.239-contract-peak-logging';
+const TARA_VERSION_DISPLAY='Tara 13.4.239';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33401,6 +33401,10 @@ function TaraApp(){
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
   const[kalshiYesPrice,setKalshiYesPrice]=useState(null); // live YES price from active Kalshi market
+  // V13.4.239: ref mirror so the post-lock tracker can sample the CONTRACT price
+  //   without taking kalshiYesPrice as an effect dependency (it ticks constantly;
+  //   adding it to deps would re-run the cushion effect on every quote).
+  const _kYesRef=useRef(null); _kYesRef.current=kalshiYesPrice;
   // V10.2.11 — KALSHI 30s HISTORY RING
   //   Phase 4's timing engine needs a 30s-ago Kalshi YES price to compute
   //   "kalshi velocity" — is the market moving toward Tara's call or away?
@@ -35585,6 +35589,11 @@ function TaraApp(){
       'resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed',
       'isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit',
       'wasOverriddenNoTrade','noGoCategory',
+      // V13.4.239: contract-price peak after the lock. Exit rules cannot be
+      //   scored without the price the position actually reached; the underlying
+      //   move alone forced the take-profit question to be estimated instead of
+      //   measured. Two ints.
+      'postLockPeakValueC','postLockFirstValueC','postLockPeakBps','postLockReversed',
       // V13.1: telemetry must survive the deep-cache minify (was the local lean source)
       'regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock',
       'isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock',
@@ -40495,7 +40504,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _logSnap=taraCallLogRef.current||[];
         const _tabAsset='BTC';
         const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null&&(e.asset||'BTC')===_tabAsset);
-        try{var _ptjR=_postLockTrajRef.current[_wid];if(_ptjR&&_ptjR.ticks>0){var _evA=!!_ptjR.everAhead;var _pkB=Math.round(_ptjR.peakBps*10)/10;var _pcC=Math.round((_ptjR.correct/_ptjR.ticks)*100)/100;var _rvD=!!_ptjR.reversed;setTaraCallLog(function(prev){return prev.map(function(e){return (e&&e.windowId===_wid&&(e.asset||'BTC')===_tabAsset&&e.postLockEverAhead===undefined)?Object.assign({},e,{postLockEverAhead:_evA,postLockPeakBps:_pkB,postLockPctCorrect:_pcC,postLockReversed:_rvD}):e;});});delete _postLockTrajRef.current[_wid];}}catch(_){}
+        try{var _ptjR=_postLockTrajRef.current[_wid];if(_ptjR&&_ptjR.ticks>0){var _evA=!!_ptjR.everAhead;var _pkB=Math.round(_ptjR.peakBps*10)/10;var _pcC=Math.round((_ptjR.correct/_ptjR.ticks)*100)/100;var _rvD=!!_ptjR.reversed;setTaraCallLog(function(prev){return prev.map(function(e){return (e&&e.windowId===_wid&&(e.asset||'BTC')===_tabAsset&&e.postLockEverAhead===undefined)?Object.assign({},e,{postLockEverAhead:_evA,postLockPeakBps:_pkB,postLockPctCorrect:_pcC,postLockReversed:_rvD,postLockPeakValueC:(_ptjR.peakValC>=0?Math.round(_ptjR.peakValC):null),postLockFirstValueC:(_ptjR.entryValC>=0?Math.round(_ptjR.entryValC):null)}):e;});});delete _postLockTrajRef.current[_wid];}}catch(_){}
         try{if(liveCoachReversalRef&&liveCoachReversalRef.current){var _lcrF=liveCoachReversalRef.current;if(_lcrF.fired){var _lcrFired=true,_lcrPeak=Math.round(_lcrF.peakBps*10)/10,_lcrDD=Math.round(_lcrF.drawdownBps*10)/10;setTaraCallLog(function(prev){return prev.map(function(e){return (e&&e.windowId===_wid&&(e.asset||'BTC')===_tabAsset&&e.liveCoachReversalFired===undefined)?Object.assign({},e,{liveCoachReversalFired:_lcrFired,liveCoachReversalPeakBps:_lcrPeak,liveCoachReversalDrawdownBps:_lcrDD}):e;});});}}}catch(_){}
         const _entryAsset=_pendingEntry?.asset||_tabAsset;
         const _entryStrike=Number(_pendingEntry?.strike)||0;
@@ -41402,7 +41411,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _windowCushionHistoryRef.current.push({t:_elapsed,cushionBps:_cushBps,spot:_refPrice});
         // Keep max 30 snapshots (15 minutes / 30s)
         if(_windowCushionHistoryRef.current.length>30)_windowCushionHistoryRef.current.shift();
-        try{var _lcT=lockedCallRef.current;if(_lcT&&(_lcT.dir==='UP'||_lcT.dir==='DOWN')&&_lcT.windowId){var _dsT=_lcT.dir==='UP'?1:-1;var _aheadT=_cushBps*_dsT;var _wT=_lcT.windowId;var _ptj=_postLockTrajRef.current[_wT];if(!_ptj){_ptj={ticks:0,correct:0,peakBps:-1e9,everAhead:false,reversed:false,wasAhead:false};_postLockTrajRef.current[_wT]=_ptj;var _ksT=Object.keys(_postLockTrajRef.current);if(_ksT.length>40)delete _postLockTrajRef.current[_ksT[0]];}_ptj.ticks++;if(_aheadT>0){_ptj.correct++;_ptj.everAhead=true;}if(_aheadT>_ptj.peakBps)_ptj.peakBps=_aheadT;if(_aheadT>=5)_ptj.wasAhead=true;if(_ptj.wasAhead&&_aheadT<0)_ptj.reversed=true;}}catch(_){}
+        try{var _lcT=lockedCallRef.current;if(_lcT&&(_lcT.dir==='UP'||_lcT.dir==='DOWN')&&_lcT.windowId){var _dsT=_lcT.dir==='UP'?1:-1;var _aheadT=_cushBps*_dsT;var _wT=_lcT.windowId;var _ptj=_postLockTrajRef.current[_wT];if(!_ptj){_ptj={ticks:0,correct:0,peakBps:-1e9,everAhead:false,reversed:false,wasAhead:false,peakValC:-1,entryValC:-1};_postLockTrajRef.current[_wT]=_ptj;var _ksT=Object.keys(_postLockTrajRef.current);if(_ksT.length>40)delete _postLockTrajRef.current[_ksT[0]];}_ptj.ticks++;if(_aheadT>0){_ptj.correct++;_ptj.everAhead=true;}if(_aheadT>_ptj.peakBps)_ptj.peakBps=_aheadT;try{var _kyT=Number(_kYesRef.current);if(Number.isFinite(_kyT)&&_kyT>0&&_kyT<100){var _valT=(_lcT.dir==='UP')?_kyT:(100-_kyT);if(_ptj.entryValC<0)_ptj.entryValC=_valT;if(_valT>_ptj.peakValC)_ptj.peakValC=_valT;}}catch(_kE){}if(_aheadT>=5)_ptj.wasAhead=true;if(_ptj.wasAhead&&_aheadT<0)_ptj.reversed=true;}}catch(_){}
       }
 
       // V10.9.2: FRESH WHALE NETSCORE — computed every scoring tick (~1s) directly
