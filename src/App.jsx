@@ -5286,8 +5286,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.20-v13.4.236-lock-conflict-and-phase';
-const TARA_VERSION_DISPLAY='Tara 13.4.236';
+const BASELINE_VERSION='2026.08.20-v13.4.237-audit-fixes';
+const TARA_VERSION_DISPLAY='Tara 13.4.237';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17215,6 +17215,35 @@ const _hourlyLaneStats=()=>{
       wr:Math.round(H.filter(e=>e.won).length/H.length*100),
       verdict:(m-ci)>0?'proven':(m+ci)<0?'losing':'unproven'};
   }catch(_e){return null;}
+};
+
+// V13.4.237: recover a gate name for sit-outs whose gate never stamped one.
+//   Patterns are taken from the reason strings actually present in the log, so
+//   this classifies real history rather than inventing buckets. Returns null when
+//   the entry is not a sit-out at all, so ordinary calls are untouched.
+const _deriveSitoutCategory=(snap)=>{
+  if(!snap)return null;
+  const isSit=snap.isNoGo===true||snap.call==='SIT_OUT'||snap.dir==='SIT_OUT'
+    ||snap.wasOverriddenSitOut===true||snap.wasOverriddenNoTrade===true;
+  if(!isSit)return null;
+  const t=String(snap.reason||snap.caution||'').toLowerCase();
+  // No reason AND no directional read means no gate ever fired — Tara simply
+  //   never formed a view. That is a different thing from "a gate vetoed this and
+  //   did not say which", and lumping them together is what made the 145 look
+  //   like an unexplained block. Naming it keeps the genuinely unexplained
+  //   remainder small enough to chase.
+  if(!t)return (Number(snap.confidence)>0)?'uncategorised-sitout':'no-signal';
+  if(/dead zone|dead-zone|70-84/.test(t))              return 'no-go-edge';
+  if(/window-closed|past entry|chance gone/.test(t))   return 'kalshi-window-closed';
+  if(/no kalshi price|price is unavail|price-unavail/.test(t)) return 'no-go-price-unavailable';
+  if(/gap guard|gap>=|gap opposed|weak gap/.test(t))   return 'weak-gap-directional-sitout';
+  if(/coin.?flip|deadzone/.test(t))                    return 'coinflip-deadzone';
+  if(/chop/.test(t))                                   return 'chop-sitout';
+  if(/dead window|bps range/.test(t))                  return 'dead-window';
+  if(/edge .*vs kalshi|priced up at|priced down at/.test(t)) return 'v11-kalshi-edge';
+  if(/quality|low.?q/.test(t))                         return 'low-quality-gate';
+  if(/cold|streak|cooldown/.test(t))                   return 'cooldown';
+  return 'uncategorised-sitout';
 };
 
 const _sitoutFee=(p)=>Math.ceil(0.07*(p/100)*(1-p/100)*100);
@@ -39564,14 +39593,32 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(ok){h.fails=0;h.last='ok';}
           else{h.fails++;h.at=Date.now();h.last=reason||'fail';}
         };
+        // V13.4.237: every racer promise is created eagerly, but the second tier is
+        //   only awaited when the FIRST tier fails. On the normal path -- first-party
+        //   wins -- the four CORS-proxy promises reject with nobody listening, and
+        //   each one becomes an unhandled rejection. Measured on a single page load:
+        //   18 of them, all from corsproxy / allorigins / codetabs / thingproxy,
+        //   repeating on every feed poll.
+        //
+        //   Functionally harmless (the tiering works, that is the point of racing)
+        //   but it fires window.onunhandledrejection continuously and buries real
+        //   errors in the console -- which is how the genuinely broken things in this
+        //   file have stayed hidden before.
+        //
+        //   Attaching a no-op handler marks the rejection as handled WITHOUT
+        //   consuming it: Promise.any still sees the original promise reject, and the
+        //   tiering behaves exactly as before.
         const _racer=(name,url,validate,post)=>{
-          if(_benched(name))return Promise.reject(new Error(name+' benched ('+(_H[name]?.last||'fail')+')'));
-          return fetchWithRetry(url,1,validate).then(r=>{
-            const out=post?post(r):r;
-            if(out&&out.ok){_mark(name,true);return{...out,_via:name};}
-            _mark(name,false,(out&&out.reason)||r.reason);
-            throw new Error((out&&out.reason)||r.reason||name+' fail');
-          }).catch(e=>{_mark(name,false,e&&e.message);throw e;});
+          const p=_benched(name)
+            ?Promise.reject(new Error(name+' benched ('+(_H[name]?.last||'fail')+')'))
+            :fetchWithRetry(url,1,validate).then(r=>{
+              const out=post?post(r):r;
+              if(out&&out.ok){_mark(name,true);return{...out,_via:name};}
+              _mark(name,false,(out&&out.reason)||r.reason);
+              throw new Error((out&&out.reason)||r.reason||name+' fail');
+            }).catch(e=>{_mark(name,false,e&&e.message);throw e;});
+          p.catch(()=>{});
+          return p;
         };
         const _vercelPromise=_racer('vercel',_vercelUrl,_okEvents);
         // V13.4.52: first-party PUBLIC-base racer. The authed /api/kalshi vercel path
@@ -46117,7 +46164,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           reason:snapshot.reason||'',
           earlyLock:false,
           isNoGo:!!snapshot.isNoGo,
-          noGoCategory:snapshot.noGoCategory||null,
+          // V13.4.237: never leave a sit-out uncategorised. Measured on the live
+          //   1,000-call log: 554 sit-outs, of which 145 that HAD a directional read
+          //   carried noGoCategory null. Some gate paths stamp a category
+          //   (v11-gate, v1123-ev-gate, weak-gap-directional-sitout) and others do
+          //   not, so the largest single block of vetoed calls could not be
+          //   attributed to any gate — which makes them untunable, since you cannot
+          //   loosen or tighten a rule you cannot identify.
+          //
+          //   Falls back to classifying the reason text, then to an explicit marker
+          //   so "no gate recorded" is distinguishable from "field absent on a legacy
+          //   entry". Logging only: this never touches a trading decision.
+          noGoCategory:snapshot.noGoCategory||_deriveSitoutCategory(snapshot)||null,
           caution:snapshot.caution||null,
           isConfluent:!!snapshot.isConfluent,
           isSuperConfluent:!!snapshot.isSuperConfluent,
