@@ -5333,8 +5333,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.29-v13.4.247-catchup-pull-egress-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.247';
+const BASELINE_VERSION='2026.08.29-v13.4.248-stale-pending-resolver-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.248';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -36527,6 +36527,15 @@ function TaraApp(){
                 strike:e.strike,
                 dir:e.dir,
                 _v8_1_stalePending:true,
+                // V13.4.248: tells the resolver below which array actually holds
+                //   this entry. Without it every item queued from here got looked
+                //   up in tradeLogRef -- a different, largely-vestigial array --
+                //   found nothing, and was silently dropped after 5 minutes with
+                //   its taraCallLog entry never touched. Confirmed live: two real
+                //   entries (2026-08-25, 2026-08-28) sat at result:null indefinitely,
+                //   one for 4 days, until corrected by hand against Kalshi's
+                //   settled market for each ticker.
+                source:'taraCallLog',
               });
             }
           });
@@ -40349,8 +40358,28 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const ageSec=(now-pending.windowCloseTime)/1000;
         // Don't query Kalshi for at least 30s after window close — they need time to settle
         if(ageSec<30)continue;
-        // After 5 minutes of failed polling, fall back to local-feed result
-        if(ageSec>300){
+        // V13.4.248: taraCallLog-sourced items (the V8.1 stale-pending backfill,
+        //   tagged source:'taraCallLog') do not belong to the tradeLog branch below
+        //   at all -- that branch looks the id up in tradeLogRef, a different array,
+        //   finds nothing, and used to silently drop the item here with the real
+        //   taraCallLog entry never touched. There is also no localResultGuess for
+        //   these to fall back to, and fabricating a WIN/LOSS guess would corrupt
+        //   the very record this app's win-rate and telemetry are measured from.
+        //   Kalshi keeps settled-market history indefinitely, but the settled-events
+        //   fetch below only returns the ~50 most recent per series (~12.5h for a
+        //   15m series) -- so past that horizon this specific query can never find
+        //   the match. Keep retrying up to 24h in case of a slow settlement or a
+        //   transient outage, then stop WITHOUT writing a result: an honest null is
+        //   correct here, a guessed one is not.
+        if(pending.source==='taraCallLog'){
+          if(ageSec>86400){
+            try{console.warn('[V13.4.248] giving up on stale pending after 24h (unreachable via the recent-settled-events window):',pending.tradeId);}catch(_){}
+            pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
+            continue;
+          }
+          // fall through to the Kalshi-fetch block below on every other tick
+        } else if(ageSec>300){
+          // After 5 minutes of failed polling, fall back to local-feed result
           const trade=tradeLogRef.current.find(t=>t.id===pending.tradeId);
           if(trade&&trade.result==='PENDING-VERIFY'){
             const finalResult=trade.localResultGuess||'LOSS';
@@ -40441,20 +40470,39 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               return null;
             })();
             if(kalshiOutcomeDir){
-              const trade=tradeLogRef.current.find(t=>t.id===pending.tradeId);
-              if(trade){
-                const finalResult=trade.dir===kalshiOutcomeDir?'WIN':'LOSS';
-                const newLog=tradeLogRef.current.map(t=>t.id===pending.tradeId?{
-                  ...t,
-                  result:finalResult,
-                  outcomeDir:kalshiOutcomeDir,
-                  kalshiResolved:true,
-                  kalshiClosingPrice:_kalshiSettlement,  // V3.0: canonical Kalshi-settled close
-                }:t);
-                saveTradeLog(newLog);setTradeLog(newLog);
-                // V7.1: per-asset learning. Replaces separate setAdaptiveWeights+setRegimeWeights.
-                const _resolved=newLog.find(t=>t.id===pending.tradeId);
-                applyTradeLearning(newLog,_resolved,finalResult);
+              // V13.4.248: taraCallLog-sourced items are resolved through the SAME
+              //   apply path the reconcile panel itself uses (window._taraApplyReconcile)
+              //   -- full IDB history, every cache tier, manualEdit stamp, cloud
+              //   propagation via the existing taraCallLog write effect. Not
+              //   applyTradeLearning: that function mutates the tradeLog-side adaptive
+              //   weight store, a different schema than what a taraCallLog entry carries.
+              if(pending.source==='taraCallLog'){
+                const _entry=(taraCallLogRef.current||[]).find(t=>t.id===pending.tradeId);
+                if(_entry&&typeof window._taraApplyReconcile==='function'){
+                  const finalResult=_entry.dir===kalshiOutcomeDir?'WIN':'LOSS';
+                  await window._taraApplyReconcile(new Map([[pending.tradeId,{
+                    result:finalResult,
+                    outcomeDir:kalshiOutcomeDir,
+                    kalshiResolved:true,
+                    kalshiClosingPrice:_kalshiSettlement,
+                  }]]));
+                }
+              } else {
+                const trade=tradeLogRef.current.find(t=>t.id===pending.tradeId);
+                if(trade){
+                  const finalResult=trade.dir===kalshiOutcomeDir?'WIN':'LOSS';
+                  const newLog=tradeLogRef.current.map(t=>t.id===pending.tradeId?{
+                    ...t,
+                    result:finalResult,
+                    outcomeDir:kalshiOutcomeDir,
+                    kalshiResolved:true,
+                    kalshiClosingPrice:_kalshiSettlement,  // V3.0: canonical Kalshi-settled close
+                  }:t);
+                  saveTradeLog(newLog);setTradeLog(newLog);
+                  // V7.1: per-asset learning. Replaces separate setAdaptiveWeights+setRegimeWeights.
+                  const _resolved=newLog.find(t=>t.id===pending.tradeId);
+                  applyTradeLearning(newLog,_resolved,finalResult);
+                }
               }
               pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
             }
