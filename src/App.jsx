@@ -5333,8 +5333,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.29-v13.4.246-sports-weather-tabs-and-lifted-picks';
-const TARA_VERSION_DISPLAY='Tara 13.4.246';
+const BASELINE_VERSION='2026.08.29-v13.4.247-catchup-pull-egress-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.247';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -36541,13 +36541,25 @@ function TaraApp(){
   //   this device's local log signature, another device has committed entries we have
   //   not seen. We then do ONE catch-up read of the big memory/taraCallLog doc and merge
   //   it in via _mergeCallLogEntries (resolved-beats-pending, manualEdit-wins). Guarded
-  //   by a 20s cooldown + in-flight flag so two behind devices cannot pull-storm each
+  //   by a cooldown + in-flight flag so two behind devices cannot pull-storm each
   //   other; once converged, local==cloud and no further pulls fire.
+  //
+  // V13.4.247 EGRESS: cooldown raised 20s -> 3min. `_sigBehind` fires on a
+  //   difference of exactly ONE resolved trade or ONE newer id -- no threshold --
+  //   so with ~450+ trades/day pool-wide and several devices listening, nearly
+  //   every settlement anywhere made every other device "behind" and eligible to
+  //   pull. At a 1.36MB doc size that measured 75 full pulls/day from the two
+  //   live origins alone: ~102MB/day, the majority of a 5GB/month egress budget
+  //   already sitting at 85% (query_logs, 2026-08-29). This doc is the
+  //   historical record used for review and telemetry, not the live trading
+  //   state (that is state/currentLock_BTC_15m, a separate ~2.4KB doc on its
+  //   own fast path) -- being a few minutes behind on it costs nothing a live
+  //   lock decision depends on, so the cooldown can be this long safely.
   useEffect(()=>{
     const _doCatchUpPull=async(reason)=>{
       if(_catchUpInFlightRef.current)return;
       const _now=Date.now();
-      if(_now-_lastCatchUpPullRef.current<20000)return; // 20s cooldown
+      if(_now-_lastCatchUpPullRef.current<180000)return; // 3min cooldown
       _catchUpInFlightRef.current=true;
       _lastCatchUpPullRef.current=_now;
       try{
