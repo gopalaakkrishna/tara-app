@@ -5333,8 +5333,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.21-v13.4.245-revert-htf-zero-sitout-spike';
-const TARA_VERSION_DISPLAY='Tara 13.4.245';
+const BASELINE_VERSION='2026.08.29-v13.4.246-sports-weather-tabs-and-lifted-picks';
+const TARA_VERSION_DISPLAY='Tara 13.4.246';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28998,7 +28998,7 @@ function useWeatherPicks(){
   };
 }
 
-function WeatherView({onClose}){
+function WeatherView({onClose,weatherPicks}){
   const[cityId,setCityId]=React.useState('NYC');
   const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null,ready:false,biting:false});
   const city=_WX_CITIES.find(c=>c.id===cityId)||_WX_CITIES[0];
@@ -29031,16 +29031,19 @@ function WeatherView({onClose}){
     return()=>{alive=false;};
   },[]);
 
-  const P=useWeatherPicks();
+  const P=weatherPicks;
   const S=state;
   const pct=(v)=>v==null?'—':(v*100).toFixed(0)+'%';
   // Suspect rows are painted SIT-OUT gold, never green: the app's own colour
   //   grammar (green=win, red=loss, gold=stand aside) already says "do not act".
   const edgeColor=(e,suspect)=>(e==null||e<1)?'rgba(255,255,255,0.4)':suspect?'#D4A03A':e>=6?'#23B981':'rgba(255,255,255,0.75)';
 
+  // V13.4.246: was `fixed inset-0 z-50` with a ✕ — a modal popping up over the
+  //   board, inconsistent with Sports' in-flow swap right next to it in the
+  //   same header toggle. Same container shape as SportsView now.
   return (
-    <div className="fixed inset-0 z-50 bg-[#0A0C0F] overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose&&onClose();}}>
-      <div className="max-w-[1000px] mx-auto px-4 py-6">
+    <div className="w-full min-h-0">
+      <div className="max-w-[1000px] mx-auto">
         <div className="flex items-center justify-between mb-5">
           <div>
             {/* The ladder's day is on screen permanently now. A wrong-day ladder
@@ -29052,7 +29055,7 @@ function WeatherView({onClose}){
             </div>
             <h2 className="font-serif text-3xl text-white tracking-tight">Temperature <span style={{color:'rgba(255,255,255,0.3)'}}>·</span> Ladder</h2>
           </div>
-          <button onClick={()=>onClose&&onClose()} className="p-2 rounded-lg text-xl" style={{color:'rgba(255,255,255,0.6)'}}>✕</button>
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-colors" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}>← Back to BTC</button>
         </div>
 
         {/* V13.4.224: twenty pills wrapping cost 391px of height at 320px — the
@@ -33419,6 +33422,13 @@ function TaraApp(){
   const[showStats,setShowStats]=useState(false); // V2.7: full stats analytics modal
   const[showSports,setShowSports]=useState(false); // v13.4.149: sports prediction record
   const[showWeather,setShowWeather]=useState(false); // V13.4.217: weather lane — a market whose settlement number cannot be pushed around
+  // V13.4.246: lifted out of WeatherView so its picks keep scanning and
+  //   settling on the app's own 5-minute sweep even when the Weather tab is
+  //   closed. It used to live inside WeatherView, whose state React destroys
+  //   on unmount — same treatment the BTC tree already gets and Weather never
+  //   had, which is why the record only ever advanced while someone happened
+  //   to be looking at it.
+  const weatherPicks=useWeatherPicks();
   const[showBrain,setShowBrain]=useState(false); // V3.1.12: Tara's Brain — synthesized reasoning view
   const[syncState,setSyncState]=useState({active:false,stage:'',progress:0,complete:false,error:null}); // V134: sync progress overlay
   const[baselineDrift,setBaselineDrift]=useState(()=>{
@@ -50521,7 +50531,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   mode (currentAsset), Sports is an overlay, but from the user's
                   side both are just "which board am I looking at". */}
               <div className="w-px my-1 bg-[#2A2A34] mx-0.5"/>
-              <button onClick={()=>setShowSports(v=>!v)}
+              {/* V13.4.246: BTC/Sports/Weather is one exclusive toggle, not two
+                  independent switches — closing whichever else is open on every
+                  click, the same as clicking BTC's own asset buttons already
+                  behaved. Two booleans that could both be true is how Weather's
+                  full-screen view ended up rendering on top of Sports instead of
+                  replacing it. */}
+              <button onClick={()=>{setShowWeather(false);setShowSports(v=>!v);}}
                 className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showSports?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                 style={showSports?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
                 title="Sports picks and record"
@@ -50530,7 +50546,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <span className="hidden sm:inline text-[10px]">Sports</span>
               </button>
               {/* V13.4.217: weather lane */}
-              <button onClick={()=>setShowWeather(v=>!v)}
+              <button onClick={()=>{setShowSports(false);setShowWeather(v=>!v);}}
                 className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showWeather?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                 style={showWeather?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
                 title="Daily-high temperature ladder"
@@ -51293,8 +51309,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             it would tear down the price feeds, websocket tape and tick history
             and re-initialise them on every trip to Sports and back. */}
         {showSports&&<SportsView onClose={()=>setShowSports(false)}/>}
-        {showWeather&&<WeatherView onClose={()=>setShowWeather(false)}/>}
-        <div className={showSports?'hidden':'contents'}>
+        {showWeather&&<WeatherView onClose={()=>setShowWeather(false)} weatherPicks={weatherPicks}/>}
+        <div className={(showSports||showWeather)?'hidden':'contents'}>
 
         {/* V7.10.6: Market context strip */}
         <MarketContextStrip
