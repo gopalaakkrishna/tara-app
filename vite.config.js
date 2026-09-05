@@ -35,6 +35,10 @@ const kalshiProxy = (target) => ({
 });
 
 export default defineConfig({
+  // Public base path. GitHub Pages serves a project site under /<repo>/, so the
+  // Pages workflow builds with VITE_BASE=/tara-app/. Everything else (dev,
+  // Vercel, a custom domain at the root) leaves it unset and gets '/'.
+  base: process.env.VITE_BASE || '/',
   plugins: [react()],
   server: {
     proxy: {

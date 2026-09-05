@@ -4353,10 +4353,16 @@ const kalshiAuthedFetch=async({apiKeyId,privateKeyPem,method,path,body,timeoutMs
   //     localStorage.setItem('taraKalshiProxyBase',
   //       'https://tara-kalshi.up.railway.app/kalshi,https://backup-proxy.fly.dev/kalshi');
   //   Override at runtime: same key as before, just supports CSV now.
+  //
+  //   Default order: Railway first because its egress IP is the one verified
+  //   to pass Kalshi's write filter, then the build-time API host (the Render
+  //   service, VITE_API_BASE) as the fallback once Railway's free credit runs
+  //   out each month. Both serve the same /kalshi/<path> contract.
   const _kProxyRaw=(typeof localStorage!=='undefined'&&localStorage.getItem('taraKalshiProxyBase'))||'';
+  const _kBuildApiBase=((import.meta.env&&import.meta.env.VITE_API_BASE)||'').trim().replace(/\/+$/,'');
   const _kProxyBases=_kProxyRaw
     ?_kProxyRaw.split(',').map(s=>s.trim()).filter(Boolean)
-    :['https://tara-kalshi.up.railway.app/kalshi'];
+    :['https://tara-kalshi.up.railway.app/kalshi',...(_kBuildApiBase?[_kBuildApiBase+'/kalshi']:[])];
   const headers={
     'KALSHI-ACCESS-KEY':apiKeyId,
     'KALSHI-ACCESS-TIMESTAMP':ts,
@@ -9656,7 +9662,9 @@ const useMacroShockData=()=>{
     const _fetchOne=async(inst)=>{
       try{
         // OKX 1m candles endpoint via the existing proxy. Returns most-recent-first.
-        const r=await fetch(`/api/okx/api/v5/market/candles?instId=${inst}&bar=1m&limit=2`);
+        // The proxy prefix already maps to /api/v5, so the path must not repeat it;
+        // the old doubled prefix resolved to a URL that 404s on OKX.
+        const r=await fetch(`/api/okx/market/candles?instId=${inst}&bar=1m&limit=2`);
         if(!r.ok)return null;
         const j=await r.json();
         if(j?.code!=='0'||!Array.isArray(j?.data)||j.data.length<2)return null;
