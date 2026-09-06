@@ -44808,11 +44808,151 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   (tier, quality, conviction, marginal caution) since the user explicitly
   //   opted in. Hard rails (kill switch, cooldowns, asset/window filters, bet
   //   size cap, anti-tilt) still apply.
-  const _handlePlaceOrderOnTaraCall=useCallback(()=>{try{console.info('[V13.4.75] auto-exec removed -- manual place is a no-op');}catch(_){}},[]);
-
   // ── ENTRY EFFECT ──────────────────────────────────────────────────────────
-  // Watches taraCall + lockedCallRef. When a new lock fires AND auto-exec is
-  // green-lit, places a limit order and opens a UI position via setUserPosition.
+  // Watches the engine lock and, when auto-exec is armed, walks the entry
+  // ladder and records the outcome in autoOrderState.
+  //
+  // DEFAULTS ARE DISARMED AND DRY RUN. Both live in the autoExecSettings
+  // initialiser above and nothing here changes them: `enabled` is !!v.enabled,
+  // so false unless explicitly stored true, and `dryRun` is v.dryRun!==false,
+  // so true unless explicitly stored false. With stock settings the effect
+  // never even starts its timer, and once armed it still simulates until
+  // dryRun is deliberately turned off.
+  //
+  // Why a poll rather than a dependency on a lock value: lockedCallRef is a
+  // ref, so writing a lock does not re-render and an effect keyed on state
+  // would miss it. The timer only exists while armed, so a disarmed app pays
+  // nothing for it.
+  //
+  // Rails, hardest and cheapest first. Every one of these returns a reason
+  // string so a skip is explainable rather than silent:
+  //   1. armed              — autoExecSettings.enabled
+  //   2. kill switch        — user-engaged, blocks auto and manual alike
+  //   3. credentials
+  //   4. a real lock
+  //   5. one order per lock — dedupe on lock identity so a re-render, a
+  //                           settings change or an overlapping tick cannot
+  //                           double-fire
+  //   6. nothing in flight  — never stack on a live autoOrderState
+  //   7. usable live quote  — reads _execCostCents, which enforces a max age
+  //                           and gives the cost on the side actually taken.
+  //                           Deliberately NOT kalshiAtLock, which is the mid
+  //                           and optimistic by half the spread on every trade
+  //   8. bet size cap       — maxBetPerTrade, in dollars
+  //
+  // The walk aborts if the lock disappears, flips direction, or the kill
+  // switch engages mid-rest, so a reversal cancels rather than fills into it.
+  const _entryFiredForRef=useRef(null);
+  const _entryBusyRef=useRef(false);
+
+  // Stake, always clamped to the per-trade cap. 'percent' has no balance in
+  // scope here, so it falls back to the cap rather than guessing large.
+  const _resolveStakeDollars=useCallback((s,costCents)=>{
+    const cap=Math.max(0,Number(s?.maxBetPerTrade)||0);
+    if(!(cap>0))return 0;
+    if(s?.entryMode==='contracts'&&costCents>0){
+      const n=Math.max(1,Math.floor(Number(s.entryContracts)||0));
+      return Math.min(cap,(n*costCents)/100);
+    }
+    return cap;
+  },[]);
+
+  const _runEntry=useCallback(async({manual=false}={})=>{
+    if(_entryBusyRef.current)return{ok:false,reason:'busy'};
+    const s=autoExecSettings||{};
+    if(!s.enabled)return{ok:false,reason:'disarmed'};
+    if(killSwitchEngaged)return{ok:false,reason:'kill-switch'};
+    const creds=kalshiCreds||{};
+    if(!creds.apiKeyId||!creds.privateKeyPem)return{ok:false,reason:'no-credentials'};
+
+    const lock=lockedCallRef.current;
+    const dir=lock&&lock.dir;
+    if(dir!=='UP'&&dir!=='DOWN')return{ok:false,reason:'no-lock'};
+
+    const lockKey=String(lock.lockedAt||0)+':'+dir;
+    if(_entryFiredForRef.current===lockKey)return{ok:false,reason:'already-fired'};
+
+    const st=autoOrderState&&autoOrderState.status;
+    if(st&&st!=='exited'&&st!=='error')return{ok:false,reason:'order-in-flight:'+st};
+
+    // Executable cost per contract on the side we are actually taking.
+    const costCents=_execCostCents(dir,30000);
+    if(costCents==null||!_quoteUsable(_kalshiQuote))return{ok:false,reason:'no-usable-quote'};
+    const ticker=_kalshiQuote&&_kalshiQuote.ticker;
+    if(!ticker)return{ok:false,reason:'no-ticker'};
+
+    const stake=_resolveStakeDollars(s,costCents);
+    if(!(stake>0))return{ok:false,reason:'no-stake'};
+
+    _entryFiredForRef.current=lockKey;
+    _entryBusyRef.current=true;
+    const dryRun=s.dryRun!==false;
+    setAutoOrderState({status:'placing',dir,ticker,dryRun,manual:!!manual,offerCents:costCents,at:Date.now()});
+
+    try{
+      const res=await kalshiRunEntryLadder({
+        apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,
+        ticker,dir,betDollars:stake,offerCents:costCents,
+        settings:s,dryRun,
+        shouldAbort:()=>{
+          const l=lockedCallRef.current;
+          return !l||l.dir!==dir;
+        },
+        onRung:(rung)=>setAutoOrderState(prev=>Object.assign({},prev||{},{
+          status:rung.takesSpread?'placing':'resting',
+          rungCents:rung.priceCents,takesSpread:!!rung.takesSpread,step:rung.step,
+        })),
+      });
+      if(!res.ok){
+        setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:res.reason,at:Date.now()}));
+        return res;
+      }
+      const filledAt=res.rung?res.rung.priceCents:costCents;
+      setAutoOrderState(prev=>Object.assign({},prev||{},{
+        status:'filled',dryRun,order:res.order,
+        filledAtCents:filledAt,
+        tookSpread:!!(res.rung&&res.rung.takesSpread),
+        // Realised saving versus crossing — the number V13.4.228 says decides
+        // whether arming this was worth doing at all.
+        savedVsTakeCents:costCents-filledAt,
+        at:Date.now(),
+      }));
+      return res;
+    }catch(e){
+      const msg=String((e&&e.message)||e);
+      setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:msg,at:Date.now()}));
+      return{ok:false,reason:msg};
+    }finally{
+      _entryBusyRef.current=false;
+    }
+  },[autoExecSettings,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,_resolveStakeDollars]);
+
+  // V9.17.18: MANUAL PLACE-ORDER on Tara's call. Tara's snapshot paths commit
+  //   without writing lockedCallRef, so the automatic path can sit out; this
+  //   lets the user fire on Tara's call explicitly. Every hard rail in
+  //   _runEntry still applies, dryRun included.
+  const _handlePlaceOrderOnTaraCall=useCallback(()=>{
+    _runEntry({manual:true}).then(r=>{
+      try{console.info('[entry] manual:',(r&&r.ok)?'filled':'skipped ('+(r&&r.reason)+')');}catch(_e){}
+    });
+  },[_runEntry]);
+
+  useEffect(()=>{
+    const s=autoExecSettings||{};
+    if(!s.enabled)return;            // disarmed: no timer, nothing runs
+    if(killSwitchEngaged)return;
+    let stopped=false;
+    const tick=()=>{
+      if(stopped)return;
+      _runEntry({}).then(r=>{
+        if(stopped||!r||r.ok)return;
+        const quiet=r.reason==='already-fired'||r.reason==='no-lock'||r.reason==='busy'||r.reason==='disarmed';
+        if(!quiet){try{console.info('[entry] auto skipped:',r.reason);}catch(_e){}}
+      });
+    };
+    const id=setInterval(tick,2000);
+    return()=>{stopped=true;clearInterval(id);};
+  },[autoExecSettings,killSwitchEngaged,_runEntry]);
 
   // ── V10.2.10 — POSITION RECONCILIATION POLL ────────────────────────────────
   // Polls /portfolio/positions every 30s and detects three drift categories
