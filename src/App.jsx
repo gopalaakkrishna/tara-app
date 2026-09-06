@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.259-weather-and-record-rebuild';
-const TARA_VERSION_DISPLAY='Tara 13.4.259';
+const BASELINE_VERSION='2026.09.06-v13.4.261-stoploss-clear-actually-fires';
+const TARA_VERSION_DISPLAY='Tara 13.4.261';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19504,6 +19504,59 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         ),
         React.createElement('button',{onClick:onClose,className:'text-[#EDEDED]/40 hover:text-white text-xl leading-none'},'×'),
       ),
+      // V13.4.260: WHAT IS TRUE RIGHT NOW. Read from the live settings on every
+      //   render -- never hardcoded -- so it cannot drift from behaviour the way
+      //   the old "Daily caps" controls did (they described enforcement that did
+      //   not exist; removed in v13.4.254).
+      (()=>{
+        const _armed=!!autoExecSettings?.enabled;
+        const _dry=autoExecSettings?.dryRun!==false;
+        const _killed=!!killSwitchEngaged;
+        const _trailOn=typeof TRAIL_ARM_C!=="undefined";
+        const _fixedTp=Number(autoExecSettings?.autoExitOffer)>0;
+        const _fixedSl=Number(autoExecSettings?.stopLossDeltaCents)>0;
+        const _cap=Number(autoExecSettings?.maxBetPerTrade)||0;
+        // headline sentence
+        const _line=_killed?"Stopped. The kill switch is on and nothing will be placed."
+          :!_armed?"Calling only. Tara picks a side; you place the order."
+          :_dry?"Armed, but practising. Orders are simulated, not sent to Kalshi."
+          :"Armed and placing real orders.";
+        const _tone=_killed?"#E8455E":(_armed&&!_dry)?"#23B981":"#D4A03A";
+        const _chip=(text,tone)=>React.createElement("span",{
+          key:text,
+          className:"text-[11px] px-2.5 py-1 rounded-md border",
+          style:{color:tone,borderColor:tone+"47",background:tone+"1F"},
+        },text);
+        const _chips=[];
+        _chips.push(_chip(_killed?"Killed":_armed?"Armed":"Disarmed",_killed?"#E8455E":_armed?"#23B981":"#D4A03A"));
+        if(_armed)_chips.push(_chip(_dry?"Practice":"Live orders",_dry?"#D4A03A":"#23B981"));
+        if(typeof NO_ENTRY_GATES!=="undefined"&&NO_ENTRY_GATES)_chips.push(_chip("No entry filter","#D4A03A"));
+        if(typeof NO_SITOUT_MODE!=="undefined"&&NO_SITOUT_MODE)_chips.push(_chip("Never sits out","#D4A03A"));
+        _chips.push(_chip("No daily cap","#D4A03A"));
+        // one line on how it gets out, since that is the other half of behaviour
+        const _exit=_trailOn
+          ?("Sells at "+TRAIL_GIVEBACK_C+"c off its high once worth "+TRAIL_ARM_C+"c"+((_fixedTp||_fixedSl)?", plus a fixed rule you set.":", otherwise holds to the close."))
+          :"Holds to the close.";
+        return React.createElement("div",{
+          className:"mb-4 rounded-[10px] border overflow-hidden",
+          style:{borderColor:_tone+"38",background:"#0A0A0E"},
+        },
+          React.createElement("div",{
+            className:"px-4 py-2.5 border-b flex items-baseline justify-between",
+            style:{borderColor:"#16161c",background:_tone+"0D"},
+          },
+            React.createElement("span",{className:UI2_LABEL,style:{color:_tone+"AA"}},"Right now"),
+            React.createElement("span",{className:UI2_LABEL},"Read this before changing anything"),
+          ),
+          React.createElement("div",{className:"px-4 py-3.5"},
+            React.createElement("div",{className:"text-[15px] font-semibold tracking-[-0.01em]",style:{color:_tone}},_line),
+            React.createElement("div",{className:"text-[12px] text-[#EDEDED]/55 mt-2 leading-relaxed"},_exit),
+            React.createElement("div",{className:"flex flex-wrap gap-1.5 mt-3"},_chips),
+            _cap>0&&React.createElement("div",{className:"text-[11px] text-[#EDEDED]/38 mt-2.5"},
+              "Trades are trimmed to $"+_cap.toFixed(2)+" each, never refused for size."),
+          ),
+        );
+      })(),
       // Bet size + win payout
       //   V10.4.1a: REMOVED misleading "Net per win / Required WR for breakeven"
       //   calculation. That math doesn't reflect Kalshi binary mechanics — actual
@@ -34152,6 +34205,13 @@ function TaraApp(){
   const[autoExecSettings,setAutoExecSettings]=useState(()=>{
     try{
       const v=JSON.parse(localStorage.getItem('tara_autoexec_v1')||'{}');
+      // V13.4.261: read the migration flag ONCE, here, before the object
+      //   literal below is evaluated. The v253 bug was setting the sentinel
+      //   inside one property and reading it from another further down, so
+      //   source order silently decided which migrations ran.
+      const _v261ExitClearPending=(()=>{
+        try{return !localStorage.getItem('tara_v13_4_261_exit_clear');}catch(_e){return false;}
+      })();
       return{
         // V13.4.252: default ARMED. Was !!v.enabled (false unless explicitly
         //   stored true). A stored false still wins, so the settings toggle
@@ -34263,7 +34323,7 @@ function TaraApp(){
           let _v=Number(v.autoExitOffer)>0?Number(v.autoExitOffer):0;
           try{
             // one-time: clear a stored fixed TP that came from a preset (80..92c)
-            if(!localStorage.getItem('tara_v13_4_253_exit_rules_measured')&&Number(v.autoExitOffer)>0){
+            if(_v261ExitClearPending&&Number(v.autoExitOffer)>0){
               try{console.info('[V13.4.253] fixed take-profit '+v.autoExitOffer+'c -> off (measured loser)');}catch(_){}
               _v=0;
             }
@@ -34305,8 +34365,10 @@ function TaraApp(){
             // V13.4.253: same place, same idiom — set the exit-rules sentinel once
             //   the hydrator has run, so the fixed TP/SL clear happens exactly once
             //   and a deliberate re-enable afterwards is never undone.
-            if(!localStorage.getItem('tara_v13_4_253_exit_rules_measured')){
-              localStorage.setItem('tara_v13_4_253_exit_rules_measured','1');
+            // V13.4.261: new sentinel. The v253 one is already '1' everywhere,
+            //   so the corrected stop-loss clear would never fire under it.
+            if(_v261ExitClearPending){
+              localStorage.setItem('tara_v13_4_261_exit_clear','1');
             }
           }catch(_){}
           return _v;
@@ -34422,7 +34484,7 @@ function TaraApp(){
           //   trailing stop, which does not cap a winner that keeps running.
           let _v=Number(v.stopLossDeltaCents)>=0?Number(v.stopLossDeltaCents):0;
           try{
-            if(!localStorage.getItem('tara_v13_4_253_exit_rules_measured')&&_v>0){
+            if(_v261ExitClearPending&&_v>0){
               try{console.info('[V13.4.253] fixed stop-loss '+_v+'c -> off (measured loser)');}catch(_){}
               _v=0;
             }
