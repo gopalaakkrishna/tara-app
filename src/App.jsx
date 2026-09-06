@@ -5633,8 +5633,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.286-order-fields-renamed-under-readers';
-const TARA_VERSION_DISPLAY='Tara 13.4.286';
+const BASELINE_VERSION='2026.09.06-v13.4.287-commits-must-say-they-are-committed';
+const TARA_VERSION_DISPLAY='Tara 13.4.287';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46816,7 +46816,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
               atPosterior:analysis?.rawProbAbove,
               kalshiAtLock:_kNow,
-              locked:false,earlyLock:false,
+              locked:true,earlyLock:false,
               isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
               samples:0,needSamples:0,
               tier:'adverse-kalshi-abort',
@@ -47103,7 +47103,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           call:tc.call,direction:null,confidence:tc.confidence,reason:tc.reason,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:analysis.rawProbAbove,
-          locked:false,
+          locked:true,
           earlyLock:false,
         };
         _persistLock(); // V5.6: cloud-save SIT_OUT commit
@@ -47381,6 +47381,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         if(!_d)return snap;                                   // no lean to commit to
         return{...snap,
           call:_d,direction:_d,dir:_d,
+          // V13.4.287: this spread `...snap` inherited the source sit-out's
+          //   locked:false, so a REAL directional commit came out claiming it was
+          //   not committed. readLockState reads exactly that flag, so THIS TRADE,
+          //   the decision clock and the advisor all said LEANING/deciding on a
+          //   round that was already committed, logged, and scored into the record.
+          //   A converted sit-out IS a commit — say so.
+          locked:true,
           wasOverriddenNoTrade:false,
           noGoCategory:null,
           confidence:snap.confidence||_commitConf,
@@ -49156,7 +49163,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
         atPosterior:analysis?.rawProbAbove,
         kalshiAtLock:_kPctNow,
-        locked:false,earlyLock:false,
+        locked:true,earlyLock:false,
         isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
         samples,needSamples:0,
         tier:'mixed-sitout',
@@ -49210,7 +49217,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:analysis?.rawProbAbove,
           kalshiAtLock:_kPctNow,
-          locked:false,earlyLock:false,
+          locked:true,earlyLock:false,
           isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
           samples,needSamples:0,
           tier:'kalshi-window-closed',
@@ -49234,7 +49241,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:analysis?.rawProbAbove,
           kalshiAtLock:_kPctNow,
-          locked:false,earlyLock:false,
+          locked:true,earlyLock:false,
           isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
           samples,needSamples:0,
           tier:'kalshi-no-reset',
@@ -49679,7 +49686,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
             atPosterior:_postAtCommit,
             kalshiAtLock:_kAtCommit,
-            locked:false,earlyLock:false,
+            locked:true,earlyLock:false,
             isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
             samples,needSamples:0,
             tier:'edge-sitout',
@@ -49718,7 +49725,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               atSecondsLeft:_leSecLeft,
               atPosterior:analysis?.rawProbAbove,
               kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
-              locked:false,earlyLock:false,
+              locked:true,earlyLock:false,
               isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
               samples,needSamples:0,
               tier:'late-trend-oppose-sitout',
@@ -49754,7 +49761,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:analysis?.rawProbAbove,
           kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
-          locked:false,earlyLock:false,
+          locked:true,earlyLock:false,
           isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
           samples,needSamples:0,
           tier:'tier1-only-skip',
