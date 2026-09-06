@@ -5510,8 +5510,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.251-no-risk-rails';
-const TARA_VERSION_DISPLAY='Tara 13.4.251';
+const BASELINE_VERSION='2026.09.06-v13.4.252-armed-by-default';
+const TARA_VERSION_DISPLAY='Tara 13.4.252';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34261,8 +34261,16 @@ function TaraApp(){
     try{
       const v=JSON.parse(localStorage.getItem('tara_autoexec_v1')||'{}');
       return{
-        enabled:!!v.enabled,                         // master toggle
-        dryRun:v.dryRun!==false,                     // default ON — flip after sandbox verification
+        // V13.4.252: default ARMED. Was !!v.enabled (false unless explicitly
+        //   stored true). A stored false still wins, so the settings toggle
+        //   keeps working in both directions -- this changes the default only.
+        enabled:v.enabled!==false,                   // master toggle — armed by default
+        // V13.4.252: default LIVE. Was dryRun:v.dryRun!==false (simulate unless
+        //   explicitly stored false). A stored true still wins, so the toggle
+        //   keeps working. Note the path this arms was rebuilt on 2026-09-05 and
+        //   has never placed a live order -- its own commit shipped it "disarmed
+        //   and dry run by default" for that reason.
+        dryRun:v.dryRun===true,                      // default OFF — real orders
         // V10.2.4: same safe-defaults migration as maxAutoTradesPerDay below.
         maxBetPerTrade:(()=>{
           let _v=Number(v.maxBetPerTrade)>0?Number(v.maxBetPerTrade):25;
@@ -34601,7 +34609,7 @@ function TaraApp(){
       //   fires on parse failure / no localStorage entry).
       //   Hunter targets: 70-72% WR, 6-10 trades/day.
       return{
-        enabled:false,dryRun:true,
+        enabled:true,dryRun:false,   // V13.4.252: fresh-install defaults follow the same change
         // Hunter sizing
         maxBetPerTrade:2.5,maxDailyLoss:6,maxAutoTradesPerDay:8,maxAutoTradesPerWindow:1,
         // Hunter filters
