@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.255-one-rule-less-screen';
-const TARA_VERSION_DISPLAY='Tara 13.4.255';
+const BASELINE_VERSION='2026.09.06-v13.4.256-drop-per-device-record';
+const TARA_VERSION_DISPLAY='Tara 13.4.256';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -53860,10 +53860,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             const geoRisk=newsSentiment?.geoRisk||0;
             const geoLabel=geoRisk>=0.7?'HIGH':geoRisk>=0.5?'ELEVATED':geoRisk>=0.3?'WATCH':'CLEAR';
             const geoColor=geoRisk>=0.5?T2_COPPER:geoRisk>=0.3?'rgba(201,125,74,0.6)':'rgba(35,185,129,0.7)';
-            const wins=scorecards[windowType]?.wins||0;
-            const losses=scorecards[windowType]?.losses||0;
-            const total=wins+losses;
-            const wr=total>0?(wins/total*100).toFixed(1):'—';
+            // V13.4.256: the per-device 15m tally that used to sit at the end of this
+            //   bar was removed -- see the note at its former render site below.
             return(
               <>
                 <span className="text-[#EDEDED]/35 uppercase tracking-wide">Regime</span>
@@ -53909,7 +53907,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     </>
                   );
                 })()}
-                <span className="ml-auto text-[#EDEDED]/45" style={T2_MONO_STYLE}>{windowType.toUpperCase()} · {wins}W-{losses}L · {wr}%</span>
+                {/* V13.4.256: removed the per-device 15m record (e.g. "15M · 58W-37L · 61.1%").
+                    It read as a second, contradictory record next to TARA'S RECORD, but it was
+                    the same call log with one extra filter -- scorecards skips entries whose
+                    e.device is not this device, so it showed only calls made on THIS machine
+                    while the header record counts the whole pool. He is always on one machine,
+                    so the split was noise that looked like a disagreement. The scorecards memo
+                    stays: StatsView and the sync panel still read it. */}
               </>
             );
           })()}
