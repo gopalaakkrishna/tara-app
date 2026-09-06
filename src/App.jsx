@@ -5633,8 +5633,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.287-commits-must-say-they-are-committed';
-const TARA_VERSION_DISPLAY='Tara 13.4.287';
+const BASELINE_VERSION='2026.09.06-v13.4.288-one-lock-rule-everywhere';
+const TARA_VERSION_DISPLAY='Tara 13.4.288';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17492,7 +17492,10 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   const _post=Number(analysis?.rawProbAbove??0);
   const _hasPost=Number.isFinite(_post)&&_post>0;
   const _dir=taraCall.snapshot?taraCall.snapshot.call:taraCall.direction;
-  const _isLocked=taraCall.snapshot&&_dir!=='SIT_OUT'&&taraCall.snapshot.call!=='NO_TRADE';
+  // V13.4.288: three ad-hoc conditions standing in for one. This gates the SIZE
+  //   recommendation and the trajectory row, so an uncommitted snapshot could size
+  //   a position that was never locked.
+  const _isLocked=readLockState(taraCall.snapshot).tradeable;
   // ── Edge vs Kalshi ── Tara's directional confidence MINUS Kalshi's implied directional probability
   let _edge=null,_edgeColor=null,_edgeLabel=null;
   if(_hasPost&&kalshiYesPrice!=null&&_dir&&(_dir==='UP'||_dir==='DOWN')){
@@ -17846,7 +17849,14 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     //   _normalizeLegacySnap. Kept as variables to avoid touching the many
     //   ternary branches below — they just always evaluate to false now.
     const isNoGoSnap=false;
-    const isLockedSnap=snap&&snap.call!=='SIT_OUT'&&!isNoGoSnap;
+    // V13.4.288: was `snap && call!==SIT_OUT` -- presence of a non-sit-out snapshot,
+    //   not commitment. Equivalent only while every snapshot happens to carry
+    //   locked:true, which was false for eight writers until v287. Routed through the
+    //   authority so it cannot drift again. Promoted legacy sit-outs still read
+    //   tradeable here (the normaliser gives them a direction AND locked:true) --
+    //   that is deliberate: isOverrideSitOut below is what renders SITTING OUT and
+    //   suppresses the Follow-Tara button for them.
+    const isLockedSnap=readLockState(snap).tradeable&&!isNoGoSnap;
     const isSatOutSnap=false;
     // V5.6.5: USER-VISIBLE STATES.
     //   No snapshot yet     → SCANNING (no direction, no UP/DOWN reveal)
@@ -26215,7 +26225,11 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
   let _snap=null,_snapLocked=false,_snapDir=null;
   try{
     _snap=taraCall?.snapshot||null;
-    _snapLocked=!!(_snap&&(_snap.call==='UP'||_snap.call==='DOWN'));
+    // V13.4.288: this was the presence-of-a-direction test in its purest form --
+    //   exactly the shape that produced the v275 and v279 bugs. It also fabricates a
+    //   lockInfo object downstream when analysis.lockInfo is null, so a lean could be
+    //   narrated as a lock in the brain view.
+    _snapLocked=readLockState(_snap).tradeable;
     _snapDir=_snapLocked?_snap.call:null;
   }catch(_){ /* snapshot unreadable — fall through */ }
   const isLocked=_snapLocked||prediction.includes('CONFIRMED');
@@ -53507,7 +53521,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const elapsed=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
               if(elapsed<=0)return null;
               const tc=taraCall;
-              const isLocked=taraCallSnapshotRef.current!==null&&taraCallSnapshotRef.current.call!=='SIT_OUT';
+              // V13.4.288: was "a snapshot exists and is not a sit-out". Same
+              //   presence-is-commitment mistake; now asks the authority.
+              const isLocked=readLockState(taraCallSnapshotRef.current).tradeable;
               const isSitOut=taraCallSnapshotRef.current?.call==='SIT_OUT'||(tc?.call==='SIT_OUT'&&analysis?.isSystemLocked);
               const isCall=tc?.call==='UP'||tc?.call==='DOWN';
               const samplesLeft=Math.max(0,(tc?.needSamples||3)-(tc?.samples||0));
@@ -54007,15 +54023,34 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           </div>
           {/* Current call direction + price */}
           <div className="flex items-center gap-2 text-xs tabular-nums">
-            {taraCall?.snapshot?.call&&<span className={'font-bold px-2 py-1 rounded-lg '+(taraCall.snapshot.call==='UP'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-rose-500/15 text-rose-400 border border-rose-500/30')}>{taraCall.snapshot.call==='UP'?'▲ UP':'▼ DN'} {(()=>{
-              // V13.4.283: also read the phantom `snapshot.posterior`. Guarded by a
-              //   ternary, so instead of a wrong number it silently printed NOTHING
-              //   -- this badge has never shown a percentage. readLockState gives the
-              //   same figure the rest of the app shows.
-              const _c=readLockState(taraCall.snapshot).confidence;
-              return _c>0?_c+'%':'';
-            })()}</span>}
-            {!taraCall?.snapshot?.call&&<span className="text-[#EDEDED]/40 italic">scanning</span>}
+            {/* V13.4.288: this badge had exactly two visual states and picked between
+                them with `call==='UP' ? UP : DN`. Every non-UP value therefore rendered
+                as a DOWN call — so a committed SIT_OUT showed "▼ DN 62%" in rose, with a
+                confidence attached, while TARA'S CALL and THIS TRADE both read SITTING
+                OUT. This is the one element pinned on screen at all times on mobile, and
+                a reader had no way to tell a sit-out from a short.
+                Routed through readLockState: `tradeable` is the only thing that earns a
+                direction arrow, a committed sit-out gets its own state, and anything
+                uncommitted stays "scanning". */}
+            {(()=>{
+              const _ls=readLockState(taraCall?.snapshot);
+              if(_ls.tradeable){
+                const _up=_ls.dir==='UP';
+                return(
+                  <span className={'font-bold px-2 py-1 rounded-lg '+(_up?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-rose-500/15 text-rose-400 border border-rose-500/30')}>
+                    {_up?'▲ UP':'▼ DN'} {_ls.confidence>0?_ls.confidence+'%':''}
+                  </span>
+                );
+              }
+              if(_ls.satOut){
+                return(
+                  <span className="font-bold px-2 py-1 rounded-lg bg-amber-500/12 text-amber-400/90 border border-amber-500/30">
+                    · SITTING OUT{_ls.intendedDir?' (leaned '+_ls.intendedDir+')':''}
+                  </span>
+                );
+              }
+              return <span className="text-[#EDEDED]/40 italic">scanning</span>;
+            })()}
             <span className="text-white font-bold">${Number(currentPrice).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
           </div>
           {/* Quick actions */}
