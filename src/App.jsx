@@ -5014,7 +5014,7 @@ const computeAutoExecSize=(inputs)=>{
   // ── Step 3: cap check (V9.19.16 wall behavior, with super/manual bypass) ──
   const cap=Math.max(0,Number(maxBetPerTrade)||0);
   const capExceeded=afterEntryModeDollars>cap;
-  const bypassAllowed=tier==='super'||manualBypass===true;
+  const bypassAllowed=NO_RISK_RAILS||tier==='super'||manualBypass===true;
 
   // Default: sit out if over cap
   if(capExceeded&&!bypassAllowed){
@@ -5510,8 +5510,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.250-no-gates';
-const TARA_VERSION_DISPLAY='Tara 13.4.250';
+const BASELINE_VERSION='2026.09.06-v13.4.251-no-risk-rails';
+const TARA_VERSION_DISPLAY='Tara 13.4.251';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5602,6 +5602,24 @@ const _SITOUT_KEEP=new Set([
 //     95c+    n=13   -15.1c/ct
 //   Set NO_ENTRY_GATES=false to restore the 55-70c band everywhere at once.
 const NO_ENTRY_GATES=true;
+// V13.4.251 — RISK RAILS OFF. The per-trade size cap no longer REFUSES a trade;
+//   it clamps to the cap instead (the same path super-confluence already used),
+//   so nothing is blocked on size any more.
+//
+//   IMPORTANT, and not what anyone would assume from the settings screen: the
+//   other three rails were ALREADY not enforced. maxDailyLoss,
+//   maxAutoTradesPerDay and autoExecCooldownUntil are written by the settings
+//   UI and read by the hydrator, and are compared against NOTHING anywhere in
+//   this file -- _runEntry, the rebuilt order path, references none of them.
+//   The entry effect rebuilt on 2026-09-05 restored ordering without
+//   re-wiring the day caps. So turning this flag off restores only the size
+//   refusal; it does NOT restore a daily loss cap, because there is not one
+//   to restore. Those would have to be written from scratch.
+//
+//   Still live and deliberately untouched: the kill switch, plus the enabled
+//   and dryRun switches -- the three things that decide whether an order
+//   happens at all.
+const NO_RISK_RAILS=true;
 const getEntryMinCost=()=>{if(NO_ENTRY_GATES)return 0;try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:55;}catch(_e13428a){return 55;}};
 const getEntryMaxCost=()=>{if(NO_ENTRY_GATES)return 100;try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e13428b){return 70;}};
 // V13.4.180: SLIM signal telemetry for cloud sync. The V10.7.58 egress fix stripped
@@ -44955,6 +44973,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const s=autoExecSettings||{};
     if(!s.enabled)return{ok:false,reason:'disarmed'};
     if(killSwitchEngaged)return{ok:false,reason:'kill-switch'};
+    // V13.4.251: there is NO daily-loss, trades-per-day or loss-streak check
+    //   here, and none anywhere else either -- maxDailyLoss,
+    //   maxAutoTradesPerDay and autoExecCooldownUntil are never compared
+    //   against anything in this file. The settings UI for them is live and
+    //   looks authoritative, which makes this worse rather than better. If
+    //   those rails are ever wanted back they must be WRITTEN, not re-enabled.
     // Dry run never reaches the network — kalshiPlaceOrder and friends return
     // synthetic orders — so requiring credentials to simulate would block the
     // exact rehearsal this mode exists for. Live runs still demand them.
