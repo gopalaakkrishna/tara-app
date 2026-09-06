@@ -495,6 +495,35 @@ const _execCostCents=(dir,maxAgeMs=60000)=>{
   return null;
 };
 
+// What one contract of an OPEN position could be sold for right now — the
+// mirror of _execCostCents, which prices getting in. Exiting crosses the other
+// side of the book:
+//   UP   (long YES) -> we sell YES into the bid.
+//   DOWN (long NO)  -> we sell NO, which is buying YES at the ask, so the NO
+//                      bid is 100 - yes ask.
+// Returns null on a missing or stale quote so callers hold rather than act on
+// a price they cannot trust.
+const _exitValueCents=(dir,maxAgeMs=30000)=>{
+  const q=_kalshiQuote;
+  if(!q||!q.at||(Date.now()-q.at)>maxAgeMs)return null;
+  if(dir==='UP')  return (q.bid!=null&&isFinite(q.bid))?q.bid:null;
+  if(dir==='DOWN')return (q.ask!=null&&isFinite(q.ask))?(100-q.ask):null;
+  return null;
+};
+
+// The YES limit price that closes the position immediately, i.e. crossing.
+// Exits are not laddered: a stop or a closing bell is not the moment to shave a
+// cent and risk not filling at all.
+//   UP   sell YES at the bid.
+//   DOWN sell NO by buying YES at the ask.
+const _exitYesLimitCents=(dir,maxAgeMs=30000)=>{
+  const q=_kalshiQuote;
+  if(!q||!q.at||(Date.now()-q.at)>maxAgeMs)return null;
+  if(dir==='UP')  return (q.bid!=null&&isFinite(q.bid))?q.bid:null;
+  if(dir==='DOWN')return (q.ask!=null&&isFinite(q.ask))?q.ask:null;
+  return null;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // V11 SELECTIVITY ENGINE — data-driven gate on all directional snap commits.
 //   Basis: 2,736 resolved forward-test trades (live Kalshi, Jun 2026).
@@ -44910,6 +44939,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const filledAt=res.rung?res.rung.priceCents:costCents;
       setAutoOrderState(prev=>Object.assign({},prev||{},{
         status:'filled',dryRun,order:res.order,
+        filledCount:(res.normalized&&res.normalized.filledCount)||Number(res.order&&res.order.count)||0,
         filledAtCents:filledAt,
         tookSpread:!!(res.rung&&res.rung.takesSpread),
         // Realised saving versus crossing — the number V13.4.228 says decides
@@ -44953,6 +44983,123 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const id=setInterval(tick,2000);
     return()=>{stopped=true;clearInterval(id);};
   },[autoExecSettings,killSwitchEngaged,_runEntry]);
+
+  // ── EXIT MANAGEMENT ───────────────────────────────────────────────────────
+  // An armed entry that nothing closes is worse than no automation at all, so
+  // these run whenever a position is open. Three paths race and the first to
+  // fire wins, which is how the settings panel has always described it:
+  //
+  //   take-profit  exit value >= autoExitOffer
+  //   time         seconds left <= autoExitSecLeft
+  //   stop-loss    exit value <= fill - stopLossDeltaCents   (0 disables)
+  //
+  // Prices come from _exitValueCents, the mirror of the entry helper: getting
+  // out crosses the other side of the book, so a long YES is marked at the bid
+  // and a long NO at 100 - ask. A stale quote returns null and the position is
+  // held rather than closed on a price we cannot trust.
+  //
+  // Exits are NOT laddered. The ladder exists to shave a cent on entry, where
+  // not filling just means no trade; on a stop or a closing bell, not filling
+  // means carrying the position, so these cross deliberately.
+  //
+  // KILL SWITCH: it blocks entries but deliberately does NOT block exits. A
+  // stop that stops working the moment you hit the big red button is a trap,
+  // and the greater risk is an open position nobody is managing. Flip the
+  // shouldHold check below if you would rather it froze everything.
+  const _exitBusyRef=useRef(false);
+  const _exitFiredForRef=useRef(null);
+
+  const _runExit=useCallback(async(why)=>{
+    if(_exitBusyRef.current)return{ok:false,reason:'busy'};
+    const st=autoOrderState;
+    if(!st||st.status!=='filled')return{ok:false,reason:'no-position'};
+    const dir=st.dir;
+    if(dir!=='UP'&&dir!=='DOWN')return{ok:false,reason:'no-dir'};
+    const creds=kalshiCreds||{};
+    if(!creds.apiKeyId||!creds.privateKeyPem)return{ok:false,reason:'no-credentials'};
+    const count=Math.max(1,Math.floor(Number(st.filledCount)||0));
+    if(!(count>0))return{ok:false,reason:'no-count'};
+    const limitCents=_exitYesLimitCents(dir);
+    if(limitCents==null)return{ok:false,reason:'no-usable-quote'};
+
+    const key=String(st.at||0);
+    if(_exitFiredForRef.current===key)return{ok:false,reason:'already-exiting'};
+    _exitFiredForRef.current=key;
+    _exitBusyRef.current=true;
+
+    const dryRun=st.dryRun!==false;
+    setAutoOrderState(prev=>Object.assign({},prev||{},{status:'exiting',exitReason:why,at:Date.now()}));
+    try{
+      const res=await kalshiExitPosition({
+        apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,
+        ticker:st.ticker,side:dir==='UP'?'yes':'no',
+        count,limitCents,dryRun,
+      });
+      if(!res.ok){
+        // Leave the ref set so a failed exit does not retry in a tight loop;
+        // it is surfaced instead, because silently hammering a broken exit is
+        // how a bad position gets worse.
+        setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:'exit failed: '+res.reason,exitReason:why,at:Date.now()}));
+        return res;
+      }
+      const exitVal=_exitValueCents(dir);
+      setAutoOrderState(prev=>Object.assign({},prev||{},{
+        status:'exited',exitReason:why,exitOrder:res.order,
+        exitAtCents:limitCents,
+        // Realised move per contract against the entry fill, so a session can
+        // be judged on what it actually got rather than on the signal.
+        pnlCentsPerContract:(exitVal!=null&&Number.isFinite(Number(prev&&prev.filledAtCents)))
+          ?(exitVal-Number(prev.filledAtCents)):null,
+        at:Date.now(),
+      }));
+      return res;
+    }catch(e){
+      const msg=String((e&&e.message)||e);
+      setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:'exit threw: '+msg,at:Date.now()}));
+      return{ok:false,reason:msg};
+    }finally{
+      _exitBusyRef.current=false;
+    }
+  },[autoOrderState,kalshiCreds]);
+
+  useEffect(()=>{
+    const st=autoOrderState;
+    if(!st||st.status!=='filled')return;      // only while actually holding
+    const s=autoExecSettings||{};
+    const dir=st.dir;
+    if(dir!=='UP'&&dir!=='DOWN')return;
+    let stopped=false;
+
+    const check=()=>{
+      if(stopped||_exitBusyRef.current)return;
+      const value=_exitValueCents(dir);
+      if(value==null)return;                  // stale quote: hold, do not guess
+
+      const secsLeft=(Number(timeState&&timeState.minsRemaining)||0)*60
+                    +(Number(timeState&&timeState.secsRemaining)||0);
+      const fill=Number(st.filledAtCents);
+      const slDelta=Math.max(0,Number(s.stopLossDeltaCents)||0);
+      const tp=Number(s.autoExitOffer)>0?Number(s.autoExitOffer):null;
+      const tExit=Number(s.autoExitSecLeft)>0?Number(s.autoExitSecLeft):null;
+
+      let why=null;
+      if(slDelta>0&&Number.isFinite(fill)&&value<=(fill-slDelta)){
+        why='stop-loss '+value+'c <= '+(fill-slDelta)+'c';
+      }else if(tp!=null&&value>=tp){
+        why='take-profit '+value+'c >= '+tp+'c';
+      }else if(tExit!=null&&secsLeft>0&&secsLeft<=tExit){
+        why='time '+Math.round(secsLeft)+'s left <= '+tExit+'s';
+      }
+      if(!why)return;
+      _runExit(why).then(r=>{
+        try{console.info('[exit]',why,'->',(r&&r.ok)?'closed':'failed ('+(r&&r.reason)+')');}catch(_e){}
+      });
+    };
+
+    const id=setInterval(check,2000);
+    check();
+    return()=>{stopped=true;clearInterval(id);};
+  },[autoOrderState,autoExecSettings,timeState,_runExit]);
 
   // ── V10.2.10 — POSITION RECONCILIATION POLL ────────────────────────────────
   // Polls /portfolio/positions every 30s and detects three drift categories
