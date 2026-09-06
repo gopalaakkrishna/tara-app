@@ -5522,8 +5522,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.269-retire-duplicate-headline';
-const TARA_VERSION_DISPLAY='Tara 13.4.269';
+const BASELINE_VERSION='2026.09.06-v13.4.270-coach-is-alerts-only';
+const TARA_VERSION_DISPLAY='Tara 13.4.270';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19377,9 +19377,13 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       cards.push({tone:'info',icon:'⏱',title:'Last 45s · offer holding',body:`Offer $${_offerVal.toFixed(2)} with ${_secLeft}s left. Ride to close — time decay is now strongly in your favor.`});
     }
 
-    if(cards.length===0){
-      cards.push({tone:'info',icon:'·',title:'Position open · all clear',body:`${userPosition} from $${(targetMargin||0).toFixed(0)}, ${_winning?'+':''}${Math.round(_favoredGap)}bps. ${Math.floor(_secLeft/60)}m ${_secLeft%60}s left. Tara ${_taraAligned?'aligned':_taraOpposed?'opposed':'neutral'}. No active alerts.`});
-    }
+    // V13.4.270: the "Position open · all clear" filler is gone. It restated what
+    //   THIS TRADE stage 2 now says in plainer words, and it forced this whole
+    //   panel to be on screen permanently just to announce that nothing was wrong.
+    //   With no filler, an empty cards array means exactly that -- nothing needs
+    //   attention -- and the panel takes no space at all (see the null return
+    //   below). What survives here is only the part THIS TRADE cannot cover:
+    //   time-sensitive ALERTS, which is what this component was actually good at.
 
     // V9.9.0: Persistent reversal-risk card. Surfaces the risk flag throughout the
     //   trade so the user sees it not just at lock but all the way through. Inserted
@@ -19514,6 +19518,12 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     //   red while losing, green while winning, neutral while flat. The old
     //   green-always box looked like good news during a losing trade.
     const _frameTone=_winning?'rgba(35,185,129,0.34)':_losing?'rgba(232,69,94,0.34)':'rgba(237,237,237,0.14)';
+    // V13.4.270: nothing to say and no live order -> render nothing. THIS TRADE
+    //   owns the running commentary now; this panel earns its space only when it
+    //   has a real alert, or an order strip with the kill switch on it. The cards
+    //   array is still BUILT either way, above, so the Discord urgent-alert path
+    //   is untouched by this.
+    if(cards.length===0&&!autoOrderState)return null;
     return React.createElement('div',{
       className:'rounded-[10px] overflow-hidden',
       style:{border:'1px solid '+_frameTone,background:'#0A0A0E'},
@@ -19523,7 +19533,10 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
                     // V13.4.263: was '★ live trade coach', which read as its own product.
           //   It is the live read on the call rendered directly below it, so the
           //   label says that instead.
-          React.createElement('span',{className:UI2_LABEL2},'live on this call'),
+          // V13.4.270: 'live on this call' described the whole panel back when it
+          //   carried the running numbers. THIS TRADE carries those now, so what is
+          //   left here is alerts, and the label says that.
+          React.createElement('span',{className:UI2_LABEL2},'alerts'),
           // V9.1.8: Market-character badges — surfaces windowAmplitude + regime so user
           //   sees what kind of market they're trading in. Tara already classifies these
           //   internally (and weights load per-regime); now they're visible at a glance.
