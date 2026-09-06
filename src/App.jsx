@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.267-clear-preset-exit-rules';
-const TARA_VERSION_DISPLAY='Tara 13.4.267';
+const BASELINE_VERSION='2026.09.06-v13.4.268-this-trade-card';
+const TARA_VERSION_DISPLAY='Tara 13.4.268';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16208,7 +16208,11 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   //   'snapshot' either way (autoExecSettings is not reachable here, but that IS the
   //   function's own default when signalSource is omitted, so this matches the common
   //   case exactly). Toggle: localStorage 'taraCoachCall'='off' to hide.
-  const on=(function(){try{return localStorage.getItem('taraCoachCall')!=='off';}catch(_e){return true;}})();
+  // V13.4.268: default OFF. Every line this panel showed is now stage 1 and
+  //   stage 2 of THIS TRADE, in one place instead of a third column. It was
+  //   also the panel that disagreed with Tara's Call about the same number.
+  //   Toggle back on with localStorage taraCoachCall=on.
+  const on=(function(){try{return localStorage.getItem('taraCoachCall')==='on';}catch(_e){return false;}})();
   if(!on)return null;
   // V13.4.116: SECOND fix needed -- the 115 fix fed taraCall.call (a FRESH live
   //   computation from analysis.rawProbAbove on every render, confirmed by reading its own
@@ -18896,6 +18900,195 @@ function BestPracticesModal({open,onClose}){
         },'Got it'),
       ),
     ),
+  );
+}
+
+// ── V13.4.268: THIS TRADE ────────────────────────────────────────────────────
+// The card from the mockup, and the actual merge he asked for. One trade told
+// as three numbered stages in plain sentences, in one place:
+//
+//   (1) THE CALL      what Tara decided, and why
+//   (2) HOW IT'S GOING  what the position is worth right now
+//   (3) WHAT IT DID   what the machine actually placed, and how it gets out
+//
+// v263 moved LiveTradeCoach next to Tara's Call and called that the merge. It
+// was not: the coach renders null without an open position, so with no trade on
+// he still saw the old scattered layout -- TARA'S CALL in one column, TRADE
+// COACH in another, AUTO-EXEC in a third, all describing the same round.
+//
+// This card is ALWAYS present. Stages 2 and 3 stay visible with no position and
+// say so, because "nothing placed yet" is information about this trade too, and
+// a card that changes shape is a card you have to re-read every time.
+//
+// Numbers freeze on commit, never drift -- the v265 rule. Confidence, reason and
+// direction all come from the committed snapshot when one exists.
+function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYesPrice,
+                        autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat}){
+  if(!taraCall)return null;
+
+  // ── stage 1: what Tara decided ──────────────────────────────────────────
+  const _snap=(snapshot&&snapshot.locked)?snapshot:null;
+  const _snapDir=(_snap&&(_snap.call==='UP'||_snap.call==='DOWN'))?_snap.call:null;
+  const _satOut=!!(_snap&&_snap.call==='SIT_OUT');
+  const _liveDir=(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call
+    :(taraCall.direction==='UP'||taraCall.direction==='DOWN')?taraCall.direction:null;
+  // committed snapshot wins over the live read, always
+  const dir=_snapDir||(_satOut?null:_liveDir);
+  const _leanDir=_satOut?(_snap._intendedDir||_snap.direction||null):null;
+  const state=_snapDir?'LOCKED':_satOut?'SITTING OUT':_liveDir?'LEANING':'SCANNING';
+  const _src=_snap||taraCall;
+  const conf=Math.round(Number(_src&&_src.confidence)||0);
+  const histWR=Number(taraCall._v10_7_43_calHistWR);
+  const _k=Number(kalshiYesPrice);
+  const _kValid=Number.isFinite(_k)&&_k>0&&_k<100;
+  const _edgeDir=dir||_leanDir;
+  // Edge is Tara's confidence minus what the market already charges for the same
+  // side. kalshiYesPrice is the UP price; a DOWN contract costs 100 minus it.
+  const edge=(_kValid&&conf>0&&_edgeDir)?Math.round(conf-(_edgeDir==='UP'?_k:(100-_k))):null;
+  const why=String((_src&&_src.reason)||taraCall.reason||'')
+    .replace(/^\[V?\d+[\d.]*\s*[A-Z0-9\-]*\]\s*/,'')
+    .split(/\s*—\s*was:\s*/)[0].trim();
+
+  const _secsLeft=timeState?((Number(timeState.minsRemaining)||0)*60+(Number(timeState.secsRemaining)||0)):null;
+  const _clock=_secsLeft!=null?Math.floor(_secsLeft/60)+':'+String(_secsLeft%60).padStart(2,'0'):null;
+  const _closeLabel=(()=>{
+    if(_secsLeft==null)return null;
+    try{
+      const d=new Date(Date.now()+_secsLeft*1000);
+      return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:timeFormat==='12h'});
+    }catch(_e){return null;}
+  })();
+
+  const GREEN='#23B981', RED='#E8455E', GOLD='#D4A03A', DIM='rgba(237,237,237,0.42)';
+  const dirTone=dir==='UP'?GREEN:dir==='DOWN'?RED:GOLD;
+
+  // ── stage 2: what it is worth right now ─────────────────────────────────
+  const _fill=Number(autoOrderState&&autoOrderState.fillPrice);
+  const _haveFill=Number.isFinite(_fill)&&_fill>0;
+  const _side=(autoOrderState&&autoOrderState.dir)||dir||userPosition;
+  const _worth=(_kValid&&_side)?Math.round(_side==='UP'?_k:(100-_k)):null;
+  const _delta=(_haveFill&&_worth!=null)?(_worth-_fill):null;
+  const _peak=Number(trailPeakCents);
+  const _havePeak=Number.isFinite(_peak)&&_peak>0;
+
+  // ── stage 3: what the machine placed ────────────────────────────────────
+  const _st=String((autoOrderState&&autoOrderState.status)||'');
+  const _count=Number(autoOrderState&&autoOrderState.count)||0;
+  const _dry=!!(autoOrderState&&autoOrderState.dryRun);
+  const _placed=_haveFill&&_count>0;
+  const _tp=Number(autoExecSettings&&autoExecSettings.autoExitOffer)||0;
+  const _sl=Number(autoExecSettings&&autoExecSettings.stopLossDeltaCents)||0;
+
+  const Stage=({n,title,badge,badgeTone,children})=>(
+    <div className="px-4 py-3.5 border-t border-[#16161c] first:border-t-0">
+      <div className="flex items-baseline justify-between gap-2 mb-2">
+        <div className="flex items-baseline gap-2">
+          <span className="inline-flex items-center justify-center w-[17px] h-[17px] rounded-full text-[9px] font-bold tabular-nums shrink-0"
+                style={{border:'1px solid rgba(237,237,237,0.18)',color:'rgba(237,237,237,0.5)'}}>{n}</span>
+          <span className="text-[9.5px] uppercase font-bold tracking-[0.15em] text-[#EDEDED]/40">{title}</span>
+        </div>
+        {badge&&<span className="text-[9.5px] uppercase font-bold tracking-[0.12em]" style={{color:badgeTone}}>{badge}</span>}
+      </div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="border border-[#1B1B22] bg-[#0A0A0E] rounded-[10px] overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-[#16161c] flex items-baseline justify-between gap-2"
+           style={{background:dirTone+'0A'}}>
+        <span className="text-[9.5px] uppercase font-bold tracking-[0.15em]" style={{color:dirTone+'BB'}}>this trade</span>
+        <span className="text-[9.5px] uppercase font-bold tracking-[0.12em] text-[#EDEDED]/30 tabular-nums">
+          {String(windowType||'').toUpperCase()}{_closeLabel?' · closes '+_closeLabel:''}
+        </span>
+      </div>
+
+      {/* ── 1 ── */}
+      <Stage n="1" title="the call" badge={state} badgeTone={_snapDir?dirTone:_satOut?GOLD:DIM}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="flex items-baseline gap-2.5 min-w-0">
+            <span className="text-[26px] leading-none" style={{color:dirTone}}>
+              {dir==='UP'?'↑':dir==='DOWN'?'↓':'·'}
+            </span>
+            <span className="text-[30px] leading-none font-semibold tracking-[-0.02em] truncate" style={{color:dirTone}}>
+              {dir||(_satOut?'SITTING OUT':'SCANNING')}
+            </span>
+          </div>
+          {_clock&&<span className="text-[19px] tabular-nums shrink-0" style={{color:GOLD}}>{_clock}</span>}
+        </div>
+        {_satOut&&_leanDir&&(
+          <div className="text-[11px] text-[#EDEDED]/45 mt-1.5">would have leaned {_leanDir}</div>
+        )}
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 mt-3">
+          {conf>0&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
+            posterior <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{conf}%</span></span>}
+          {Number.isFinite(histWR)&&histWR>0&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
+            hist wr <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{Math.round(histWR)}%</span></span>}
+          {edge!=null&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
+            edge <span className="text-[11px] tabular-nums font-bold ml-0.5"
+                       style={{color:edge>=0?GREEN:RED}}>{edge>0?'+':''}{edge}pt</span></span>}
+        </div>
+        {why&&(
+          <div className="mt-3 px-3 py-2 rounded-lg flex items-baseline justify-between gap-3"
+               style={{background:'rgba(237,237,237,0.03)',border:'1px solid #16161c'}}>
+            <span className="text-[12px] text-[#EDEDED]/70 leading-snug min-w-0">{why}</span>
+            <span className="text-[8.5px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/25 shrink-0">why</span>
+          </div>
+        )}
+      </Stage>
+
+      {/* ── 2 ── */}
+      <Stage n="2" title="how it's going"
+             badge={!_placed?'not in':_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat'}
+             badgeTone={!_placed?DIM:_delta>0?GREEN:_delta<0?RED:DIM}>
+        {_placed&&_worth!=null?(
+          <>
+            <div className="text-[15px] leading-snug text-[#EDEDED]/85">
+              Worth <span className="font-semibold tabular-nums" style={{color:_delta>0?GREEN:_delta<0?RED:'#EDEDED'}}>{_worth}¢</span>
+              {_delta!=null&&<>, {_delta>0?'up':_delta<0?'down':'flat'}{_delta!==0?' '+Math.abs(_delta)+'¢':''} from entry.</>}
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 mt-2.5">
+              {_havePeak&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
+                peak <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{Math.round(_peak)}¢</span></span>}
+              <span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
+                trail arms at <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{TRAIL_ARM_C}¢</span></span>
+            </div>
+          </>
+        ):(
+          <div className="text-[13px] text-[#EDEDED]/40 leading-snug">
+            {state==='LOCKED'?'Locked, but nothing filled yet.'
+              :_satOut?'Sitting this one out, so there is nothing to watch.'
+              :'No position on this window yet.'}
+          </div>
+        )}
+      </Stage>
+
+      {/* ── 3 ── */}
+      <Stage n="3" title="what it did"
+             badge={!_placed?(_st?_st.toUpperCase():'nothing yet'):(_dry?'simulated':'filled · live')}
+             badgeTone={!_placed?DIM:_dry?GOLD:GREEN}>
+        {_placed?(
+          <div className="text-[15px] leading-snug text-[#EDEDED]/85">
+            {_dry?'Would have bought':'Bought'} <span className="font-semibold tabular-nums">{_count}</span> at{' '}
+            <span className="font-semibold tabular-nums">{Math.round(_fill)}¢</span>
+            {' — '}<span className="tabular-nums">${((_fill*_count)/100).toFixed(2)}</span> in.
+          </div>
+        ):(
+          <div className="text-[13px] text-[#EDEDED]/40 leading-snug">
+            {autoExecSettings&&autoExecSettings.enabled===false
+              ?'Auto-exec is off — you place this one yourself.'
+              :'No order placed on this window.'}
+          </div>
+        )}
+        <div className="text-[12px] text-[#EDEDED]/45 mt-2 leading-snug">
+          {_tp>0&&_tp<=TRAIL_ARM_C
+            ? <span style={{color:'rgba(232,69,94,0.85)'}}>Fixed target at {_tp}¢ fires before the trail can arm at {TRAIL_ARM_C}¢.</span>
+            : (_tp>0||_sl>0)
+              ? <>Sells itself {TRAIL_GIVEBACK_C}¢ off the high, plus a fixed rule you set{_tp>0?' (take '+_tp+'¢)':''}{_sl>0?' (cut '+_sl+'¢)':''}.</>
+              : <>Sells itself {TRAIL_GIVEBACK_C}¢ off the high. No fixed target.</>}
+        </div>
+      </Stage>
+    </div>
   );
 }
 
@@ -52872,6 +53065,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               Tara's Call. The wrapper is the grid child now, so the column
               count is unchanged and auto-rows-fr still matches heights. */}
           <div className="flex flex-col gap-3 min-w-0">
+          {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
+              numbered stages, always present. Replaces the scattered TARA'S CALL
+              headline + TRADE COACH + auto-exec status that all described the same
+              round from three different columns. */}
+          <ThisTradeCard
+            taraCall={taraCall}
+            snapshot={taraCallSnapshotRef.current||null}
+            analysis={analysis}
+            timeState={timeState}
+            windowType={windowType}
+            kalshiYesPrice={kalshiYesPrice}
+            autoOrderState={autoOrderState}
+            userPosition={userPosition}
+            trailPeakCents={_exitTrailRef.current?.peak}
+            autoExecSettings={autoExecSettings}
+            timeFormat={timeFormat}
+          />
+
           {/* V13.4.263: stages 2 and 3 of the trade -- how it is going, and what
               the auto-exec did about it. Returns null with no open position, so it
               leads this column only while a trade is live, which is the one time
