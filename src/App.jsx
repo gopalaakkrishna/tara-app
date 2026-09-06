@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.261-stoploss-clear-actually-fires';
-const TARA_VERSION_DISPLAY='Tara 13.4.261';
+const BASELINE_VERSION='2026.09.06-v13.4.262-home-surface';
+const TARA_VERSION_DISPLAY='Tara 13.4.262';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14800,7 +14800,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
             const n=v?.n||0,correct=v?.correct||0;
             const wr=n>0?correct/n:0;
             return(
-              <div key={key} className="flex items-center justify-between bg-[#101014] rounded-lg px-2.5 py-2 border border-[#24242E]">
+              <div key={key} className="flex items-center justify-between bg-[#0A0A0E] rounded-lg px-2.5 py-2 border border-[#24242E]">
                 <span className={'text-xs text-[#EDEDED]/70'}>{_labels[key]||key}</span>
                 <div className="flex items-center gap-2">
                   {n<30&&n>0&&<span className={'text-[9px] text-[#EDEDED]/30 italic'}>low-n</span>}
@@ -18650,7 +18650,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
       ),
     ),
     open&&React.createElement('div',{
-      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#101014] border border-[#2A2A34] rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
+      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#0A0A0E] border border-[#1B1B22] rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
       style:{boxShadow:'0 8px 32px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(35,185,129,0.06)'},
     },
       filtered.slice(0,15).map((w)=>React.createElement('div',{
@@ -18688,7 +18688,7 @@ function BestPracticesModal({open,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#101014] border border-[#2A2A34] rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(35,185,129,0.06)'},
     },
@@ -19493,7 +19493,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#101014] border border-[#2A2A34] rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(35,185,129,0.06)'},
     },
@@ -23617,7 +23617,7 @@ function TaraLearningsModal({learnings,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#101014] border border-[#2A2A34] rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
+      className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(35,185,129,0.06)'},
     },
@@ -25068,7 +25068,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         });
         const _activeTiers=_tiers.filter(t=>_stats[t].wins+_stats[t].losses>0);
         if(_activeTiers.length===0)return null;
-        return React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] mb-4'},
+        return React.createElement('div',{className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 mb-4'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold'},'Win rate by tier'),
             React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/30'},filter==='15m'?'15m only':filter==='5m'?'5m only':'all windows'),
@@ -25136,7 +25136,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             // Sort newest first
             const days=Array.from(byDay.entries()).map(([k,v])=>({key:k,...v})).sort((a,b)=>b.date-a.date);
             if(days.length===0){
-              return React.createElement('div',{className:'bg-[#101014] border border-[#24242E] rounded-xl p-8 text-center text-[#EDEDED]/40 italic'},'No data yet.');
+              return React.createElement('div',{className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-8 text-center text-[#EDEDED]/40 italic'},'No data yet.');
             }
             return React.createElement('div',{className:'space-y-3 max-h-[65vh] overflow-y-auto pr-1'},
               days.map(day=>{
@@ -25158,7 +25158,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   else if(e.result==='SITOUT')hourBins[h].sitouts++;
                 });
                 const _maxHourTotal=Math.max(1,...hourBins.map(b=>b.total));
-                return React.createElement('div',{key:day.key,className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4'},
+                return React.createElement('div',{key:day.key,className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4'},
                   // Day header
                   React.createElement('div',{className:'flex items-baseline justify-between mb-3 flex-wrap gap-2'},
                     React.createElement('div',{className:'flex items-baseline gap-3'},
@@ -25222,7 +25222,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               }),
             );
           })()
-        : React.createElement('div',{className:'bg-[#101014] border border-[#24242E] rounded-xl overflow-hidden'},
+        : React.createElement('div',{className:'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] overflow-hidden'},
         filtered.length===0
           ? React.createElement('div',{className:'p-8 text-center text-[#EDEDED]/40 italic'},'No calls match this filter yet.')
           : (()=>{
@@ -25423,7 +25423,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#24242E] shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
+    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
       <T2Stamp code="PROJ · 042"/>
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
@@ -25911,7 +25911,7 @@ function ExecutionPanel({taraCallLog}){
   const mult=d.evNow>0?(d.evRested/d.evNow):null;
 
   return (
-    <div className="bg-[#101014] border border-[#24242E] rounded-xl p-4 sm:p-5 mb-5">
+    <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 sm:p-5 mb-5">
       <div className="text-xs uppercase tracking-[0.22em] font-bold mb-1" style={{color:'rgba(255,255,255,0.85)'}}>
         Execution <span className="text-[10px] tracking-wider ml-1 font-normal normal-case" style={{color:'rgba(255,255,255,0.34)'}}>what crossing the spread costs</span>
       </div>
@@ -25998,7 +25998,7 @@ function WindowClockPanel({taraCallLog}){
   const maxAbs=Math.max(10,...judged.map(r=>Math.abs(r.evc||0)));
 
   return (
-    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-4 sm:p-5 mb-5">
+    <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 sm:p-5 mb-5">
       <div className="text-xs uppercase tracking-[0.22em] font-bold mb-1" style={{color:T2_GOLD}}>
         Window Clock <span className="text-[10px] tracking-wider text-[#EDEDED]/30 ml-1 font-normal normal-case">your local time · every window, not just traded ones</span>
       </div>
@@ -26248,19 +26248,19 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 
         {/* Top stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5">
-          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
             <T2Stamp code="ALL · 001"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Trades</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{trades.length}</div>
             <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">resolved</div>
           </div>
-          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
             <T2Stamp code="ACC · 002"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Accuracy</div>
             <div className={'text-2xl sm:text-3xl font-bold '+(wr>=60?'text-emerald-400':wr>=50?'text-white':'text-rose-400')} style={T2_MONO_STYLE}>{trades.length>0?wr.toFixed(0):'—'}%</div>
             <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{wins}W · {losses}L</div>
           </div>
-          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
             <T2Stamp code="STR · 003"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Streak</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{(()=>{
@@ -26272,7 +26272,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
             })()}</div>
             <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#6FA98C':'rgba(232,69,94,0.72)'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
           </div>
-          <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
             <T2Stamp code="LIFE · 004"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Lifetime</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{((scorecards?.['15m']?.wins||0)/Math.max(1,(scorecards?.['15m']?.wins||0)+(scorecards?.['15m']?.losses||0))*100).toFixed(0)}%</div>
@@ -26281,7 +26281,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Insights surface */}
-        <div className="bg-[#101014] border border-[#24242E] rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="INS · 005"/>
           <div className="text-xs uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>Insights</div>
           <div className="space-y-2">
@@ -26303,7 +26303,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         <WindowClockPanel taraCallLog={taraCallLog}/>
 
         {/* Hourly heatmap */}
-        <div className="bg-[#101014] border border-[#24242E] rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="HOUR · 006"/>
           <div className="flex items-baseline justify-between mb-3">
             <div className="text-xs uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Hourly Breakdown <span className="text-[10px] tracking-wider text-[#EDEDED]/30 ml-1 font-normal normal-case">LOCAL · tap to drill</span></div>
@@ -26412,7 +26412,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 // Cohort row card — used inside StatsView
 function CohortCard({title,stamp,rows}){
   return(
-    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
       <T2Stamp code={stamp}/>
       <div className="text-[10px] uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>{title}</div>
       {rows.length===0&&<div className="text-[11px] text-[#EDEDED]/30 italic">No data</div>}
@@ -26552,7 +26552,7 @@ function TapeStrip({tapeWindows,whaleLog}){
     );
   };
   return(
-    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
       <T2Stamp code="TAPE · 030"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -26733,7 +26733,7 @@ function DepthStrip({orderBook,targetMargin}){
     );
   };
   return(
-    <div className="bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3 sm:p-4 relative">
       <T2Stamp code="DOM · BAND"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -27924,7 +27924,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   // v13.4.153: tape/bloomberg/whale derivations moved with the Live Feeds card.
 
   return(
-    <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#24242E] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
+    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
       <T2Stamp code="SCR · 008"/>
       {/* V13.4.148: Trade Coach + Hourly ladder relocated here from the middle column
           so everything read during a live window sits in one place, no scrolling.
@@ -28114,7 +28114,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
 function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource}){
   return(
-    <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#24242E] shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
+    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
         <span className={'text-xs uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold'}>Live Chart</span>
         <div className="flex gap-1">
@@ -51013,7 +51013,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: Sync progress overlay */}
       {syncState&&syncState.active&&(
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-          <div className="bg-[#101014] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
+          <div className="bg-[#0A0A0E] rounded-[10px] border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
             <div className="text-xs uppercase tracking-widest text-indigo-300 font-bold mb-3">
               {syncState.complete?'✓ Sync Complete':syncState.error?'⚠ Sync Failed':'🔄 Syncing Tara'}
             </div>
@@ -51149,7 +51149,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           <div className="flex items-center gap-1.5 shrink-0">
 
             {/* BTC */}
-            <div className={'flex bg-[#101014] border border-[#2A2A34] rounded-lg p-0.5 shrink-0'}>
+            <div className={'flex bg-[#0A0A0E] border border-[#1B1B22] rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
                 const _active=currentAsset===k;
@@ -51979,7 +51979,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
 
         {/* STATS BAR */}
-        <div className={'bg-[#101014] rounded-xl border border-[#24242E] shadow-md relative overflow-hidden shrink-0'}>
+        <div className={'bg-[#0A0A0E] rounded-[10px] border border-[#1B1B22] relative overflow-hidden shrink-0'}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
@@ -52433,7 +52433,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             view tabs get their own row, the three utilities get another. Nothing
             is clipped at any width, and each target keeps a real tap area. */}
         <div className={'flex lg:hidden flex-col gap-1 shrink-0'}>
-          <div className={'flex bg-[#101014] border border-[#24242E] rounded-xl p-1 gap-1'}>
+          <div className={'flex bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-1 gap-1'}>
             {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4 shrink-0"/>},
               {id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4 shrink-0"/>},
               {id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4 shrink-0"/>}].map(tab=>(
@@ -52443,7 +52443,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </button>
             ))}
           </div>
-          <div className={'flex bg-[#101014] border border-[#24242E] rounded-xl p-1 gap-1'}>
+          <div className={'flex bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-1 gap-1'}>
             <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex flex-1 min-w-0 justify-center"/>
             <TheoryLabBtn active={showTheoryLab} onClick={()=>setShowTheoryLab(!showTheoryLab)} cls="flex flex-1 min-w-0 justify-center"/>
             <button onClick={()=>setShowSettings(true)} className={'flex-1 min-w-0 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide text-[#EDEDED]/40 hover:text-indigo-400 transition-all'} title="Discord settings">
@@ -52490,7 +52490,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#24242E] shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
@@ -52806,7 +52806,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               gating this to 'projections' would have parked News under a tab
               that has no Tara's Call on it. DOM order puts this right after the
               prediction card once the grid collapses to one column. */}
-          <div className={'bg-[#101014] p-3 sm:p-4 rounded-xl border border-[#24242E] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
+          <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
             <T2Stamp code="FEED · 016"/>
             <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
             <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
@@ -52832,7 +52832,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Settings */}
       {showSettings&&(
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#101014] border border-[#2A2A34] rounded-xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
@@ -52979,7 +52979,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 </div>
               ))}
             </div>
-            <div className={'p-2.5 bg-[#050508] border-t border-[#24242E]'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#101014] border border-[#2A2A34] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
+            <div className={'p-2.5 bg-[#050508] border-t border-[#24242E]'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#0A0A0E] border border-[#1B1B22] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
           </div>
         )}
         {!isChatOpen&&<button onClick={()=>setIsChatOpen(true)} className={'bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 transition-transform hover:scale-105'}><IC.Msg className="w-5 h-5"/></button>}
@@ -53014,7 +53014,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
       {showAnalytics&&(
         <div className={'fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#101014] border border-[#2A2A34] rounded-xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#101014] border-b border-[#24242E] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
@@ -53661,7 +53661,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── HOW TARA WORKS GUIDE ── */}
       {showGuide&&(
         <div className={'fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#101014] border border-[#2A2A34] rounded-xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#101014] border-b border-[#24242E] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
