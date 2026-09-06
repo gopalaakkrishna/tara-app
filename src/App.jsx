@@ -5584,8 +5584,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.280-one-lock-authority';
-const TARA_VERSION_DISPLAY='Tara 13.4.280';
+const BASELINE_VERSION='2026.09.06-v13.4.281-why-must-say-something';
+const TARA_VERSION_DISPLAY='Tara 13.4.281';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19234,8 +19234,14 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   //   version tags, vote counts, per-signal arithmetic. Fine in the call log,
   //   unreadable as the one line that explains the trade. The leading clause is
   //   always the actual finding, so that is the line; the rest sits behind WHY.
-  const _whyParts=whyFull.split(/\s+·\s+/);
-  const why=_whyParts[0].trim();
+  // V13.4.281: taking ONLY the first clause could produce a bare label that
+  //   contradicts the headline right above it -- seen live as "LEANING" over a
+  //   why of "Directional lock", from the full string "Directional lock · UP 15pt
+  //   · structural momentum in 6bps window". A two-word label is never the
+  //   finding. Keep adding clauses until the line actually says something.
+  const _whyParts=whyFull.split(/\s+·\s+/).map(s=>s.trim()).filter(Boolean);
+  let why=_whyParts[0]||'';
+  for(let i=1;i<_whyParts.length&&why.length<34;i++)why+=' · '+_whyParts[i];
   const whyHasMore=whyFull.length>why.length+2;
 
   const _secsLeft=timeState?((Number(timeState.minsRemaining)||0)*60+(Number(timeState.secsRemaining)||0)):null;
