@@ -2796,6 +2796,55 @@ const readLockState=(snapshot)=>{
   };
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// V13.4.286 — readOrderState: THE ONLY PLACE THAT READS A LIVE KALSHI ORDER.
+//
+// The writer and the readers use different names for the same fields, and have
+// done since the maker/rung ladder rewrite. setAutoOrderState writes:
+//
+//     filledCount   filledAtCents   exitAtCents   rungCents   pnlCentsPerContract
+//
+// while every reader asks for:
+//
+//     count         fillPrice       exitFillPrice limitCents
+//
+// None of those reader names is ever assigned, so they are all undefined. The
+// damage is not cosmetic: THIS TRADE computes `_placed = _haveFill && _count>0`,
+// so stages 2 and 3 read "NOT IN" / "NOTHING YET" even while an order is filled
+// and live. The trade card cannot show a position at all.
+//
+// Same fix shape as readLockState (V13.4.280): one normalizer, so a rename on the
+// writer side can never again silently blank a panel that reads it. Accepts BOTH
+// spellings — the new names win, the old ones stay as fallbacks so nothing breaks
+// if a path somewhere does set them.
+const readOrderState=(s)=>{
+  const o=(s&&typeof s==='object')?s:null;
+  const num=(...vals)=>{
+    for(const v of vals){const n=Number(v);if(Number.isFinite(n))return n;}
+    return null;
+  };
+  const status=String((o&&o.status)||'');
+  const count=num(o&&o.filledCount,o&&o.count)||0;
+  const fillCents=num(o&&o.filledAtCents,o&&o.fillPrice);
+  const limitCents=num(o&&o.rungCents,o&&o.limitCents);
+  const exitCents=num(o&&o.exitAtCents,o&&o.exitFillPrice);
+  return{
+    raw:o,
+    status,
+    dir:(o&&o.dir)||null,
+    dryRun:!!(o&&o.dryRun),
+    count,
+    fillCents,
+    limitCents,
+    exitCents,
+    pnlPerContract:num(o&&o.pnlCentsPerContract),
+    // A real position exists only with BOTH a fill price and a contract count.
+    placed:!!(o&&Number.isFinite(fillCents)&&fillCents>0&&count>0),
+    exited:status==='exited',
+    errored:status==='error',
+  };
+};
+
 // ═══════════════════════════════════════
 // ICONS
 // ═══════════════════════════════════════
@@ -5584,8 +5633,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.285-right-object-this-time';
-const TARA_VERSION_DISPLAY='Tara 13.4.285';
+const BASELINE_VERSION='2026.09.06-v13.4.286-order-fields-renamed-under-readers';
+const TARA_VERSION_DISPLAY='Tara 13.4.286';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19304,8 +19353,13 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   //   is flat while he is holding. Three ways to be in, in order of how much they
   //   know: an auto fill, a manually recorded Kalshi fill, or userPosition marked
   //   with no fill price captured yet.
-  const _autoFill=Number(autoOrderState&&autoOrderState.fillPrice);
-  const _haveAutoFill=Number.isFinite(_autoFill)&&_autoFill>0&&Number(autoOrderState&&autoOrderState.count)>0;
+  // V13.4.286: read autoOrderState.fillPrice / .count -- names the writer has NEVER
+  //   set (it writes filledAtCents / filledCount). So _haveAutoFill was permanently
+  //   false and this card said NOT IN / NOTHING YET with a live filled order on the
+  //   book. Routed through readOrderState, which accepts both spellings.
+  const _ord=readOrderState(autoOrderState);
+  const _autoFill=_ord.fillCents;
+  const _haveAutoFill=_ord.placed;
   const _manFill=Number(manualKalshiEntry&&manualKalshiEntry.entryCents);
   const _haveManFill=Number.isFinite(_manFill)&&_manFill>0;
   const _isManual=!_haveAutoFill&&_haveManFill;
@@ -19313,16 +19367,16 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _haveFill=_haveAutoFill||_haveManFill;
   // marked in, but we do not know what was paid -- worth saying, not worth guessing
   const _markedOnly=!_haveFill&&(userPosition==='UP'||userPosition==='DOWN');
-  const _side=(autoOrderState&&autoOrderState.dir)||(manualKalshiEntry&&manualKalshiEntry.side)||userPosition||dir;
+  const _side=_ord.dir||(manualKalshiEntry&&manualKalshiEntry.side)||userPosition||dir;
   const _worth=(_kValid&&_side)?Math.round(_side==='UP'?_k:(100-_k)):null;
   const _delta=(_haveFill&&_worth!=null)?(_worth-_fill):null;
   const _peak=Number(trailPeakCents);
   const _havePeak=Number.isFinite(_peak)&&_peak>0;
 
   // ── stage 3: what was actually placed ───────────────────────────────────
-  const _st=String((autoOrderState&&autoOrderState.status)||'');
+  const _st=_ord.status;
   const _count=_haveAutoFill
-    ?(Number(autoOrderState&&autoOrderState.count)||0)
+    ?_ord.count
     :(Number(manualKalshiEntry&&manualKalshiEntry.contracts)||0);
   const _dry=!!(autoOrderState&&autoOrderState.dryRun)&&!_isManual;
   const _placed=_haveFill&&_count>0;
@@ -32896,7 +32950,11 @@ function ScalperAdvisorPanel({
   // the generic ticket renders as before.
   const _liveStatus=autoOrderState?.status;
   const _isInTrade=_liveStatus==='filled'||_liveStatus==='exiting';
-  const _isExited=_liveStatus==='exited'&&autoOrderState.exitFillPrice!=null&&autoOrderState.fillPrice!=null;
+  // V13.4.286: these four read fillPrice / count / limitCents / exitFillPrice --
+  //   none of which the writer sets (it writes filledAtCents / filledCount /
+  //   rungCents / exitAtCents). Routed through readOrderState like THIS TRADE.
+  const _ordS=readOrderState(autoOrderState);
+  const _isExited=_liveStatus==='exited'&&_ordS.exitCents!=null&&_ordS.fillCents!=null;
   const _liveDir=autoOrderState?.dir;
   // Only pull live values when the order's direction matches Tara's locked direction
   //  (defensive — if directions diverge we don't want to mix generic + live values).
@@ -32920,8 +32978,8 @@ function ScalperAdvisorPanel({
   let _liveUnrealCents=null,_liveUnrealDollars=null,_liveMaxPayout=null,_liveMaxNet=null;
   let _liveExitCents=null,_liveRealCents=null,_liveRealDollars=null,_liveIsWin=null;
   if(_liveValid){
-    _liveEntryCents=autoOrderState.fillPrice!=null?autoOrderState.fillPrice:autoOrderState.limitCents;
-    _liveContractsActual=Number(autoOrderState.count)||0;
+    _liveEntryCents=_ordS.fillCents!=null?_ordS.fillCents:_ordS.limitCents;
+    _liveContractsActual=_ordS.count;
     // V10.2.26 — STAKE DISPLAY FIX. Old behavior preferred autoOrderState.betDollars
     //   (the BUDGET passed to Kalshi at order time) over the real cost
     //   (entry × contracts / 100). Kalshi only sells whole contracts, so the
@@ -32943,7 +33001,7 @@ function ScalperAdvisorPanel({
       _liveUnrealDollars=(_liveUnrealCents*_liveContractsActual)/100;
     }
     if(_isExited){
-      _liveExitCents=autoOrderState.exitFillPrice;
+      _liveExitCents=_ordS.exitCents;
       _liveRealCents=_liveExitCents-_liveEntryCents;
       _liveRealDollars=(_liveRealCents*_liveContractsActual)/100;
       _liveIsWin=_liveRealCents>0;
@@ -33992,7 +34050,7 @@ ${_d.responseBody||'(empty)'}`;
             //   clearly so the user knows the position is incomplete and any
             //   remaining contracts may still fill.
             if(_liveValid&&autoOrderState&&autoOrderState.requestedCount>0){
-              const _filled=Number(autoOrderState.count)||0;
+              const _filled=readOrderState(autoOrderState).count; /* V13.4.286: was .count, never written */
               const _requested=Number(autoOrderState.requestedCount)||0;
               const _isPartial=_filled>0&&_filled<_requested&&(_liveStatus==='filled'||_liveStatus==='resting'||_liveStatus==='submitted');
               if(_isPartial){
@@ -34000,7 +34058,7 @@ ${_d.responseBody||'(empty)'}`;
                   'partial',
                   '⚠ partial fill',
                   `${_filled} of ${_requested} contracts filled`,
-                  `Your order requested ${_requested} contracts but Kalshi only filled ${_filled} at your limit price (${autoOrderState.limitCents}¢). The remaining ${_requested-_filled} contract${_requested-_filled===1?'':'s'} may still fill if price comes back, or expire when the order TTL runs out (90s default). Exit math (target/stop) only applies to the ${_filled} actually filled. If you wanted exposure to all ${_requested}, you can manually buy more on Kalshi at the current offer.`,
+                  `Your order requested ${_requested} contracts but Kalshi only filled ${_filled} at your limit price (${readOrderState(autoOrderState).limitCents}¢). The remaining ${_requested-_filled} contract${_requested-_filled===1?'':'s'} may still fill if price comes back, or expire when the order TTL runs out (90s default). Exit math (target/stop) only applies to the ${_filled} actually filled. If you wanted exposure to all ${_requested}, you can manually buy more on Kalshi at the current offer.`,
                   'rgba(35,185,129,0.95)',
                 ));
               }
