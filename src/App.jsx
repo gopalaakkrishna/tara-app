@@ -4481,6 +4481,42 @@ const computeKalshiTotalFees=({contractsN,entryCents,exitCents,isSettlement})=>{
   };
 };
 
+// ── KALSHI ORDER API V2 MIGRATION (Sept 2026) ────────────────────────────────
+// Kalshi removed POST /portfolio/orders and DELETE /portfolio/orders/{id} in
+// late June 2026; both now answer 410 deprecated_v1_order_endpoint. Creation
+// moved to POST /portfolio/events/orders and cancellation to
+// DELETE /portfolio/events/orders/{id}. Reads are unaffected: GET on a single
+// order, the order list, positions and balance all still work on the old paths.
+//
+// The wire format changed in three ways that matter:
+//
+//   1. The old (side: yes|no) x (action: buy|sell) pair collapses into ONE
+//      `side` quoted on the YES book only: "bid" buys YES, "ask" sells YES.
+//      Buying NO at X is the same trade as selling YES at (1 - X), so the four
+//      legacy combinations fold into two. The invariant is YES exposure:
+//
+//        legacy               YES exposure   v2 side
+//        buy  YES             increases      bid
+//        sell NO              increases      bid
+//        sell YES             decreases      ask
+//        buy  NO              decreases      ask
+//
+//   2. `price` is always the YES price in fixed-point dollars, never the price
+//      of the leg you named. Every path here already carries `limitCents` as
+//      the YES price, so the price is limitCents/100 in all four cases and the
+//      old (100 - lim) arithmetic for NO legs disappears from the wire body.
+//      It still governs cost per contract, which is why count is unchanged.
+//
+//   3. `time_in_force` and `self_trade_prevention_type` are now required, and
+//      `expiration_ts` became `expiration_time`. good_till_canceled plus an
+//      expiration_time reproduces the old expiring-limit behaviour exactly.
+const KALSHI_ORDERS_PATH='/portfolio/events/orders';
+// True when the trade increases YES exposure. See the table above.
+const _kV2Side=(legacySide,legacyAction)=>
+  ((legacyAction==='buy')===(legacySide==='yes'))?'bid':'ask';
+// Kalshi wants fixed-point dollars as a string: 65 cents -> "0.6500".
+const _kV2PriceDollars=(yesCents)=>(yesCents/100).toFixed(4);
+
 // Place a limit order. side='yes' for UP, 'no' for DOWN.
 // betDollars is the user's stake; we convert to contract count using the limit price.
 // Each YES contract pays out $1 if it resolves YES; cost = yes_price (cents).
@@ -4497,29 +4533,25 @@ const kalshiBuildOrder=({ticker,dir,limitCents,betDollars})=>{
   if(costPerContractCents<=0)return{ok:false,reason:'bad-cost'};
   // Floor to integer contracts; cap at 250 contracts as a per-order safety bound.
   const count=Math.max(1,Math.min(250,Math.floor((stake*100)/costPerContractCents)));
-  const expiration_ts=Math.floor(Date.now()/1000)+90; // 90s TTL (will expire if unfilled)
+  const expiration_time=Math.floor(Date.now()/1000)+90; // 90s TTL (will expire if unfilled)
   const client_order_id=`tara_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-  // V9.19.12: Kalshi rejects orders with BOTH legacy and _dollars fields.
-  //   Error: "exactly one of yes_price, no_price, yes_price_dollars, or
-  //   no_price_dollars should be provided". V9.19.4 sent both as a "deprecation
-  //   hedge" — Kalshi tightened validation since. Now send ONLY the _dollars
-  //   variants (current canonical format). Legacy integer-cents fields removed.
-  const _priceDollarsStr=(c)=>(c/100).toFixed(4);
+  // Always buying to open: UP buys YES (bid), DOWN buys NO, which on the YES
+  // book is a sell (ask). `lim` is the YES price either way, so it goes on the
+  // wire unchanged; only costPerContractCents above differs between the legs.
+  const v2Side=_kV2Side(side,'buy');
   const body={
     ticker,
     client_order_id,
-    side,
-    action:'buy',
-    type:'limit',
-    count,
-    expiration_ts,
+    side:v2Side,
+    price:_kV2PriceDollars(lim),
+    count:String(count),
+    time_in_force:'good_till_canceled',
+    expiration_time,
+    // Cancel our own incoming order rather than disturbing a resting one if we
+    // would ever cross ourselves. Single-user account, so this rarely fires.
+    self_trade_prevention_type:'taker_at_cross',
   };
-  if(side==='yes'){
-    body.yes_price_dollars=_priceDollarsStr(lim);
-  }else{
-    body.no_price_dollars=_priceDollarsStr(100-lim);
-  }
-  return{ok:true,body,count,costPerContractCents,side,client_order_id};
+  return{ok:true,body,count,costPerContractCents,side,v2Side,client_order_id};
 };
 
 // Place order (or simulate in dry-run). Returns {ok, dryRun, order?, reason?}.
@@ -4546,13 +4578,13 @@ const kalshiPlaceOrder=async({apiKeyId,privateKeyPem,ticker,dir,limitCents,betDo
   if(dryRun){
     return{ok:true,dryRun:true,order:{
       order_id:`DRY_${built.client_order_id}`,client_order_id:built.client_order_id,
-      ticker,side:built.side,action:'buy',type:'limit',count:built.count,
-      yes_price:built.body.yes_price,no_price:built.body.no_price,status:'resting',
+      ticker,side:built.side,v2Side:built.v2Side,action:'buy',type:'limit',count:built.count,
+      price:built.body.price,status:'resting',
       created_time:new Date().toISOString(),
       _simulated:true,
     }};
   }
-  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:'/portfolio/orders',body:built.body});
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:KALSHI_ORDERS_PATH,body:built.body});
   if(!res.ok)return{
     ok:false,reason:res.reason||'order failed',dryRun:false,raw:res,
     // V9.17.28: expose full diagnostic so the UI banner can render request +
@@ -4627,10 +4659,13 @@ const kalshiNormalizeOrder=(_ord)=>{
     const n=Number(_ord.fill_price);
     if(Number.isFinite(n)&&n>=1&&n<=99)_fillCents=Math.round(n);
   }
-  // Only use yes_price_dollars (limit) as last-resort estimate if order is filled.
-  // Conservative — limit might equal fill price for marketable limits.
+  // Only use the limit price as a last-resort estimate if the order is filled.
+  // Conservative — limit might equal fill price for marketable limits. V2 order
+  // objects carry the limit as `price` (YES, fixed-point dollars); older ones
+  // used yes_price_dollars. Try both so this works across the migration.
   if(_fillCents==null&&_status==='filled'){
-    _fillCents=_kalshiParseDollarString(_ord.yes_price_dollars);
+    _fillCents=_kalshiParseDollarString(_ord.price);
+    if(_fillCents==null)_fillCents=_kalshiParseDollarString(_ord.yes_price_dollars);
   }
   return{status:_status,fillPriceCents:_fillCents,filledCount:_filledCount,_raw:_ord};
 };
@@ -4649,34 +4684,35 @@ const kalshiCancelOrder=async({apiKeyId,privateKeyPem,orderId,dryRun})=>{
   if(dryRun||(orderId&&String(orderId).startsWith('DRY_'))){
     return{ok:true,dryRun:true,order:{order_id:orderId,status:'canceled',_simulated:true}};
   }
-  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'DELETE',path:`/portfolio/orders/${encodeURIComponent(orderId)}`});
+  // Cancellation moved with creation; the legacy DELETE path returns 410.
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'DELETE',path:`${KALSHI_ORDERS_PATH}/${encodeURIComponent(orderId)}`});
   if(!res.ok)return{ok:false,reason:res.reason||'cancel failed',raw:res};
   return{ok:true,order:res.data?.order||res.data};
 };
 
-// Sell out at market — used when offer threshold hit or window closing soon.
-// On Kalshi this is "buy the OPPOSITE side" or "sell" via the same orders endpoint
-// with action='sell'. We use action='sell' on the same side held.
+// Sell out — used when the offer threshold is hit or the window is closing.
+// Selling the leg held reduces that exposure: dumping YES is an ask, dumping NO
+// is a bid, because shedding NO is the same trade as buying YES. `limitCents`
+// is the YES price in both cases, so it goes on the wire unchanged.
 const kalshiExitPosition=async({apiKeyId,privateKeyPem,ticker,side,count,limitCents,dryRun})=>{
   const lim=Math.max(1,Math.min(99,Math.round(Number(limitCents)||1)));
   const client_order_id=`tara_exit_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const _count=Math.max(1,Math.floor(Number(count)||0));
+  const v2Side=_kV2Side(side,'sell');
   const body={
-    ticker,client_order_id,side,action:'sell',type:'limit',
-    count:Math.max(1,Math.floor(Number(count)||0)),
-    expiration_ts:Math.floor(Date.now()/1000)+30,
+    ticker,
+    client_order_id,
+    side:v2Side,
+    price:_kV2PriceDollars(lim),
+    count:String(_count),
+    time_in_force:'good_till_canceled',
+    expiration_time:Math.floor(Date.now()/1000)+30,
+    self_trade_prevention_type:'taker_at_cross',
   };
-  // V9.19.12: send ONLY _dollars (see kalshiBuildOrder for context).
-  //   Kalshi rejects orders with both legacy and _dollars price fields.
-  const _priceDollarsStr=(c)=>(c/100).toFixed(4);
-  if(side==='yes'){
-    body.yes_price_dollars=_priceDollarsStr(lim);
-  }else{
-    body.no_price_dollars=_priceDollarsStr(100-lim);
-  }
   if(dryRun){
-    return{ok:true,dryRun:true,order:{order_id:`DRY_${client_order_id}`,client_order_id,ticker,side,action:'sell',count:body.count,status:'filled',_simulated:true}};
+    return{ok:true,dryRun:true,order:{order_id:`DRY_${client_order_id}`,client_order_id,ticker,side,v2Side,action:'sell',count:_count,status:'filled',_simulated:true}};
   }
-  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:'/portfolio/orders',body});
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:KALSHI_ORDERS_PATH,body});
   if(!res.ok)return{ok:false,reason:res.reason||'exit failed',raw:res};
   return{ok:true,order:res.data?.order||res.data};
 };
