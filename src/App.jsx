@@ -5584,8 +5584,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.283-phantom-posterior-field';
-const TARA_VERSION_DISPLAY='Tara 13.4.283';
+const BASELINE_VERSION='2026.09.06-v13.4.284-posterior-phantom-cluster';
+const TARA_VERSION_DISPLAY='Tara 13.4.284';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17432,7 +17432,12 @@ function TaraAdvisorPanel({advisor,executeAction}){
 // position size, and cooldown after loss.
 function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayData,analysis,movementRisk,bestWindowsToday}){
   if(!taraCall)return null;
-  const _post=Number(taraCall.posterior||0);
+  // V13.4.284: `taraCall.posterior` is never written (engine exposes rawProbAbove),
+  //   so _post was always 0 and _hasPost always false — this component's EDGE chip
+  //   could never render. Its trajectory chip was dead too, for the same root cause
+  //   further down (convictionHistoryRef never filled). Two of its five chips were
+  //   unreachable; it only ever appeared when the size / cooldown / risk chip fired.
+  const _post=Number(taraCall.rawProbAbove??0);
   const _hasPost=Number.isFinite(_post)&&_post>0;
   const _dir=taraCall.snapshot?taraCall.snapshot.call:taraCall.direction;
   const _isLocked=taraCall.snapshot&&_dir!=='SIT_OUT'&&taraCall.snapshot.call!=='NO_TRADE';
@@ -18161,7 +18166,15 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           //   be stale → conviction showed 0.0pt despite engine saying 69%.
           //   The snap's frozen posterior is used for the locked call display (below),
           //   not for the live conviction meter which should always reflect current engine.
-          const _livePost=tc?.posterior??snap?.atPosterior??50;
+          // V13.4.284: read `tc.posterior` — a field the engine NEVER writes. The live
+          //   object exposes the posterior as `rawProbAbove` (see the engine return at
+          //   ~L43758). So this was undefined, fell through to snap?.atPosterior, and
+          //   with no committed snapshot fell all the way to the 50 literal — giving
+          //   conviction |50-50| = 0.0pt and painting "DEADZONE — coin flip" on screen
+          //   directly beside "CONFIDENCE 75%".
+          //   The V10.7.67b note above describes fixing exactly this symptom by
+          //   preferring tc.posterior; that fix could never have worked.
+          const _livePost=tc?.rawProbAbove??snap?.atPosterior??50;
           const _post=Number(_livePost);
           if(!isFinite(_post))return null;
           const _conv=Math.abs(_post-50);
@@ -46279,8 +46292,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   a TDZ ReferenceError.
   useEffect(()=>{
     const iv=setInterval(()=>{
-      if(!taraCall||taraCall.posterior==null)return;
-      const _post=Number(taraCall.posterior);
+      // V13.4.284: gated on the phantom `taraCall.posterior`, so this guard ALWAYS
+      //   returned and convictionHistoryRef was never written to. That in turn made
+      //   convictionTrajectory permanently {state:'UNKNOWN'} (it needs >=4 samples),
+      //   and _showTrajectory is `state!=='UNKNOWN'` — so the BUILDING/FADING
+      //   conviction arrow has never rendered once.
+      if(!taraCall||taraCall.rawProbAbove==null)return;
+      const _post=Number(taraCall.rawProbAbove);
       if(!Number.isFinite(_post))return;
       const _now=Date.now();
       convictionHistoryRef.current.push({time:_now,post:_post});
@@ -46306,7 +46324,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(_delta>=2)return{state:'BUILDING',delta:_delta};
     if(_delta<=-2)return{state:'FADING',delta:_delta};
     return{state:'STABLE',delta:_delta};
-  },[taraCall?.posterior]);
+    // V13.4.284: dep was taraCall?.posterior — permanently undefined, so this memo
+    //   never recomputed on a posterior tick even once the ref does fill.
+  },[taraCall?.rawProbAbove]);
   // V5.7.8: mirror confluence into the ref so the engine cooldown gate can read it
   confluenceStateRef.current={
     isConfluent:taraCall?._ctx?.isConfluent||taraCall?._ctx?.isRisingConfluence||false,
@@ -47193,7 +47213,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Examples: post=65% → 57¢ max | post=70% → 62¢ | post=75% → 67¢ | post=80% → 72¢
     //   User: "lock if she's very sure" — high conviction = higher allowed price. Never
     //   blocks profitable entries; only blocks clearly negative-EV ones.
-    const _convictionNow=Math.max(50,Math.min(95,Number(analysis?.posterior||tc?.posterior||50)));
+    // V13.4.284: BOTH reads here were phantom fields — neither `analysis.posterior`
+    //   nor `tc.posterior` is ever written (the engine exposes `rawProbAbove`). So
+    //   this was permanently 50, and the whole conviction-scaling design above —
+    //   "post=75% -> 67c max", "high conviction = higher allowed price" — never
+    //   operated. KALSHI_ENTRY_THRESH collapsed to max(_entryFloor, 50-buffer),
+    //   i.e. welded to its FLOOR (52c, or 55c in squeeze/compressing) on every
+    //   window regardless of how sure Tara was. A lower threshold is MORE
+    //   restrictive, so this silently refused to register entries on exactly her
+    //   most confident reads.
+    //   Also note the intent: the worked examples are all >50 (65/70/75/80), so the
+    //   input is DIRECTIONAL confidence, not raw P(UP). Raw would pin every DOWN
+    //   call back to the floor via the Math.max(50,...) clamp — 25% UP is a strong
+    //   DOWN read, not a weak one. Expressed as 50+|p-50|, matching readLockState.
+    const _postNow=(()=>{
+      const _a=Number(analysis?.rawProbAbove);
+      if(Number.isFinite(_a))return _a;
+      const _t=Number(tc?.rawProbAbove);
+      return Number.isFinite(_t)?_t:50;
+    })();
+    const _convictionNow=Math.max(50,Math.min(95,50+Math.abs(_postNow-50)));
     //   V10.7.71: conviction-scaled threshold. V10.7.74: floor raised 55¢ → 45¢.
     //   V10.7.75: regime-adaptive thresholds.
     //   RANGE-CHOP:   max(45, posterior-8)  — current, well-tuned
@@ -49696,7 +49735,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }:null,
         rawPosteriorAtLock:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove??null, /* V9.11.3: distinguish raw vs calibrated */
         calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
-        calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
+        /* V13.4.284: used the phantom analysis.posterior as the CALIBRATED value and
+           rawProbAbove as the RAW one -- both wrong. The two lines directly above
+           define the real pair: rawProbAbove IS the calibrated value, and the raw one
+           is rawPosteriorUncalibrated (written at ~L43863). analysis.posterior is never
+           written at all, so this logged null on every single lock and the calibration
+           swing has no history. Correct orientation is calibrated - raw; still null when
+           the uncalibrated value is genuinely absent, because a fabricated 0 would read
+           as "calibration did nothing" rather than "unknown". */
+        calSwingAtLock:(()=>{
+          const _cal=Number(analysis?.rawProbAbove);
+          const _raw=Number(analysis?.rawPosteriorUncalibrated);
+          return (Number.isFinite(_cal)&&Number.isFinite(_raw))?Math.round(_cal-_raw):null;
+        })(),
         // V6.3.5: full signal scores + tape consensus at lock for analysis exports
         signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
         // V10.7.53: persist strike, version, and engine reasoning for full audit trail
@@ -49875,7 +49926,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }:null,
         rawPosteriorAtLock:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove??null, /* V9.11.3: distinguish raw vs calibrated */
         calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
-        calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
+        /* V13.4.284: used the phantom analysis.posterior as the CALIBRATED value and
+           rawProbAbove as the RAW one -- both wrong. The two lines directly above
+           define the real pair: rawProbAbove IS the calibrated value, and the raw one
+           is rawPosteriorUncalibrated (written at ~L43863). analysis.posterior is never
+           written at all, so this logged null on every single lock and the calibration
+           swing has no history. Correct orientation is calibrated - raw; still null when
+           the uncalibrated value is genuinely absent, because a fabricated 0 would read
+           as "calibration did nothing" rather than "unknown". */
+        calSwingAtLock:(()=>{
+          const _cal=Number(analysis?.rawProbAbove);
+          const _raw=Number(analysis?.rawPosteriorUncalibrated);
+          return (Number.isFinite(_cal)&&Number.isFinite(_raw))?Math.round(_cal-_raw):null;
+        })(),
         // V6.3.5: capture full signal scores + tape consensus at lock for analysis exports
         signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
         // V10.7.53: persist strike, version, and engine reasoning for full audit trail
