@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.265-one-decision-one-number';
-const TARA_VERSION_DISPLAY='Tara 13.4.265';
+const BASELINE_VERSION='2026.09.06-v13.4.266-predictor-is-autoexec';
+const TARA_VERSION_DISPLAY='Tara 13.4.266';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32344,9 +32344,31 @@ function ScalperAdvisorPanel({
   // ─────────────────────────────────────────────────────────────────────────
   const _renderPredictorHeader=()=>React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#24242E]'},
     // Title row: "Predictor"
-    React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:'#23B981'}},'predictor'),
-    ),
+    // V13.4.266: was the bare word 'predictor'. It predicts nothing -- it is the
+    //   auto-exec control surface, which is how he describes it himself. Named for
+    //   what it does, with the state it is actually in, read live off the settings
+    //   so it cannot drift from behaviour the way static copy does.
+    (()=>{
+      const _armed=!!autoExecSettings?.enabled;
+      const _dry=autoExecSettings?.dryRun!==false;
+      const _killed=!!killSwitchEngaged;
+      const _tone=_killed?'#E8455E':(_armed&&!_dry)?'#23B981':'#D4A03A';
+      const _chip=_killed?'stopped':_armed?(_dry?'practice':'live'):'off';
+      const _line=_killed?'Stopped. The kill switch is on, nothing will be placed.'
+        :!_armed?'Calling only. Tara picks a side, you place the order yourself.'
+        :_dry?'Practising. Orders are simulated, never sent to Kalshi.'
+        :'Placing real orders on Kalshi when Tara locks.';
+      return React.createElement('div',{key:'ax-head',className:'mb-2.5'},
+        React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-1.5'},
+          React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:_tone}},'auto-exec'),
+          React.createElement('span',{
+            className:'text-[9px] uppercase font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-md',
+            style:{color:_tone,border:'1px solid '+_tone+'47',background:_tone+'1A'},
+          },_chip),
+        ),
+        React.createElement('div',{className:'text-[11px] leading-snug',style:{color:'rgba(237,237,237,0.62)'}},_line),
+      );
+    })(),
     // Row 1: AUTO / MANUAL toggle
     React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #24242E'}},
       (()=>{
@@ -32441,14 +32463,19 @@ function ScalperAdvisorPanel({
         // Both modes: smart-exits ON, min-profit 5¢ — be willing to take
         //   small wins when Tara's read flips instead of watching them
         //   evaporate.
+        // V13.4.266: stopLossDeltaCents:15 and autoExitOffer:88 REMOVED. Both were
+        //   measured-losing rules that v253/v261 deliberately cleared, and this
+        //   button wrote them straight back. The 88c target also sat below
+        //   TRAIL_ARM_C (90), so it fired before the trailing stop could arm --
+        //   one click silently disabled the only exit rule that measured as working.
+        //   The entry and timing half of the preset is untouched; it was never the
+        //   problem, and patient entry is what the mode is actually for.
         const _PATIENT={
           patientEntryEnabled:true,
           patientEntryMaxCents:45,
           patientEntryMaxWaitSec:90,
           entryLadderEnabled:false,
           slippageCents:0,
-          stopLossDeltaCents:15,
-          autoExitOffer:88,
           timeExitSecLeft:45,
           smartExitsEnabled:true,
           smartExitMinProfitCents:5,
@@ -32459,22 +32486,24 @@ function ScalperAdvisorPanel({
           patientEntryEnabled:false,
           entryLadderEnabled:false,
           slippageCents:2,
-          stopLossDeltaCents:20,
-          autoExitOffer:78,
+          // V13.4.266: stopLossDeltaCents:20 / autoExitOffer:78 removed, same
+          //   reason as patient above -- and 78c is further under the 90c trail arm.
           timeExitSecLeft:60,
           smartExitsEnabled:true,
           smartExitMinProfitCents:5,
           lockStabilitySec:0,
           minTier:'structural',
         };
+        // V13.4.266: these keyed off the two fields the presets no longer write,
+        //   so both buttons would have read as permanently inactive. Rebased onto
+        //   what each preset still actually sets, which is what distinguishes them.
         const _isPatientActive=
           autoExecSettings?.patientEntryEnabled===true
-          &&autoExecSettings?.autoExitOffer===88
-          &&autoExecSettings?.stopLossDeltaCents===15;
+          &&Number(autoExecSettings?.slippageCents||0)===0
+          &&Number(autoExecSettings?.timeExitSecLeft)===45;
         const _isFastActive=
           autoExecSettings?.patientEntryEnabled===false
-          &&autoExecSettings?.autoExitOffer===78
-          &&autoExecSettings?.stopLossDeltaCents===20
+          &&Number(autoExecSettings?.slippageCents)===2
           &&autoExecSettings?.minTier==='structural';
         const _applyMode=(preset)=>{
           if(typeof setAutoExecSettings!=='function')return;
@@ -32488,7 +32517,7 @@ function ScalperAdvisorPanel({
             className:'flex-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-colors cursor-pointer',
             style:_isPatientActive?_btnStyleActive:_btnStyleIdle,
             onClick:()=>_applyMode(_PATIENT),
-            title:'patient (A): waits for cheaper entries (≤45¢, up to 90s), tight stop (15¢), realistic target (88¢ — leaves 2¢ buffer for fill misses), time-exit 45s before window close, smart-exit on 5¢+ profit when Tara flips. accepts lower fire rate for better R:R.',
+            title:'patient (A): waits for a cheaper entry (≤45¢, up to 90s), rests instead of crossing the spread, exits 45s before the close, and takes a small profit if Tara flips. Lower fire rate, better entry price. Does not touch how the trade exits on price — that is the trailing stop.',
           },[
             React.createElement('span',{key:'a',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'A'),
             'patient',
@@ -32498,7 +32527,7 @@ function ScalperAdvisorPanel({
             className:'flex-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-colors cursor-pointer',
             style:_isFastActive?_btnStyleActive:_btnStyleIdle,
             onClick:()=>_applyMode(_FAST),
-            title:'fast (B): fires immediately at offer+2¢, tighter stop (20¢), early target (78¢ — book before fade), time-exit 60s before close, structural+ tier only. higher fire rate with smaller-faster winners.',
+            title:'fast (B): fires immediately at offer+2¢, exits 60s before the close, structural-tier locks only. Higher fire rate, worse entry price. Does not touch how the trade exits on price — that is the trailing stop.',
           },[
             React.createElement('span',{key:'b',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'B'),
             'fast',
@@ -32506,6 +32535,25 @@ function ScalperAdvisorPanel({
         );
       })(),
     ),
+    // V13.4.266: how the trade GETS OUT, stated where the mode buttons are --
+    //   because until this version those buttons quietly wrote a fixed take-profit
+    //   BELOW the trailing arm, so picking a mode disabled the trail without
+    //   saying so anywhere. Read live from the settings, not hardcoded.
+    (()=>{
+      const _tp=Number(autoExecSettings?.autoExitOffer)||0;
+      const _sl=Number(autoExecSettings?.stopLossDeltaCents)||0;
+      const _trailKilled=_tp>0&&_tp<=TRAIL_ARM_C;
+      const _txt=_trailKilled
+        ?'Exit: fixed take-profit at '+_tp+'\u00a2, which fires before the trailing stop can arm at '+TRAIL_ARM_C+'\u00a2.'
+        :(_tp>0||_sl>0)
+          ?'Exit: trailing stop, plus a fixed rule you set'+(_tp>0?' (take '+_tp+'\u00a2)':'')+(_sl>0?' (cut '+_sl+'\u00a2)':'')+'.'
+          :'Exit: trailing stop only \u2014 sells '+TRAIL_GIVEBACK_C+'\u00a2 off its high once the contract is worth '+TRAIL_ARM_C+'\u00a2.';
+      return React.createElement('div',{
+        key:'exit-line',
+        className:'mt-2 text-[10px] leading-snug',
+        style:{color:_trailKilled?'rgba(232,69,94,0.85)':'rgba(237,237,237,0.42)'},
+      },_txt);
+    })(),
     // P&L strip
     // V10.2.9 — was filtered to autoExec=true only, which left the pill blank
     //   forever for users who hadn't run auto-exec yet (the 814 historical
