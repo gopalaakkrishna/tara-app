@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.266-predictor-is-autoexec';
-const TARA_VERSION_DISPLAY='Tara 13.4.266';
+const BASELINE_VERSION='2026.09.06-v13.4.267-clear-preset-exit-rules';
+const TARA_VERSION_DISPLAY='Tara 13.4.267';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34310,6 +34310,17 @@ function TaraApp(){
       const _v261ExitClearPending=(()=>{
         try{return !localStorage.getItem('tara_v13_4_261_exit_clear');}catch(_e){return false;}
       })();
+      // V13.4.267: second one-shot, for devices whose fixed rules were written
+      //   by a MODE preset AFTER the v261 clear already ran (sentinel set, so
+      //   nothing would ever clear them again). Captured here for the same
+      //   reason as the one above -- never read inline at the migration sites.
+      const _v267PresetExitClear=(()=>{
+        try{return !localStorage.getItem('tara_v13_4_267_preset_exit_clear');}catch(_e){return false;}
+      })();
+      // The exact values _PATIENT and _FAST wrote. Narrow on purpose: a value he
+      //   set by hand in Settings is his decision and is left alone.
+      const _v267IsPresetTP=(n)=>Number(n)===78||Number(n)===88;
+      const _v267IsPresetSL=(n)=>Number(n)===15||Number(n)===20;
       return{
         // V13.4.252: default ARMED. Was !!v.enabled (false unless explicitly
         //   stored true). A stored false still wins, so the settings toggle
@@ -34421,8 +34432,12 @@ function TaraApp(){
           let _v=Number(v.autoExitOffer)>0?Number(v.autoExitOffer):0;
           try{
             // one-time: clear a stored fixed TP that came from a preset (80..92c)
-            if(_v261ExitClearPending&&Number(v.autoExitOffer)>0){
-              try{console.info('[V13.4.253] fixed take-profit '+v.autoExitOffer+'c -> off (measured loser)');}catch(_){}
+            // V13.4.267: second condition catches a preset-written TP on a device
+            //   the v261 clear already ran on. 88c and 78c both sit UNDER the 90c
+            //   trail arm, so leaving one in place silently disables the trailing
+            //   stop -- the one exit rule that measured as working.
+            if((_v261ExitClearPending||(_v267PresetExitClear&&_v267IsPresetTP(v.autoExitOffer)))&&Number(v.autoExitOffer)>0){
+              try{console.info('[V13.4.267] fixed take-profit '+v.autoExitOffer+'c -> off (measured loser; under the '+TRAIL_ARM_C+'c trail arm)');}catch(_){}
               _v=0;
             }
             if(!localStorage.getItem('tara_v10_2_8_audit_optimal_applied')&&_v>0){
@@ -34467,6 +34482,12 @@ function TaraApp(){
             //   so the corrected stop-loss clear would never fire under it.
             if(_v261ExitClearPending){
               localStorage.setItem('tara_v13_4_261_exit_clear','1');
+            }
+            // V13.4.267: safe to set here only because the flag is captured once
+            //   at the top of the hydrator, not read inline. That is the whole
+            //   lesson of the v253 bug.
+            if(_v267PresetExitClear){
+              localStorage.setItem('tara_v13_4_267_preset_exit_clear','1');
             }
           }catch(_){}
           return _v;
@@ -34582,8 +34603,11 @@ function TaraApp(){
           //   trailing stop, which does not cap a winner that keeps running.
           let _v=Number(v.stopLossDeltaCents)>=0?Number(v.stopLossDeltaCents):0;
           try{
-            if(_v261ExitClearPending&&_v>0){
-              try{console.info('[V13.4.253] fixed stop-loss '+_v+'c -> off (measured loser)');}catch(_){}
+            // V13.4.267: same second condition. This is the one actually found live
+            //   on the dev origin -- stopLossDeltaCents 15 with the v261 sentinel
+            //   already set, i.e. written by a MODE click after the clear had run.
+            if((_v261ExitClearPending||(_v267PresetExitClear&&_v267IsPresetSL(_v)))&&_v>0){
+              try{console.info('[V13.4.267] fixed stop-loss '+_v+'c -> off (measured loser)');}catch(_){}
               _v=0;
             }
           }catch(_){}
