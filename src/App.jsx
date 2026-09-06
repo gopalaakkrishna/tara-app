@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.272-restore-cloud-writes';
-const TARA_VERSION_DISPLAY='Tara 13.4.272';
+const BASELINE_VERSION='2026.09.06-v13.4.273-confidence-in-called-side';
+const TARA_VERSION_DISPLAY='Tara 13.4.273';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18963,7 +18963,22 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _leanDir=_satOut?(_snap._intendedDir||_snap.direction||null):null;
   const state=_snapDir?'LOCKED':_satOut?'SITTING OUT':_liveDir?'LEANING':'SCANNING';
   const _src=_snap||taraCall;
-  const conf=Math.round(Number(_src&&_src.confidence)||0);
+  // V13.4.273: `confidence` does NOT mean one thing across the engine. At the
+  //   directional-lock site it is stored as the raw posterior P(UP) (L44426,
+  //   `confidence:_post`), while committed snapshots carry it already flipped to
+  //   the called side. So a DOWN call could render "30%" on one path and "65%"
+  //   on another when both meant a strong DOWN.
+  //   `conviction` is unambiguous -- it is |posterior - 50| at every site -- so
+  //   50 + conviction is the confidence in whichever side was actually called,
+  //   under either convention. Fall back to flipping the raw value only when
+  //   conviction is missing.
+  const _convict=Number(_src&&_src.conviction);
+  const _rawConf=Number(_src&&_src.confidence);
+  const conf=Number.isFinite(_convict)&&_convict>0
+    ?Math.round(50+_convict)
+    :(Number.isFinite(_rawConf)&&_rawConf>0
+        ?Math.round((dir==='DOWN'&&_rawConf<50)?(100-_rawConf):_rawConf)
+        :0);
   const histWR=Number(taraCall._v10_7_43_calHistWR);
   const _k=Number(kalshiYesPrice);
   const _kValid=Number.isFinite(_k)&&_k>0&&_k<100;
@@ -19054,7 +19069,7 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
         )}
         <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 mt-3">
           {conf>0&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
-            posterior <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{conf}%</span></span>}
+            confidence <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{conf}%</span></span>}
           {Number.isFinite(histWR)&&histWR>0&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
             hist wr <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{Math.round(histWR)}%</span></span>}
           {edge!=null&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
