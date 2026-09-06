@@ -4717,6 +4717,103 @@ const kalshiExitPosition=async({apiKeyId,privateKeyPem,ticker,side,count,limitCe
   return{ok:true,order:res.data?.order||res.data};
 };
 
+// ── ENTRY LADDER ─────────────────────────────────────────────────────────────
+// V13.4.228 measured this on 440 settled calls and it is the whole argument for
+// arming anything:
+//
+//     crossing the spread (what a naive auto-exec does)   -1.85c per contract
+//     resting a cent inside (maker fee is 0)              +1.00c per contract
+//     swing                                                2.85c per contract
+//
+// The swing is larger than the signal's gross edge, so execution decides whether
+// the strategy makes or loses money. The settings for a ladder have existed
+// since V9.7.4 and the UI renders them, but nothing ever implemented the walk;
+// entryLadderEnabled was a checkbox wired to no behaviour. This is that walk.
+//
+// Plan only, no I/O, so it can be tested without credentials or a live market.
+// Given the current offer it returns the rungs to try in order: start
+// undercutCents below the offer and close half the remaining gap on each step,
+// so the last rung sits adjacent to the offer rather than repeating it. The
+// final entry is the offer itself, flagged takesSpread, which is the -1.85c
+// path and is only reached if every resting rung failed to fill.
+//
+//   planEntryLadder({offerCents:70,undercutCents:4,maxSteps:2})
+//     -> [{priceCents:66,...},{priceCents:68,...},{priceCents:70,takesSpread:true}]
+//
+// A ladder disabled, or a nonsensical offer, collapses to the single taking rung
+// so callers always get a usable plan.
+const planEntryLadder=({offerCents,undercutCents=2,maxSteps=2,stepSec=8,enabled=true})=>{
+  const offer=Math.round(Number(offerCents));
+  if(!Number.isFinite(offer)||offer<1||offer>99){
+    return{ok:false,reason:'bad-offer',rungs:[]};
+  }
+  const take={priceCents:offer,takesSpread:true,waitSec:0,step:null};
+  const steps=Math.max(0,Math.min(6,Math.floor(Number(maxSteps)||0)));
+  const under=Math.max(1,Math.min(20,Math.floor(Number(undercutCents)||0)));
+  const wait=Math.max(2,Math.min(60,Math.floor(Number(stepSec)||0)));
+  if(!enabled||steps<1)return{ok:true,rungs:[take],ladder:false};
+  const rungs=[];
+  let gap=under;
+  for(let i=0;i<steps;i++){
+    const price=offer-gap;
+    // Never rest at or through the offer, and never below 1c.
+    if(price>=1&&price<offer)rungs.push({priceCents:price,takesSpread:false,waitSec:wait,step:i+1});
+    gap=Math.floor(gap/2);
+    if(gap<1)break;
+  }
+  // Drop duplicate prices produced by the halving while keeping order.
+  const seen=new Set();
+  const unique=rungs.filter(r=>seen.has(r.priceCents)?false:(seen.add(r.priceCents),true));
+  return{ok:true,rungs:[...unique,take],ladder:unique.length>0};
+};
+
+// Walk the plan against Kalshi: rest at each rung, wait for a fill, cancel and
+// step up if it does not come, and take the offer only as the last rung. Honours
+// dryRun end to end by delegating to the helpers, which simulate. Returns the
+// filled order plus which rung filled, so the caller can log realised entry cost
+// against the -1.85c / +1.00c figures above and see whether the ladder is
+// actually earning its keep on this account.
+const kalshiRunEntryLadder=async({
+  apiKeyId,privateKeyPem,ticker,dir,betDollars,offerCents,settings,dryRun,
+  shouldAbort,onRung,pollMs=1000,
+})=>{
+  const plan=planEntryLadder({
+    offerCents,
+    undercutCents:settings?.entryLadderUndercutCents,
+    maxSteps:settings?.entryLadderMaxSteps,
+    stepSec:settings?.entryLadderStepSec,
+    enabled:!!settings?.entryLadderEnabled,
+  });
+  if(!plan.ok)return{ok:false,reason:plan.reason};
+  const attempts=[];
+  for(const rung of plan.rungs){
+    if(typeof shouldAbort==='function'&&shouldAbort())return{ok:false,reason:'aborted',attempts};
+    if(typeof onRung==='function'){try{onRung(rung);}catch(_e){}}
+    const placed=await kalshiPlaceOrder({
+      apiKeyId,privateKeyPem,ticker,dir,limitCents:rung.priceCents,betDollars,dryRun,
+    });
+    if(!placed.ok){attempts.push({rung,error:placed.reason});continue;}
+    const orderId=placed.order?.order_id;
+    // The taking rung is not given time to rest; it either fills or it does not.
+    const deadline=Date.now()+(rung.takesSpread?0:rung.waitSec*1000);
+    let normalized=kalshiNormalizeOrder(placed.order);
+    while(normalized.status!=='filled'&&Date.now()<deadline){
+      if(typeof shouldAbort==='function'&&shouldAbort())break;
+      await new Promise(r=>setTimeout(r,pollMs));
+      const look=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
+      if(!look.ok)break;
+      normalized=kalshiNormalizeOrder(look.order);
+    }
+    if(normalized.status==='filled'){
+      return{ok:true,order:placed.order,normalized,rung,attempts,plan};
+    }
+    // Unfilled: cancel before stepping so two orders never rest at once.
+    if(orderId)await kalshiCancelOrder({apiKeyId,privateKeyPem,orderId,dryRun});
+    attempts.push({rung,status:normalized.status||'unfilled'});
+  }
+  return{ok:false,reason:'no-fill',attempts,plan};
+};
+
 // Quick credentials check — calls /portfolio/balance which requires auth but no params.
 const kalshiPing=async({apiKeyId,privateKeyPem})=>{
   if(!apiKeyId||!privateKeyPem)return{ok:false,reason:'no-credentials'};
