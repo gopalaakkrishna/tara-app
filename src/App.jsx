@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.254-declutter';
-const TARA_VERSION_DISPLAY='Tara 13.4.254';
+const BASELINE_VERSION='2026.09.06-v13.4.255-one-rule-less-screen';
+const TARA_VERSION_DISPLAY='Tara 13.4.255';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18329,32 +18329,12 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           </div>
         </div>
 
-        {/* V13.4.226: what the sit-outs were actually WORTH. A big number labelled
-            "sat out" reads as missed opportunity and nothing on screen said
-            otherwise, so the honest answer is to price them. Every sat-out window
-            where Tara still had a directional read is replayed at the price
-            recorded at lock — no hindsight beyond the outcome itself. */}
-        {(()=>{
-          const v=_sitoutValue(taraCallLog);
-          if(!v||v.n<20)return null;
-          const good=v.netCents<=0;   // negative = trading them would have lost = sitting out was right
-          return (
-            <div className="mt-2 px-3 py-2 rounded-lg text-[10px] leading-relaxed"
-                 style={{background:good?'rgba(35,185,129,0.06)':'rgba(212,160,58,0.07)',
-                         border:`1px solid ${good?'rgba(35,185,129,0.22)':'rgba(212,160,58,0.26)'}`,
-                         color:'rgba(255,255,255,0.58)'}}
-                 title="Replays every sat-out window that still had a directional read, buying the leaned side at the price recorded at lock, and settles it against what the window actually did.">
-              <span className="uppercase tracking-[0.14em] font-bold" style={{color:good?'rgba(35,185,129,0.9)':T2_SITOUT_FG}}>
-                {good?'sitting out is paying':'sit-outs are costing'}
-              </span>{' '}
-              — of {v.total} sit-outs, {v.noRead} had no signal at all. The other {v.n} had a read and were vetoed; taking every one of them at the price on the screen would have{' '}
-              <b style={{color:good?'rgba(35,185,129,0.9)':T2_SITOUT_FG}}>
-                {good?`lost ${Math.abs(Math.round(v.netCents))}c`:`made ${Math.round(v.netCents)}c`}
-              </b>{' '}
-              — right {v.wr}% of the time, but at an average {v.be}c to enter it needed {v.be}% just to break even.
-            </div>
-          );
-        })()}
+        {/* V13.4.255: the sit-out value panel was removed. It priced every
+            sat-out window to show whether sitting out had been worth it -- a
+            useful answer while sit-outs existed. They were turned off in
+            v13.4.249/250, so the panel could only ever report on history and
+            read as though Tara were still declining windows. _sitoutValue is
+            left in place for analysis. */}
 
         {/* V6.2.6: Force-call buttons. Only when Tara hasn't committed yet (SCANNING / WATCHING).
               Hidden after commit or sit-out — at that point the call is locked one-way and these
@@ -21773,76 +21753,19 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
 }
 
 // ── V8.2: ANTI-TILT COOLDOWN BANNER ──────────────────────────────────────────
-const AntiTiltCooldownBanner=React.memo(function AntiTiltCooldownBanner({tiltLockUntil,setTiltLockUntil,settings,onOverride}){
-  const[now,setNow]=React.useState(Date.now());
-  React.useEffect(()=>{
-    if(!tiltLockUntil||tiltLockUntil<=Date.now())return;
-    const iv=setInterval(()=>setNow(Date.now()),1000);
-    return()=>clearInterval(iv);
-  },[tiltLockUntil]);
-  if(!tiltLockUntil||tiltLockUntil<=now)return null;
-  const _msLeft=tiltLockUntil-now;
-  const _minLeft=Math.floor(_msLeft/60000);
-  const _secLeft=Math.floor((_msLeft%60000)/1000);
-  return React.createElement('div',{
-    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2.5 animate-pulse',
-    style:{
-      border:'1px solid rgba(232,69,94,0.50)',
-      background:'rgba(232,69,94,0.07)',
-      boxShadow:'0 3px 10px rgba(0,0,0,0.35)',
-    },
-  },
-    React.createElement('div',{className:'flex items-baseline justify-between gap-3 flex-wrap'},
-      React.createElement('div',{className:'flex items-baseline gap-2 min-w-0 flex-1'},
-        React.createElement('span',{className:'text-base shrink-0'},'⛔'),
-        React.createElement('div',{className:'min-w-0 flex-1'},
-          React.createElement('div',{className:'text-[11px] uppercase font-bold tracking-wider',style:{color:'rgb(232,69,94)'}},'TILT COOLDOWN ACTIVE'),
-          React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mt-0.5'},
-            settings.antiTiltStreakLen,'+ losses in a row · new locks blocked for ',
-            React.createElement('span',{className:'tabular-nums font-bold'},_minLeft,':',String(_secLeft).padStart(2,'0')),
-            ' · take a break, review the recent losses',
-          ),
-        ),
-      ),
-      React.createElement('button',{
-        onClick:()=>{
-          if(window.confirm('Override tilt cooldown? Tilt entries are statistically the worst trades. Are you sure?')){
-            setTiltLockUntil(0);
-            if(typeof onOverride==='function')onOverride();
-          }
-        },
-        className:'px-2 py-1 rounded-lg text-[9px] uppercase font-bold tracking-wider hover:bg-[#EDEDED]/8 shrink-0',
-        style:{color:'rgba(232,69,94,0.7)',border:'1px solid rgba(232,69,94,0.25)'},
-      },'Override'),
-    ),
-  );
-})
+// V13.4.255: AntiTiltCooldownBanner removed. It rendered only when tiltLockUntil
+//   was in the future, and the effect that set it was hard-disabled in V10.4.1a
+//   ("antiTilt merged into autoExec cooldown") -- an effect that now returns
+//   before its own body. tiltLockUntil is therefore only ever set to 0, so this
+//   banner could not render. The autoExec cooldown it deferred to does not
+//   enforce anything either (see the note at _runEntry, v13.4.251).
 
 // ── V8.2: ASSET ROTATION HINT ────────────────────────────────────────────────
-function AssetRotationHint({rotation,onSwitch}){
-  if(!rotation)return null;
-  return React.createElement('div',{
-    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
-    style:{
-      border:'1px solid rgba(147,197,253,0.30)',
-      background:'rgba(147,197,253,0.04)',
-    },
-  },
-    React.createElement('div',{className:'flex items-baseline justify-between gap-3 flex-wrap'},
-      React.createElement('div',{className:'flex items-baseline gap-2 min-w-0 flex-1 flex-wrap'},
-        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:'rgba(147,197,253,0.85)'}},'Asset hint'),
-        React.createElement('span',{className:'text-[11px] text-[#EDEDED]/75'},
-          rotation.suggest,' has won ',rotation.othWR,'% of last ',rotation.othN,' (vs current ',rotation.curWR,'%, ',rotation.curN,' calls)',
-        ),
-      ),
-      onSwitch&&React.createElement('button',{
-        onClick:()=>onSwitch(rotation.suggest),
-        className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider shrink-0',
-        style:{color:'rgba(147,197,253,0.95)',border:'1px solid rgba(147,197,253,0.30)',background:'rgba(147,197,253,0.05)'},
-      },`Switch to ${rotation.suggest}`),
-    ),
-  );
-}
+// V13.4.255: AssetRotationHint removed. It suggested rotating to a better-
+//   performing asset, but _otherAsset is hardcoded to BTC -- the same asset as
+//   current -- so the two win rates it compared were always the same set and the
+//   difference could never clear the 15-point threshold. ETH support was removed
+//   long before this.
 
 // ── V9.3.0: DUAL-ASSET CALL STRIP ─────────────────────────────────────────────
 // Side-by-side BTC + ETH calls so the user sees Tara's read on both assets
@@ -33493,7 +33416,8 @@ ${_d.responseBody||'(empty)'}`;
             },manualOrderFeedback.msg);
           })(),
           _isLateTier?React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 mt-1.5 text-center italic'},
-            `Tara on ${_tier} — auto-exec may sit out · click to take her call manually`,
+            // V13.4.255: was "auto-exec may sit out". It does not sit out any more.
+            `Tara on ${_tier} · click to take her call manually`,
           ):React.createElement('div',{className:'text-[10px] text-[#EDEDED]/40 mt-1.5 text-center italic'},
             'override soft filters — fire on tara\'s direction',
           ),
@@ -44019,14 +43943,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _wa=analysis?.windowAmplitude;
     const _rangeBps=_wa?.rangeBps||0;
     const _isOpening=_wa?.label==='OPENING';
+    // V13.4.255: the dead-window sit-out is GONE from the display layer.
+    //   It was the last place the screen and the record disagreed. The commit
+    //   lifecycle stopped sitting out on dead windows in v13.4.250 (the
+    //   no-go-edge-dead-window category was dropped from _SITOUT_KEEP), so the
+    //   card could read "true sitout" while a directional call was committed,
+    //   logged, and -- since v13.4.252 -- actually ordered. One rule now.
+    //
+    //   The condition is still computed and stamped so it stays visible in
+    //   telemetry; it just no longer overrides the call.
     const _isDead=!_isOpening&&_rangeBps<5;
-    if(_isDead){
-      return{
-        ...call,
-        reason:`[V10.6.8b] Dead window — only ${_rangeBps.toFixed(1)}bps range, true sitout`,
-        _v10_6_8_deadWindow:true,
-      };
-    }
     // WINDOW IS MOVING — commit to posterior direction
     const _post=Number(analysis?.rawProbAbove)||50;
     if(_post===50)return call; // exactly neutral, nothing to commit to
@@ -44036,6 +43962,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       ...call,
       call:_dir,
       direction:_dir,
+      _v10_6_8_deadWindow:_isDead,   // V13.4.255: telemetry only, no longer gates
       confidence:_post,
       conviction:_convict,
       reason:`Directional lock · ${_dir} ${_convict.toFixed(0)}pt · ${_rangeBps.toFixed(0)}bps window momentum`,
@@ -52281,11 +52208,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             ⊕ button on the strip header. */}
 
         {/* V8.2: Anti-tilt cooldown — most urgent banner, blocks new locks */}
-        <AntiTiltCooldownBanner
-          tiltLockUntil={tiltLockUntil}
-          setTiltLockUntil={setTiltLockUntil}
-          settings={tradingSettings}
-        />
+        {/* V13.4.255: AntiTiltCooldownBanner removed — see the note at its
+            former definition. tiltLockUntil is only ever set to 0, so it never rendered. */}
 
 
         {/* V9.7.0: Mission Mode compact widget — only renders when active */}
@@ -52340,10 +52264,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         />
 
         {/* V8.2: Asset rotation suggestion */}
-        <AssetRotationHint
-          rotation={todayData?.assetRotation}
-          onSwitch={(asset)=>setCurrentAssetState(asset)}
-        />
+        {/* V13.4.255: AssetRotationHint removed — _otherAsset is hardcoded to
+            BTC, the same asset as current, so it could never suggest a rotation. */}
 
         {/* V8.2: Pre-window prep (30s before next window) */}
         <PreWindowPrepCard
