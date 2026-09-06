@@ -4777,6 +4777,15 @@ const kalshiRunEntryLadder=async({
   apiKeyId,privateKeyPem,ticker,dir,betDollars,offerCents,settings,dryRun,
   shouldAbort,onRung,pollMs=1000,
 })=>{
+  // The ladder plans on the COST axis — what we pay per contract on the side we
+  // are taking — which always walks upward toward the offer. kalshiBuildOrder
+  // takes the YES price, and for a DOWN call those run in OPPOSITE directions,
+  // because NO cost = 100 - yes. Paying less for NO means quoting a HIGHER yes
+  // price. Convert per rung; planning in YES terms would rest every DOWN ladder
+  // on the wrong side of the book.
+  //   UP   cost 66 -> yes limit 66  (buy YES at 66)
+  //   DOWN cost 56 -> yes limit 44  (buy NO at 56, i.e. sell YES at 44)
+  const _costToYesLimit=(c)=>dir==='UP'?c:(100-c);
   const plan=planEntryLadder({
     offerCents,
     undercutCents:settings?.entryLadderUndercutCents,
@@ -4790,7 +4799,7 @@ const kalshiRunEntryLadder=async({
     if(typeof shouldAbort==='function'&&shouldAbort())return{ok:false,reason:'aborted',attempts};
     if(typeof onRung==='function'){try{onRung(rung);}catch(_e){}}
     const placed=await kalshiPlaceOrder({
-      apiKeyId,privateKeyPem,ticker,dir,limitCents:rung.priceCents,betDollars,dryRun,
+      apiKeyId,privateKeyPem,ticker,dir,limitCents:_costToYesLimit(rung.priceCents),betDollars,dryRun,
     });
     if(!placed.ok){attempts.push({rung,error:placed.reason});continue;}
     const orderId=placed.order?.order_id;
