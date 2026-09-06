@@ -308,7 +308,9 @@ const _idbRead=async(key)=>{
 
 // One-shot write: insert or update a single doc. Best-effort, fire-and-forget
 //   (no error throws to caller). Used for non-RMW paths.
+const _VERIFY_NO_WRITES=true;
 const cloudSupabaseWrite=async(path,data)=>{
+  if(_VERIFY_NO_WRITES)return false;
   if(!_sbClient||!path)return false;
   try{
     const {error}=await _sbClient.from('tara_state').upsert({
@@ -826,6 +828,7 @@ const cloudSupabaseWatch=(path,callback)=>{
 const cloudSupabaseDelete=async(path)=>{
   if(!_sbClient||!path)return false;
   try{
+    if(_VERIFY_NO_WRITES)return false;
     const {error}=await _sbClient.from('tara_state').delete().eq('doc_path',path);
     if(error){console.warn('[Supabase] delete failed',path,error.message);return false;}
     return true;
@@ -878,6 +881,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
       _attempts++;
       try{
         // Read current state
+        if(_VERIFY_NO_WRITES)return false;
         const {data:_cur,error:_readErr}=await _sbClient.from('tara_state')
           .select('data,updated_at').eq('doc_path',path).maybeSingle();
         if(_readErr&&_readErr.code!=='PGRST116'){
@@ -5518,8 +5522,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.268-this-trade-card';
-const TARA_VERSION_DISPLAY='Tara 13.4.268';
+const BASELINE_VERSION='2026.09.06-v13.4.269-retire-duplicate-headline';
+const TARA_VERSION_DISPLAY='Tara 13.4.269';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17867,6 +17871,13 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     }
     return(
       <div className={"mb-3 px-3 py-3 rounded-lg shrink-0 "+(className||"")} style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isLockedSnap?`0 6px 20px rgba(10,10,10,0.35), inset 0 0 24px ${snap.call==='UP'?'rgba(35,185,129,0.07)':'rgba(232,69,94,0.07)'}`:'0 4px 16px rgba(10,10,10,0.28)'}}>
+        {/* V13.4.269: the call headline is now stage 1 of THIS TRADE, which renders
+            directly above this card and reads the same committed snapshot. Keeping
+            both meant the same direction, confidence and reason twice on one screen,
+            which is the duplication he asked to be merged away. What stays below is
+            everything THIS TRADE does NOT cover: conviction, decision clock, entry
+            pricing, edge, phase and memory. Restore with taraCallHeadline=on. */}
+        {(()=>{try{return localStorage.getItem('taraCallHeadline')==='on';}catch(_e){return false;}})()&&(<>
         <div className="flex items-baseline justify-between mb-2">
           <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
           <div className="flex items-baseline gap-2">
@@ -17983,6 +17994,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           </div>
         </div>
         <div className="text-[11px] text-[#EDEDED]/65 leading-snug mb-2">{dispReason||'Awaiting signal data...'}</div>
+        </>)}
         {/* V8.9.1: Follow-Tara button — one-tap copy of Tara's locked direction
              into the user's position. When tapped, sets userPosition = snap.call so
              the advisor's full in-trade management logic kicks in (hold suggestions,
@@ -18924,6 +18936,9 @@ function BestPracticesModal({open,onClose}){
 // direction all come from the committed snapshot when one exists.
 function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYesPrice,
                         autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat}){
+  // Declared BEFORE the early return: hooks must run in the same order on every
+  //   render, and this component can return null on the very first one.
+  const[whyOpen,setWhyOpen]=React.useState(false);
   if(!taraCall)return null;
 
   // ── stage 1: what Tara decided ──────────────────────────────────────────
@@ -18945,9 +18960,16 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   // Edge is Tara's confidence minus what the market already charges for the same
   // side. kalshiYesPrice is the UP price; a DOWN contract costs 100 minus it.
   const edge=(_kValid&&conf>0&&_edgeDir)?Math.round(conf-(_edgeDir==='UP'?_k:(100-_k))):null;
-  const why=String((_src&&_src.reason)||taraCall.reason||'')
+  const whyFull=String((_src&&_src.reason)||taraCall.reason||'')
     .replace(/^\[V?\d+[\d.]*\s*[A-Z0-9\-]*\]\s*/,'')
     .split(/\s*—\s*was:\s*/)[0].trim();
+  // V13.4.269: reason strings in this file are audit-trail text by design --
+  //   version tags, vote counts, per-signal arithmetic. Fine in the call log,
+  //   unreadable as the one line that explains the trade. The leading clause is
+  //   always the actual finding, so that is the line; the rest sits behind WHY.
+  const _whyParts=whyFull.split(/\s+·\s+/);
+  const why=_whyParts[0].trim();
+  const whyHasMore=whyFull.length>why.length+2;
 
   const _secsLeft=timeState?((Number(timeState.minsRemaining)||0)*60+(Number(timeState.secsRemaining)||0)):null;
   const _clock=_secsLeft!=null?Math.floor(_secsLeft/60)+':'+String(_secsLeft%60).padStart(2,'0'):null;
@@ -19030,9 +19052,10 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
         </div>
         {why&&(
           <div className="mt-3 px-3 py-2 rounded-lg flex items-baseline justify-between gap-3"
-               style={{background:'rgba(237,237,237,0.03)',border:'1px solid #16161c'}}>
-            <span className="text-[12px] text-[#EDEDED]/70 leading-snug min-w-0">{why}</span>
-            <span className="text-[8.5px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/25 shrink-0">why</span>
+               style={{background:'rgba(237,237,237,0.03)',border:'1px solid #16161c',cursor:whyHasMore?'pointer':'default'}}
+               onClick={()=>{if(whyHasMore)setWhyOpen(v=>!v);}}>
+            <span className="text-[12px] text-[#EDEDED]/70 leading-snug min-w-0">{whyOpen?whyFull:why}</span>
+            {whyHasMore&&<span className="text-[8.5px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/25 shrink-0">{whyOpen?'less':'why'}</span>}
           </div>
         )}
       </Stage>
