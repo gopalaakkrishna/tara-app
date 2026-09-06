@@ -5633,8 +5633,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.288-one-lock-rule-everywhere';
-const TARA_VERSION_DISPLAY='Tara 13.4.288';
+const BASELINE_VERSION='2026.09.06-v13.4.289-edge-at-lock-not-live';
+const TARA_VERSION_DISPLAY='Tara 13.4.289';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19325,7 +19325,20 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _edgeDir=dir||_leanDir;
   // Edge is Tara's confidence minus what the market already charges for the same
   // side. kalshiYesPrice is the UP price; a DOWN contract costs 100 minus it.
-  const edge=(_kValid&&conf>0&&_edgeDir)?Math.round(conf-(_edgeDir==='UP'?_k:(100-_k))):null;
+  // V13.4.289: this used the LIVE kalshiYesPrice while `conf` beside it is FROZEN at
+  //   commit, so stage 1 mixed two moments in one row — and it contradicted the
+  //   "Edge vs market" row below, which is gated on snap.kalshiAtLock and is therefore
+  //   the AT-LOCK figure. Seen live as "EDGE -15PT" on the card over "GOOD EDGE +12pt"
+  //   in the row: both correct, both labelled just edge, no way to tell them apart.
+  //   Stage 1 describes the decision AS MADE, so it takes the price as it was at the
+  //   lock. The live comparison belongs to stage 2, which is about how it is going.
+  //   Pre-commit there is no lock price, so the live one is correct there.
+  const _edgeK=(()=>{
+    const _atLock=Number(_snap&&_snap.kalshiAtLock);
+    if(_lockSt.committed&&Number.isFinite(_atLock)&&_atLock>0&&_atLock<100)return _atLock;
+    return _kValid?_k:null;
+  })();
+  const edge=(_edgeK!=null&&conf>0&&_edgeDir)?Math.round(conf-(_edgeDir==='UP'?_edgeK:(100-_edgeK))):null;
   const whyFull=String((_src&&_src.reason)||taraCall.reason||'')
     .replace(/^\[V?\d+[\d.]*\s*[A-Z0-9\-]*\]\s*/,'')
     .split(/\s*—\s*was:\s*/)[0].trim();
