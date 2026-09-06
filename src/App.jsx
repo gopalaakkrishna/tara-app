@@ -44912,8 +44912,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const s=autoExecSettings||{};
     if(!s.enabled)return{ok:false,reason:'disarmed'};
     if(killSwitchEngaged)return{ok:false,reason:'kill-switch'};
+    // Dry run never reaches the network — kalshiPlaceOrder and friends return
+    // synthetic orders — so requiring credentials to simulate would block the
+    // exact rehearsal this mode exists for. Live runs still demand them.
+    const dryRun=(autoExecSettings||{}).dryRun!==false;
     const creds=kalshiCreds||{};
-    if(!creds.apiKeyId||!creds.privateKeyPem)return{ok:false,reason:'no-credentials'};
+    if(!dryRun&&(!creds.apiKeyId||!creds.privateKeyPem))return{ok:false,reason:'no-credentials'};
 
     const lock=lockedCallRef.current;
     const dir=lock&&lock.dir;
@@ -44936,7 +44940,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
     _entryFiredForRef.current=lockKey;
     _entryBusyRef.current=true;
-    const dryRun=s.dryRun!==false;
     setAutoOrderState({status:'placing',dir,ticker,dryRun,manual:!!manual,offerCents:costCents,at:Date.now()});
 
     try{
@@ -45036,8 +45039,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(!st||st.status!=='filled')return{ok:false,reason:'no-position'};
     const dir=st.dir;
     if(dir!=='UP'&&dir!=='DOWN')return{ok:false,reason:'no-dir'};
+    const dryRun=st.dryRun!==false;
     const creds=kalshiCreds||{};
-    if(!creds.apiKeyId||!creds.privateKeyPem)return{ok:false,reason:'no-credentials'};
+    if(!dryRun&&(!creds.apiKeyId||!creds.privateKeyPem))return{ok:false,reason:'no-credentials'};
     const count=Math.max(1,Math.floor(Number(st.filledCount)||0));
     if(!(count>0))return{ok:false,reason:'no-count'};
     const limitCents=_exitYesLimitCents(dir);
@@ -45048,7 +45052,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     _exitFiredForRef.current=key;
     _exitBusyRef.current=true;
 
-    const dryRun=st.dryRun!==false;
     setAutoOrderState(prev=>Object.assign({},prev||{},{status:'exiting',exitReason:why,at:Date.now()}));
     try{
       const res=await kalshiExitPosition({
