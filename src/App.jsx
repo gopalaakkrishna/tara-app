@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.276-close-the-column-gap';
-const TARA_VERSION_DISPLAY='Tara 13.4.276';
+const BASELINE_VERSION='2026.09.06-v13.4.277-fold-the-ticket';
+const TARA_VERSION_DISPLAY='Tara 13.4.277';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32255,6 +32255,18 @@ function ScalperAdvisorPanel({
   //   showMonitoring = whether the engineer-mode exit-tick details are visible.
   const[tappedTip,setTappedTip]=React.useState(null);
   const[showMonitoring,setShowMonitoring]=React.useState(false);
+  // V13.4.277: the trade ticket READOUT collapses. Persisted, because a disclosure
+  //   that resets on every window roll is worse than no disclosure at all.
+  const[ticketOpen,setTicketOpen]=React.useState(()=>{
+    try{return localStorage.getItem('taraTicketOpen')==='1';}catch(_e){return false;}
+  });
+  const _toggleTicket=React.useCallback(()=>{
+    setTicketOpen(v=>{
+      const n=!v;
+      try{localStorage.setItem('taraTicketOpen',n?'1':'0');}catch(_e){}
+      return n;
+    });
+  },[]);
   const _editOriginalsRef=React.useRef(null); // {betSize, autoExitOffer, stopLossDeltaCents, entryOverride}
   const _editLastWindowIdRef=React.useRef(null);
   // V9.19.9: Persist edit originals to localStorage so a refresh mid-edit doesn't
@@ -33364,9 +33376,35 @@ ${_d.responseBody||'(empty)'}`;
           'V9.17.28: click "show full request/response details" above to see what we sent and what Kalshi returned. Click ⧉ Copy to paste it elsewhere.',
         ),
       ),
+      // V13.4.277: ONE-LINE SUMMARY + DISCLOSURE. The rows below were the biggest
+      //   single block left on the page (~406px) and roughly half of them restated
+      //   what THIS TRADE stage 1 and stage 3 now say. Collapsed by default -- but
+      //   the numbers that live NOWHERE else (contract count, entry price, stake)
+      //   stay on this summary line, so the detail is folded, not hidden.
+      React.createElement('button',{
+        key:'ticket-summary',
+        onClick:_toggleTicket,
+        className:'w-full flex items-baseline justify-between gap-2 py-2 text-left',
+      },
+        React.createElement('span',{className:'text-[12px] tabular-nums',style:{color:'rgba(237,237,237,0.75)'}},
+          (()=>{
+            const _d=_taraDirLabel||'—';
+            const _n=Number.isFinite(_contracts)?_contracts:null;
+            const _c=Number.isFinite(_entryCents)?Math.round(_entryCents):null;
+            const _b=Number.isFinite(_betSize)?_betSize:null;
+            const _size=(_n!=null&&_c!=null)?(' · '+_n+' @ '+_c+'¢'):'';
+            const _stake=(_b!=null)?(' · $'+_b.toFixed(2)):'';
+            return _d+_size+_stake;
+          })(),
+        ),
+        React.createElement('span',{
+          className:'text-[9px] uppercase font-bold tracking-[0.14em] shrink-0',
+          style:{color:'rgba(237,237,237,0.35)'},
+        },ticketOpen?'hide detail':'detail'),
+      ),
       // V9.17.17: Trade ticket rows — show LIVE values when user is in a trade,
       //   generic suggestion when not. _liveValid is the gate.
-      React.createElement('div',{className:'space-y-0'},
+      ticketOpen&&React.createElement('div',{className:'space-y-0'},
         // tara says — V9.17.22: when in trade, show ENTERED direction (from
         //   autoOrderState.dir) primary, and CURRENT Tara direction beneath if
         //   they diverge. Sticky lock means entered direction won't flip, but
