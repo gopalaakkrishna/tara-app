@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.257-best-hours-actually-compute';
-const TARA_VERSION_DISPLAY='Tara 13.4.257';
+const BASELINE_VERSION='2026.09.06-v13.4.258-sports-screen-rebuild';
+const TARA_VERSION_DISPLAY='Tara 13.4.258';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6308,6 +6308,20 @@ const T2_COPPER_BG='rgba(201,125,74,0.08)';
 const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
 // Tabular-nums monospace style — used for all prices, posteriors, statistics
 // font-variant-numeric: tabular-nums keeps digits aligned column-wise (no wobble during ticks)
+// V13.4.258 — INTERFACE REBUILD TOKENS. One visual language for every screen,
+//   introduced with Sports and reused by each screen as it is converted.
+//   Deliberately built from the palette already in this file: #050508 ground,
+//   #0A0A0E surface, #1B1B22 hairline, #EDEDED text, #23B981 win, #E8455E loss,
+//   #D4A03A caution. Nothing new was invented.
+//
+//   The point is WEIGHT, not colour: one panel treatment instead of pills at
+//   a dozen sizes, tiny caps labels, mono numerals, and green/red reserved for
+//   outcomes so nothing else competes with them.
+const UI2_PANEL='border border-[#1B1B22] bg-[#0A0A0E] rounded-[10px]';
+const UI2_HEAD='px-3.5 py-2.5 border-b border-[#16161c] flex items-baseline justify-between';
+const UI2_LABEL='text-[9.5px] uppercase font-bold tracking-[0.15em] text-[#EDEDED]/30';
+const UI2_LABEL2='text-[10px] uppercase font-semibold tracking-[0.11em] text-[#EDEDED]/45';
+const UI2_GRID_BG='bg-[#16161c]';   // 1px gaps between cells show through as hairlines
 const T2_MONO_STYLE={fontVariantNumeric:'tabular-nums',letterSpacing:'-0.01em'};
 // Corner stamp component — small gold serial mark in upper-right of panels
 function T2Stamp({code}){return(<span style={{position:'absolute',top:'8px',right:'10px',fontSize:'8px',letterSpacing:'0.18em',color:T2_GOLD_DIM,fontWeight:500}}>{code}</span>);}
@@ -29642,7 +29656,10 @@ function SportsView({onClose}){
   const setAllDays=open=>{const m={};grouped.forEach(d=>{m[d.key]=open;});setDateOverrides(m);};
 
   const rec=data&&data.record;
-  const card='bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] relative';
+  // V13.4.258: was a raised card with a shadow and a corner stamp per tile.
+  //   Now a hairline cell inside one joined panel -- the tiles read as one
+  //   instrument rather than four competing boxes.
+  const card='bg-[#0A0A0E] p-3.5 relative';
 
   return(
     <div className="w-full min-h-0">
@@ -29666,23 +29683,23 @@ function SportsView({onClose}){
 
         {data&&(<>
           {rec&&(
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
-              <div className={card}><T2Stamp code="REC · 001"/>
+            <div className={`grid grid-cols-2 sm:grid-cols-4 gap-px mb-4 overflow-hidden ${UI2_PANEL} ${UI2_GRID_BG}`}>
+              <div className={card}>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Record</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{rec.wins}–{rec.losses}</div>
                 <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{Math.round((rec.win_rate||0)*100)}% win rate</div>
               </div>
-              <div className={card}><T2Stamp code="LL · 002"/>
+              <div className={card}>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Model log loss</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{rec.ll==null?'—':rec.ll.toFixed(3)}</div>
                 <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">lower is better</div>
               </div>
-              <div className={card}><T2Stamp code="MKT · 003"/>
+              <div className={card}>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Market log loss</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{rec.mkt_ll==null?'—':rec.mkt_ll.toFixed(3)}</div>
                 <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">on the {rec.n_mkt||0} with a price</div>
               </div>
-              <div className={card}><T2Stamp code="VS · 004"/>
+              <div className={card}>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">vs market</div>
                 <div className="text-2xl sm:text-3xl font-bold" style={{...T2_MONO_STYLE,color:(rec.vs_market||0)<0?SPORTS_GREEN:SPORTS_RED}}>{rec.vs_market==null?'—':(rec.vs_market>0?'+':'')+rec.vs_market.toFixed(3)}</div>
                 <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{(rec.vs_market||0)<0?'beating market':'losing to market'}</div>
