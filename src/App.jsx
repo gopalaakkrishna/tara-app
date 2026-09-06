@@ -34483,7 +34483,28 @@ function TaraApp(){
         // to the offer. After `entryLadderMaxSteps` steps, takes the market
         // (current offer + slippage). Net effect: most fills save 1-2¢/contract,
         // a small minority of fast-moving setups never fill at all.
-        entryLadderEnabled:!!v.entryLadderEnabled, // default OFF — opt-in
+        // V13.4.249 — LADDER ON BY DEFAULT, one-time migration.
+        //   V13.4.228 measured this on 440 settled calls: crossing the spread
+        //   costs -1.85c per contract, resting a cent inside earns +1.00c, a
+        //   2.85c swing that is larger than the signal's gross edge. The
+        //   checkbox has existed since V9.7.4 but nothing implemented the walk
+        //   until V13.4.248, so "off" was the only behaviour there had ever
+        //   been and every stored `false` is a default nobody chose. Flip it
+        //   once, then respect the setting forever after — same shape as the
+        //   V10.2.5 stop-loss and V10.2.8 audit-optimal migrations above.
+        entryLadderEnabled:(()=>{
+          let _v=!!v.entryLadderEnabled;
+          try{
+            if(!localStorage.getItem('tara_v13_4_249_ladder_default_applied')){
+              if(!_v){
+                _v=true;
+                try{console.info('[V13.4.249] entry ladder ON by default — rest instead of cross (V13.4.228: +2.85c/contract swing)');}catch(_e){}
+              }
+              localStorage.setItem('tara_v13_4_249_ladder_default_applied','1');
+            }
+          }catch(_e){}
+          return _v;
+        })(),
         entryLadderUndercutCents:Number(v.entryLadderUndercutCents)>0?Number(v.entryLadderUndercutCents):2, // start 2¢ below
         entryLadderStepSec:Number(v.entryLadderStepSec)>=2?Number(v.entryLadderStepSec):8, // wait 8s per step
         entryLadderMaxSteps:Number(v.entryLadderMaxSteps)>=1?Number(v.entryLadderMaxSteps):2, // 2 ladder rungs before market
