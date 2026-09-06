@@ -5510,8 +5510,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.29-v13.4.248-stale-pending-resolver-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.248';
+const BASELINE_VERSION='2026.09.06-v13.4.249-no-sitouts-7min-lock-deadline';
+const TARA_VERSION_DISPLAY='Tara 13.4.249';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5565,6 +5565,28 @@ const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runwa
 //   At 72c you need 72% WR to break even and the book wins 61% there. EV tracks COST,
 //   not win rate -- the same lesson as every EV-vs-WR fix in this file, now applied to
 //   the band itself. localStorage dials still win over these defaults if set.
+// V13.4.249 — SIT-OUTS OFF. Tara commits to her lean instead of declining a
+//   window on signal quality. Set NO_SITOUT_MODE=false to restore the old
+//   behaviour in one line; nothing else needs touching.
+const NO_SITOUT_MODE=true;
+// Locks may only form while MORE than this many seconds remain. Past it the
+//   window is left alone. Replaces the old late-lock behaviour, which allowed
+//   locks until ~100s remained -- the file's own note at isVeryLateLock says
+//   "losses lock avg 777s vs wins 744s", so an earlier deadline is the same
+//   direction the existing evidence already pointed.
+const LOCK_DEADLINE_SEC=420;
+// Sit-out categories that SURVIVE. Everything here is about the market, not
+//   about how good the read is:
+//     - nothing to trade (no open market, no price)
+//     - entry cost outside the band that getEntryMinCost documents as the only
+//       profitable one (55-69c = +1,079c/n206; 70-74c = -1,127c/n106)
+//   Delete an entry to let that case trade too.
+const _SITOUT_KEEP=new Set([
+  'kalshi-window-closed',
+  'no-go-price-unavailable-sitout',
+  'no-go-edge','edge-sitout','no-go-edge-band-sitout','no-go-edge-dead-window',
+  'v1123-ev-gate','time-cap-band-sitout',
+]);
 const getEntryMinCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:55;}catch(_e13428a){return 55;}};
 const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e13428b){return 70;}};
 // V13.4.180: SLIM signal telemetry for cloud sync. The V10.7.58 egress fix stripped
@@ -41939,6 +41961,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const isVeryLateLock=is15m?(elapsedSeconds>800):(elapsedSeconds>250); // V112: tighter — losses cluster in last 100s
       // Late lock warning zone (700-820s elapsed) — show indicator, allow but note
       const isLateLockZone=is15m?(elapsedSeconds>700&&elapsedSeconds<=820):(elapsedSeconds>220&&elapsedSeconds<=260);
+      // V13.4.249: hard lock deadline. No NEW lock may form once this many seconds
+      //   remain -- clockSeconds counts DOWN, so this is "more than 7 minutes left"
+      //   on a 15m window. Previously locks were merely penalised this late
+      //   (isLateLockZone -8, isVeryLateLock -20) and still allowed until ~100s
+      //   remained. An existing lock is untouched; this only blocks forming a new one.
+      const _pastLockDeadline=NO_SITOUT_MODE&&clockSeconds<=LOCK_DEADLINE_SEC;
 
       // Add current posterior to history (capped at 12 samples)
       posteriorHistoryRef.current.push(posterior);
@@ -42196,7 +42224,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           // V138: Premium Mode and the MTF Confluence gate it carried have been removed.
           //       Premium added asymmetric blocks (US session skip, weak RC skip, SS/HVC DOWN block,
           //       MTF cross-window veto). With FGT as the primary signal these were over-filtering.
-          const dirAllowed=!committedDir||committedDir==='UP';
+          const dirAllowed=(!committedDir||committedDir==='UP')&&!_pastLockDeadline;
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
@@ -42324,7 +42352,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //       (V112 → V137 evolution). Was the last asymmetric block; UP had no equivalent.
           //       Score math (regime bonus, FGT contribution, signal alignment) is now the only
           //       directional filter. Premium Mode + MTF Confluence gate also removed.
-          const dirAllowed=!committedDir||committedDir==='DOWN';
+          const dirAllowed=(!committedDir||committedDir==='DOWN')&&!_pastLockDeadline;
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
@@ -46356,6 +46384,30 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Fallback to claimedDir so the direction is always set on the snapshot.
     const _commitDir=_postKnown?(_post>=50?'UP':'DOWN'):(claimedDir||null);
     const _commitConf=_postKnown?Math.round(_commitDir==='UP'?_post:(100-_post)):50;
+    // V13.4.249: turns a sit-out snapshot into a commit on Tara's own lean.
+    //   Applied at every snapshot assignment below; a snapshot that is already
+    //   directional passes straight through, so it is safe to wrap all of them.
+    const _secsLeftNow=()=>(timeState.minsRemaining*60)+timeState.secsRemaining;
+    const _applyNoSitout=(snap)=>{
+      try{
+        if(!NO_SITOUT_MODE||!snap||snap.call!=='SIT_OUT')return snap;
+        if(_SITOUT_KEEP.has(snap.noGoCategory))return snap;   // market-side, keep
+        if(_secsLeftNow()<=LOCK_DEADLINE_SEC)return snap;     // past the deadline
+        const _d=(snap._intendedDir==='UP'||snap._intendedDir==='DOWN')?snap._intendedDir
+          :(_commitDir==='UP'||_commitDir==='DOWN')?_commitDir:null;
+        if(!_d)return snap;                                   // no lean to commit to
+        return{...snap,
+          call:_d,direction:_d,dir:_d,
+          wasOverriddenNoTrade:false,
+          noGoCategory:null,
+          confidence:snap.confidence||_commitConf,
+          tier:'no-sitout-commit',
+          _noSitoutFrom:snap.noGoCategory||snap.tier||'sitout',
+          _noSitoutWas:snap.reason||snap.caution||null,
+          caution:'Committed on the lean — sit-outs are off (was: '+(snap.noGoCategory||'sitout')+')',
+        };
+      }catch(_e){return snap;}
+    };
     const _isCoinFlip=_postKnown&&_post>=45&&_post<=55;
     // V13.4.180: PATIENCE FLOOR 90s -> 210s on 15m. The old 90s ("1-2min range user
     //   wants") predates the timing data; measured on the cloud log, in-band (55-69c)
@@ -47337,8 +47389,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _committedAt:Date.now(),
             _v10790_gapAligned:_gapAligned,
           };
-          taraCallSnapshotRef.current=_sitSnap;
-          _logSnapshotEntry(_sitSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_sitSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -47379,8 +47431,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _v112Timing:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.timing:null),
             _v112Why:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.why:null),
           };
-          taraCallSnapshotRef.current=_forceSnap;
-          _logSnapshotEntry(_forceSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_forceSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -47405,8 +47457,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           fgt:analysis?.mtfAlignment,
           _committedAt:Date.now(),
         };
-        taraCallSnapshotRef.current=_sitSnap;
-        _logSnapshotEntry(_sitSnap);
+        taraCallSnapshotRef.current=_applyNoSitout(_sitSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current);
         _persistLock();
         return;
       }
@@ -47555,8 +47607,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               _mgcEdge:Math.round(_mgcEdge),
             };
             try{console.info('[V13.0 MOD-GAP-CHOP] sit-out: '+_mgcGapBps.toFixed(0)+'bps, '+Math.round(_mgcKForDir)+'c on '+_commitDir+', chop');}catch(_){}
-            taraCallSnapshotRef.current=_mgcSit;
-            _logSnapshotEntry(_mgcSit);
+            taraCallSnapshotRef.current=_applyNoSitout(_mgcSit);
+            _logSnapshotEntry(taraCallSnapshotRef.current);
             _persistLock();
             return;
           }
@@ -47619,8 +47671,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               fgt:analysis?.mtfAlignment,
               _committedAt:Date.now(),
             };
-            taraCallSnapshotRef.current=_sitSnap;
-            _logSnapshotEntry(_sitSnap);
+            taraCallSnapshotRef.current=_applyNoSitout(_sitSnap);
+            _logSnapshotEntry(taraCallSnapshotRef.current);
             _persistLock();
             return;
           }
@@ -47681,8 +47733,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
           };
-          taraCallSnapshotRef.current=_ngNoDataSnap;
-          _logSnapshotEntry(_ngNoDataSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_ngNoDataSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -47705,8 +47757,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
           };
-          taraCallSnapshotRef.current=_ngSitSnap;
-          _logSnapshotEntry(_ngSitSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_ngSitSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -47735,8 +47787,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v10787_isThinBook:((depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0))>0&&((depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0))<500000,
           _v10787_edgeThreshold:_noGoEdgeThreshold||null,
         };
-        taraCallSnapshotRef.current=_ngSnap;
-        _logSnapshotEntry(_ngSnap); // V7.10.1: write to call log
+        taraCallSnapshotRef.current=_applyNoSitout(_ngSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1: write to call log
         _persistLock();
         return;
       }
@@ -47843,8 +47895,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               _v112Timing:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.timing:null),
               _v112Why:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.why:null),
             };
-            taraCallSnapshotRef.current=_forceSnap;
-            _logSnapshotEntry(_forceSnap);
+            taraCallSnapshotRef.current=_applyNoSitout(_forceSnap);
+            _logSnapshotEntry(taraCallSnapshotRef.current);
             _persistLock();
             return;
           }
@@ -47884,8 +47936,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _v10_7_48_effectiveDeadzone:_effectiveDeadzone,
             _v10_7_48_postAtSitout:_post,
           };
-          taraCallSnapshotRef.current=_sitSnap;
-          _logSnapshotEntry(_sitSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_sitSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -47925,8 +47977,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
           };
-          taraCallSnapshotRef.current=_capSitSnap;
-          _logSnapshotEntry(_capSitSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_capSitSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -47950,8 +48002,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           fgt:analysis?.mtfAlignment,
           _committedAt:Date.now(), // V9.1.3: stamp at creation
         };
-        taraCallSnapshotRef.current=_capSnap;
-        _logSnapshotEntry(_capSnap); // V7.10.1: write to call log
+        taraCallSnapshotRef.current=_applyNoSitout(_capSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1: write to call log
         _persistLock();
         return;
       }
@@ -47993,8 +48045,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
           };
-          taraCallSnapshotRef.current=_tmSitSnap;
-          _logSnapshotEntry(_tmSitSnap);
+          taraCallSnapshotRef.current=_applyNoSitout(_tmSitSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
           _persistLock();
           return;
         }
@@ -48018,8 +48070,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           fgt:analysis?.mtfAlignment,
           _committedAt:Date.now(), // V9.1.3: stamp at creation
         };
-        taraCallSnapshotRef.current=_timerSnap;
-        _logSnapshotEntry(_timerSnap); // V7.10.1: write to call log
+        taraCallSnapshotRef.current=_applyNoSitout(_timerSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1: write to call log
         _persistLock();
         return;
       }
@@ -48087,8 +48139,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v13458_entryCost:Math.round(_ceCost),
           _v13458_edge:Math.round(_ceConf-_ceCost),
         };
-        taraCallSnapshotRef.current=_ceSnap;
-        _logSnapshotEntry(_ceSnap);
+        taraCallSnapshotRef.current=_applyNoSitout(_ceSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current);
         _persistLock();
         return;
       }
@@ -48117,8 +48169,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _v10_7_47_sitoutThresholdSec:Math.round(_v1074_sitoutMinSec),
         _v10_7_47_dialAtSitout:50, // dial removed V10.8.4
       };
-      taraCallSnapshotRef.current=_mixSnap;
-      _logSnapshotEntry(_mixSnap); // V7.10.1
+      taraCallSnapshotRef.current=_applyNoSitout(_mixSnap);
+      _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1
       _persistLock();
       return;
     }
@@ -48166,8 +48218,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
           fgt:analysis?.mtfAlignment,
         };
-        taraCallSnapshotRef.current=_kwcSnap;
-        _logSnapshotEntry(_kwcSnap); // V7.10.1
+        taraCallSnapshotRef.current=_applyNoSitout(_kwcSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1
         _persistLock();
         return;
       }
@@ -48190,8 +48242,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
           fgt:analysis?.mtfAlignment,
         };
-        taraCallSnapshotRef.current=_knrSnap;
-        _logSnapshotEntry(_knrSnap); // V7.10.1
+        taraCallSnapshotRef.current=_applyNoSitout(_knrSnap);
+        _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1
         _persistLock();
         return;
       }
@@ -48635,8 +48687,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
             fgt:analysis?.mtfAlignment,
           };
-          taraCallSnapshotRef.current=_edgeSnap;
-          _logSnapshotEntry(_edgeSnap); // V7.10.1
+          taraCallSnapshotRef.current=_applyNoSitout(_edgeSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current); // V7.10.1
           _persistLock();
           return;
         }
@@ -48676,8 +48728,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               isNoGo:true,
               noGoCategory:'late-trend-oppose',
             };
-            taraCallSnapshotRef.current=_leSnap;
-            _logSnapshotEntry(_leSnap);
+            taraCallSnapshotRef.current=_applyNoSitout(_leSnap);
+            _logSnapshotEntry(taraCallSnapshotRef.current);
             _persistLock();
             try{console.info('[V12.7 LATE-TREND-OPPOSE] sit out:',_leTC.dir,'opposes',_leDir,'· secLeft',_leSecLeft);}catch(_){}
             return;
@@ -48717,8 +48769,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           wouldHaveBeen:_committedCall,
           wouldHaveBeenTier:tierLabel,
         };
-        taraCallSnapshotRef.current=_t1Snap;
-        _logSnapshotEntry(_t1Snap);
+        taraCallSnapshotRef.current=_applyNoSitout(_t1Snap);
+        _logSnapshotEntry(taraCallSnapshotRef.current);
         _persistLock();
         return;
       }
