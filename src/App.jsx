@@ -5584,8 +5584,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.282-name-which-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.282';
+const BASELINE_VERSION='2026.09.06-v13.4.283-phantom-posterior-field';
+const TARA_VERSION_DISPLAY='Tara 13.4.283';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10283,7 +10283,13 @@ const computeAdvisor=(params)=>{
   const momentumWith=(isUP&&tickSlope>0)||(isDN&&tickSlope<0);
   const momentumAgainst=(isUP&&tickSlope<0)||(isDN&&tickSlope>0);
   const adverseAccel=(isUP&&(accel||0)<-0.5)||(isDN&&(accel||0)>0.5);
-  const winSide=isUP?posterior:(100-posterior); // Tara model confidence only
+  // V13.4.283: this is the LIVE model read flipped to the position's side, not the
+  //   confidence frozen at commit. Both are legitimate -- live is the right number
+  //   for "should I get out now" -- but every line below quoted it as a bare
+  //   "Tara: 71%" while the card, the badge and the edge row all showed the
+  //   committed 67%. Four numbers, one name. They now read "Tara now: 71%", so the
+  //   live figure is identifiable as live instead of contradicting the call.
+  const winSide=isUP?posterior:(100-posterior); // LIVE model confidence, not the lock
   // REAL truth: is price actually above/below strike right now?
   const gapForPosition=isUP?gapBps:-gapBps;
   const isActuallyWinning=gapForPosition>0;
@@ -10476,8 +10482,8 @@ const computeAdvisor=(params)=>{
   }
 
   // ── 5. NEAR STRIKE (small adverse buffer zone) ─────────────────────────────
-  if(!isActuallyWinning&&momentumWith)return{label:'RECOVERY IN PROGRESS',reason:`Price moving toward strike. Tara: ${winSide.toFixed(0)}%. Comeback score: ${comebackScore.toFixed(0)}/100. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT EARLY',actionTarget:'SIT OUT'};
-  if(!isActuallyWinning)return{label:'AT STRIKE — WATCH CLOSELY',reason:`Price at strike (${gapStr}). No clear edge. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
+  if(!isActuallyWinning&&momentumWith)return{label:'RECOVERY IN PROGRESS',reason:`Price moving toward strike. Tara now: ${winSide.toFixed(0)}%. Comeback score: ${comebackScore.toFixed(0)}/100. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT EARLY',actionTarget:'SIT OUT'};
+  if(!isActuallyWinning)return{label:'AT STRIKE — WATCH CLOSELY',reason:`Price at strike (${gapStr}). No clear edge. Tara now: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
 
   // ── 6. WINNING POSITION ────────────────────────────────────────────────────
   // V6.2.8: Tara-aligned reassurance — when Tara strongly agrees with user's winning position,
@@ -10502,12 +10508,12 @@ const computeAdvisor=(params)=>{
     const _holdKNote=_velConfStr?`${_velConfStr} — tape confirming.`:null;
     return{label:`SOLID · HOLD ${userPosition}`,reason:`${gapForPosition.toFixed(0)} bps clean. Tara ${userPosition} ${Math.round(_liveConf)}%${_holdEdgeNote?`, ${_holdEdgeNote}`:''}. ${[_holdKNote,_driftStr12].filter(Boolean).join(' ')||'Position holding well.'} ${_timePress12||timeLabel}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   }
-  if(isActuallyWinning&&winSide>80&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`${gapForPosition.toFixed(0)} bps favorable. Tara: ${winSide.toFixed(0)}% confident. Wait for offer to appear. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
-  if(isActuallyWinning&&momentumWith&&gapMagnitude>10)return{label:'HOLD STRONG',reason:`${gapForPosition.toFixed(0)} bps above/below strike. Momentum aligned. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isActuallyWinning&&winSide>80&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`${gapForPosition.toFixed(0)} bps favorable. Tara now: ${winSide.toFixed(0)}% confident. Wait for offer to appear. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
+  if(isActuallyWinning&&momentumWith&&gapMagnitude>10)return{label:'HOLD STRONG',reason:`${gapForPosition.toFixed(0)} bps above/below strike. Momentum aligned. ${gapStr}. Tara now: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   if(isActuallyWinning&&momentumAgainst)return{label:'SECURE HOLD — WATCH MOMENTUM',reason:`Winning by ${gapForPosition.toFixed(0)} bps but momentum flipping. Consider locking in. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
-  if(isActuallyWinning&&isLate)return{label:'HOLD FIRM — ALMOST THERE',reason:`${gapForPosition.toFixed(0)} bps favorable with ${timeLabel} left. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
-  if(isActuallyWinning)return{label:'HOLD FIRM',reason:`${gapStr}. Tara: ${winSide.toFixed(0)}% win rate. Position solid. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
-  return{label:'HOLD FIRM',reason:`${gapStr}. Tara: ${winSide.toFixed(0)}% win rate. Watching for cleaner signal. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isActuallyWinning&&isLate)return{label:'HOLD FIRM — ALMOST THERE',reason:`${gapForPosition.toFixed(0)} bps favorable with ${timeLabel} left. ${gapStr}. Tara now: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isActuallyWinning)return{label:'HOLD FIRM',reason:`${gapStr}. Tara now: ${winSide.toFixed(0)}% win rate. Position solid. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  return{label:'HOLD FIRM',reason:`${gapStr}. Tara now: ${winSide.toFixed(0)}% win rate. Watching for cleaner signal. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
 };
 
 // ═══════════════════════════════════════
@@ -19560,7 +19566,33 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     const _taraDir=taraCall?.snapshot?.call;
     const _taraAligned=_taraDir===userPosition;
     const _taraOpposed=(_taraDir==='UP'&&_isDN)||(_taraDir==='DOWN'&&_isUP);
-    const _taraConf=Number(taraCall?.snapshot?.posterior)||50;
+    // V13.4.283: read `taraCall.snapshot.posterior` -- a field NO snapshot builder
+    //   has ever written. Snapshots store `atPosterior`. So this was always
+    //   Number(undefined) -> NaN -> 50, and the damage was not the wrong label:
+    //
+    //     "Tara still UP 50%"                quoted a coin flip while the card
+    //                                        showed her committed 67%
+    //     if(_taraOpposed && _taraConf>=70)  NEVER TRUE -> the URGENT "Tara
+    //                                        flipped against you" card has never
+    //                                        fired, and it is the one wired to
+    //                                        Discord
+    //     if(_taraOpposed && _taraConf>=60)  NEVER TRUE -> "Tara disagrees but
+    //                                        you're ahead" has never fired
+    //
+    //   Two alerts silently dead, one of them the reversal warning on an open
+    //   position. Same shape as the Number(null)===0 sentinel bugs this file
+    //   keeps producing: a fallback that looks like a safe default and is not.
+    //   readLockState owns the confidence rule now, so use it; pre-commit there
+    //   is no snapshot, so derive from the live object the same way it does.
+    const _taraConf=(()=>{
+      const _ls=readLockState(taraCall?.snapshot);
+      if(_ls.committed&&_ls.confidence>0)return _ls.confidence;
+      const _c=Number(taraCall?.conviction);
+      if(Number.isFinite(_c)&&_c>0)return 50+_c;
+      const _p=Number(taraCall?.confidence);
+      if(Number.isFinite(_p)&&_p>0)return (_taraDir==='DOWN'&&_p<50)?(100-_p):_p;
+      return 50;
+    })();
     // Edge vs Kalshi
     const _kalshi=Number(kalshiYesPrice);
     // Offer awareness
@@ -53822,7 +53854,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           </div>
           {/* Current call direction + price */}
           <div className="flex items-center gap-2 text-xs tabular-nums">
-            {taraCall?.snapshot?.call&&<span className={'font-bold px-2 py-1 rounded-lg '+(taraCall.snapshot.call==='UP'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-rose-500/15 text-rose-400 border border-rose-500/30')}>{taraCall.snapshot.call==='UP'?'▲ UP':'▼ DN'} {taraCall.snapshot.posterior?Math.round(taraCall.snapshot.posterior)+'%':''}</span>}
+            {taraCall?.snapshot?.call&&<span className={'font-bold px-2 py-1 rounded-lg '+(taraCall.snapshot.call==='UP'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-rose-500/15 text-rose-400 border border-rose-500/30')}>{taraCall.snapshot.call==='UP'?'▲ UP':'▼ DN'} {(()=>{
+              // V13.4.283: also read the phantom `snapshot.posterior`. Guarded by a
+              //   ternary, so instead of a wrong number it silently printed NOTHING
+              //   -- this badge has never shown a percentage. readLockState gives the
+              //   same figure the rest of the app shows.
+              const _c=readLockState(taraCall.snapshot).confidence;
+              return _c>0?_c+'%':'';
+            })()}</span>}
             {!taraCall?.snapshot?.call&&<span className="text-[#EDEDED]/40 italic">scanning</span>}
             <span className="text-white font-bold">${Number(currentPrice).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
           </div>
