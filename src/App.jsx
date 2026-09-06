@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.256-drop-per-device-record';
-const TARA_VERSION_DISPLAY='Tara 13.4.256';
+const BASELINE_VERSION='2026.09.06-v13.4.257-best-hours-actually-compute';
+const TARA_VERSION_DISPLAY='Tara 13.4.257';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37875,12 +37875,31 @@ function TaraApp(){
     }
   },[todayData,tradingSettings.antiTiltEnabled,tradingSettings.antiTiltStreakLen,tradingSettings.antiTiltMinutes]);
   const bestWindowsToday=useMemo(()=>{
-    if(!scorecards)return null;
+    // V13.4.257 FIX: this used to read scorecards[`${dayName}-${h}`], a key shape
+    //   the scorecards memo never produces (it only makes '15m' and '5m'). Every
+    //   hour hit the !cell continue, so _todayHours stayed empty and this returned
+    //   null on every render -- PreWindowPrepCard and DecisionalOverlay have never
+    //   shown an hour. Tallied from taraCallLog directly now, which is the source
+    //   TradeScheduleStrip already uses successfully.
     const _now=new Date();
-    const dayName=['SUN','MON','TUE','WED','THU','FRI','SAT'][_now.getDay()];
+    const dayName=['SUN','MON','TUE','WED','THU','FRI','SAT'][_now.getUTCDay()];
+    const _dayIdx=_now.getUTCDay();
+    const _byHour={};
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))return;
+      if(e.wasOverriddenNoTrade===true)return;
+      if(e.tier==='no-go-data'&&!e.closingPrice)return;
+      const _t=Number(e.id);
+      if(!Number.isFinite(_t)||_t<=0)return;
+      const _d=new Date(_t);
+      if(_d.getUTCDay()!==_dayIdx)return;          // this weekday only
+      const _h=_d.getUTCHours();
+      if(!_byHour[_h])_byHour[_h]={wins:0,losses:0};
+      if(e.result==='WIN')_byHour[_h].wins++; else _byHour[_h].losses++;
+    });
     const _todayHours=[];
     for(let h=0;h<24;h++){
-      const cell=scorecards?.[`${dayName}-${h}`]||scorecards?.byHourDay?.[`${dayName}-${h}`]||null;
+      const cell=_byHour[h];
       if(!cell)continue;
       const w=cell.wins||0,l=cell.losses||0,total=w+l;
       if(total<3)continue; // need ≥3 trades to be meaningful
@@ -37894,7 +37913,7 @@ function TaraApp(){
     const curH=_now.getUTCHours();
     const _nextBest=_best.map(h=>({...h,minsUntil:h.hour>=curH?(h.hour-curH)*60-_now.getUTCMinutes():(24-curH+h.hour)*60-_now.getUTCMinutes()})).sort((a,b)=>a.minsUntil-b.minsUntil)[0];
     return{best:_best,dayName,nextBest:_nextBest,inBestWindow:_best.some(h=>h.hour===curH)};
-  },[scorecards]);
+  },[taraCallLog]);
   // V8.0: Conviction trajectory tracker. Records taraCall.posterior every 5s into a rolling
   //   2-min ring buffer. Lets us tell whether conviction is BUILDING, STABLE, or FADING since
   //   commit — surfaced as a small arrow on the call card.
