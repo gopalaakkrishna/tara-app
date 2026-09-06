@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.262-home-surface';
-const TARA_VERSION_DISPLAY='Tara 13.4.262';
+const BASELINE_VERSION='2026.09.06-v13.4.263-merge-trade-blocks';
+const TARA_VERSION_DISPLAY='Tara 13.4.263';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19251,13 +19251,21 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       watch: {border:'rgba(35,185,129,0.40)',bg:'rgba(35,185,129,0.05)',accent:'rgba(35,185,129,0.95)',pulse:false},
       info:  {border:'rgba(147,197,253,0.30)',bg:'rgba(147,197,253,0.04)',accent:'rgba(147,197,253,0.85)',pulse:false},
     };
+    // V13.4.263: panel shape shared with the rest of the interface, and the
+    //   border now carries the STATE of the trade rather than a fixed green:
+    //   red while losing, green while winning, neutral while flat. The old
+    //   green-always box looked like good news during a losing trade.
+    const _frameTone=_winning?'rgba(35,185,129,0.34)':_losing?'rgba(232,69,94,0.34)':'rgba(237,237,237,0.14)';
     return React.createElement('div',{
-      className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
-      style:{border:'1px solid rgba(35,185,129,0.30)',background:'rgba(35,185,129,0.03)'},
+      className:'rounded-[10px] overflow-hidden',
+      style:{border:'1px solid '+_frameTone,background:'#0A0A0E'},
     },
       React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#24242E] flex items-baseline justify-between gap-2 flex-wrap'},
         React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap'},
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
+                    // V13.4.263: was '★ live trade coach', which read as its own product.
+          //   It is the live read on the call rendered directly below it, so the
+          //   label says that instead.
+          React.createElement('span',{className:UI2_LABEL2},'live on this call'),
           // V9.1.8: Market-character badges — surfaces windowAmplitude + regime so user
           //   sees what kind of market they're trading in. Tara already classifies these
           //   internally (and weights load per-regime); now they're visible at a glance.
@@ -52333,33 +52341,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           timeState={timeState}
         />}
 
-        {/* V8.7: Live Trade Coach — situational advisory while in a trade */}
-        {/* V9.3.0: also shows Kalshi auto-order status + kill switch when active */}
-        <LiveTradeCoach
-          userPosition={userPosition}
-          positionStatus={positionStatus}
-          taraCall={taraCall}
-          analysis={analysis}
-          movementRisk={movementRisk}
-          currentPrice={currentPrice}
-          targetMargin={targetMargin}
-          timeState={timeState}
-          kalshiYesPrice={kalshiYesPrice}
-          currentOffer={currentOffer}
-          whaleLog={whaleLog}
-          tradingSettings={tradingSettings}
-          todayData={todayData}
-          tickHistoryRef={tickHistoryRef}
-          autoOrderState={autoOrderState}
-          killSwitchEngaged={killSwitchEngaged}
-          onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
-          onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
-          liveCoachReversalRef={liveCoachReversalRef}
-          reversalRisk={lockedCallRef.current?.reversalRisk||null}
-          lockedSnapshotDir={(taraCallSnapshotRef.current?.call==='UP'||taraCallSnapshotRef.current?.call==='DOWN')?taraCallSnapshotRef.current.call:null}
-          lockedSnapshot={taraCallSnapshotRef.current||null}
-          onClearAutoOrder={()=>setAutoOrderState(null)}
-        />
+        {/* V13.4.263: LiveTradeCoach moved from here down into the column that
+            holds Tara’s Call, so the locked call and the live read on it are one
+            block instead of two features 300 lines apart. Props unchanged. */}
 
         {/* V8.2: Asset rotation suggestion */}
         {/* V13.4.255: AssetRotationHint removed — _otherAsset is hardcoded to
@@ -52756,6 +52740,37 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               Tara's Call. The wrapper is the grid child now, so the column
               count is unchanged and auto-rows-fr still matches heights. */}
           <div className="flex flex-col gap-3 min-w-0">
+          {/* V13.4.263: stages 2 and 3 of the trade -- how it is going, and what
+              the auto-exec did about it. Returns null with no open position, so it
+              leads this column only while a trade is live, which is the one time
+              the live read outranks the call sitting under it. */}
+          {/* V8.7: Live Trade Coach — situational advisory while in a trade */}
+          {/* V9.3.0: also shows Kalshi auto-order status + kill switch when active */}
+          <LiveTradeCoach
+            userPosition={userPosition}
+            positionStatus={positionStatus}
+            taraCall={taraCall}
+            analysis={analysis}
+            movementRisk={movementRisk}
+            currentPrice={currentPrice}
+            targetMargin={targetMargin}
+            timeState={timeState}
+            kalshiYesPrice={kalshiYesPrice}
+            currentOffer={currentOffer}
+            whaleLog={whaleLog}
+            tradingSettings={tradingSettings}
+            todayData={todayData}
+            tickHistoryRef={tickHistoryRef}
+            autoOrderState={autoOrderState}
+            killSwitchEngaged={killSwitchEngaged}
+            onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
+            onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
+            liveCoachReversalRef={liveCoachReversalRef}
+            reversalRisk={lockedCallRef.current?.reversalRisk||null}
+            lockedSnapshotDir={(taraCallSnapshotRef.current?.call==='UP'||taraCallSnapshotRef.current?.call==='DOWN')?taraCallSnapshotRef.current.call:null}
+            lockedSnapshot={taraCallSnapshotRef.current||null}
+            onClearAutoOrder={()=>setAutoOrderState(null)}
+          />
           <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
