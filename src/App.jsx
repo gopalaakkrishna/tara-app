@@ -2730,6 +2730,72 @@ const getTaraDirection=({snapshot,lock,signalSource}={})=>{
   return{dir,source};
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// V13.4.280 — readLockState: THE ONLY PLACE THAT DECIDES "IS IT LOCKED".
+//
+// Three panels independently reinvented this rule and all three got it wrong the
+// same way -- they treated "a direction exists" as "Tara has committed":
+//
+//   TARA ADVISOR    (V13.4.275) inferred a lock from direction alone, and was
+//                   handed a snapshot COPY that omitted `locked` entirely, so it
+//                   could not have checked. Printed "Locked DOWN" with an ENTER
+//                   button on a round that was never committed.
+//   DECISION CLOCK  (V13.4.279) `!!(taraCall.call==='UP'||'DOWN')` -- true on
+//                   nearly every tick. Announced LOCKED and "do not trade against
+//                   it" while its own phase strip read "33s to commit".
+//   TradeCoachCall  (V13.4.265) conflated "tradeable lock" with "decided", so a
+//                   committed SIT-OUT fell through to the live object and showed a
+//                   confidence that kept drifting after the decision was frozen.
+//
+// The distinction that matters, and the reason a single boolean was never enough:
+//
+//   committed  a decision was made. A SIT-OUT is committed.
+//   tradeable  committed AND there is a side to buy. A sit-out is NOT tradeable.
+//
+// Anything that says LOCKED, offers an ENTER button, or tells the user not to
+// trade against a call MUST gate on `tradeable`. Anything that freezes numbers so
+// they stop drifting MUST gate on `committed`. Never on the presence of a
+// direction -- a lean has a direction too.
+//
+// Pass the committed snapshot (taraCallSnapshotRef.current, or the partial copy
+// handed to the advisor). NEVER pass the live taraCall: it always has a direction
+// and never has a lock, which is precisely how all three bugs happened.
+const readLockState=(snapshot)=>{
+  const s=(snapshot&&typeof snapshot==='object')?snapshot:null;
+  // `locked` is the snapshot's own claim. Sit-out snapshots set it too, by design.
+  const committed=!!(s&&s.locked);
+  const call=committed?s.call:null;
+  const tradeable=committed&&(call==='UP'||call==='DOWN');
+  const satOut=committed&&call==='SIT_OUT';
+  const dir=tradeable?call:null;
+  // For a sit-out, the side it would have taken -- context only, never tradeable.
+  const _lean=satOut?(s._intendedDir||s.direction||null):null;
+  const intendedDir=(_lean==='UP'||_lean==='DOWN')?_lean:null;
+  // Confidence in the side actually called. `confidence` does NOT mean one thing
+  //   across the engine -- the directional-lock site stores the raw posterior
+  //   P(UP), committed snapshots store it already flipped -- so the same DOWN call
+  //   could render 30% on one path and 65% on another (V13.4.273). `conviction` is
+  //   unambiguous, |posterior-50| at every site, so 50+conviction is correct under
+  //   either convention. The flip is the fallback for snapshots without it.
+  const _convict=Number(s&&s.conviction);
+  const _rawConf=Number(s&&s.confidence);
+  const _side=dir||intendedDir;
+  const confidence=(Number.isFinite(_convict)&&_convict>0)
+    ?Math.round(50+_convict)
+    :((Number.isFinite(_rawConf)&&_rawConf>0)
+        ?Math.round((_side==='DOWN'&&_rawConf<50)?(100-_rawConf):_rawConf)
+        :0);
+  return{
+    committed,tradeable,satOut,dir,intendedDir,confidence,
+    call:call||null,
+    reason:(s&&s.reason)||'',
+    qScore:Number.isFinite(s&&s.qScore)?s.qScore:null,
+    // 'LOCKED' | 'SITTING OUT' | null -- null means nothing is committed yet, and
+    //   the caller should describe the LIVE state (leaning / scanning) itself.
+    label:tradeable?'LOCKED':satOut?'SITTING OUT':null,
+  };
+};
+
 // ═══════════════════════════════════════
 // ICONS
 // ═══════════════════════════════════════
@@ -5518,8 +5584,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.279-clock-needs-a-real-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.279';
+const BASELINE_VERSION='2026.09.06-v13.4.280-one-lock-authority';
+const TARA_VERSION_DISPLAY='Tara 13.4.280';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10058,10 +10124,14 @@ const computeAdvisor=(params)=>{
   //   snapshot carry UP/DOWN, so an uncommitted snapshot rendered as "Locked DOWN"
   //   with an ENTER button while THIS TRADE, reading the same object, correctly
   //   said LEANING. The snapshot's own `locked` flag decides now.
-  const _taraCommitted=!!(taraSnapshot&&taraSnapshot.locked);
-  const _taraDir=_taraCommitted&&(taraSnapshot?.call==='UP'||taraSnapshot?.call==='DOWN')?taraSnapshot.call
+  // V13.4.280: routed through readLockState, the single lock authority. Was two
+  //   hand-rolled conditions here; the ORIGINAL bug was that neither checked
+  //   `locked` at all, because the snapshot copy this receives did not carry it.
+  const _lockSt=readLockState(taraSnapshot);
+  const _taraCommitted=_lockSt.committed;
+  const _taraDir=_lockSt.tradeable?_lockSt.dir
     :(taraLean?.dir||null); // even on SIT_OUT, taraLean might exist if she had a forming direction
-  const _taraSatOut=taraSnapshot?.call==='SIT_OUT';
+  const _taraSatOut=_lockSt.satOut;
   // Implied direction Tara would have called if forced — useful display when sitting out.
   //   Use posterior if available, else lean.
   const _taraImpliedDir=_taraDir||(taraPosterior!=null?(taraPosterior>=50?'UP':'DOWN'):null);
@@ -16252,17 +16322,23 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   //   The real lock lives in the committed snapshot (taraCallSnapshotRef.current,
   //   passed in as lockedSnapshot). Sit-out snapshots also carry locked:true, so a
   //   DIRECTIONAL call is required -- otherwise a sit-out would read as a locked trade.
-  const _lockedDir=(lockedSnapshot&&lockedSnapshot.locked
-    &&(lockedSnapshot.call==='UP'||lockedSnapshot.call==='DOWN'))?lockedSnapshot.call:null;
-  const locked=!!_lockedDir;
+  // V13.4.280: routed through readLockState. `tradeable` carries exactly the rule
+  //   this had hand-rolled -- committed AND directional -- so a sit-out can never
+  //   display as a locked trade, which is what the V13.4.161 guard was for.
+  const _lockSt=readLockState(lockedSnapshot);
+  const _lockedDir=_lockSt.dir;
+  const locked=_lockSt.tradeable;
   // V13.4.265: `locked` above answers "is there a tradeable directional lock",
   //   and must keep requiring a direction -- a sit-out displaying as a locked
   //   trade is the bug the V13.4.161 guard was written to prevent.
   //   But it was ALSO being used to mean "has Tara decided yet", and a sit-out
   //   is a decision. That second meaning gets its own name here, so the panel
   //   can freeze its numbers on any commit without ever calling one tradeable.
-  const _committedSnap=(lockedSnapshot&&lockedSnapshot.locked)?lockedSnapshot:null;
-  const _committedSitOut=!!(_committedSnap&&_committedSnap.call==='SIT_OUT');
+  // V13.4.280: both from readLockState now. `committed` (not `tradeable`) is the
+  //   right gate for freezing numbers -- a sit-out is decided, so its confidence
+  //   and reason must stop drifting too. That distinction was the V13.4.265 bug.
+  const _committedSnap=_lockSt.committed?lockedSnapshot:null;
+  const _committedSitOut=_lockSt.satOut;
   // V13.4.161 FIX: the REAL cause of the header/reason contradiction, which the
   //   V13.4.148 debounce-lag fix did not catch (confirmed by a fresh screenshot
   //   showing "LEANING DOWN -- HOLD" over "TRAJ-priority lock·UP" with NO active
@@ -18577,12 +18653,16 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           //   a lock from the presence of a direction (see V13.4.275).
           //   The committed snapshot decides, and the label reads from the snapshot
           //   too, so the clock can never name a direction the commit did not make.
-          const _hasCall=!!(isLockedSnap&&snap&&(snap.call==='UP'||snap.call==='DOWN'));
+          // V13.4.280: routed through readLockState. `tradeable` is the correct
+          //   gate for a panel that says "do not trade against it" -- a committed
+          //   sit-out is decided but has no side to trade against.
+          const _dcLock=readLockState(snap);
+          const _hasCall=_dcLock.tradeable;
           let _dcState,_dcMain,_dcSub,_dcCol;
           if(_hasCall){
             _dcState='LOCKED';
-            _dcCol=snap.call==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.95)';
-            _dcMain=`LOCKED ${snap.call}`;
+            _dcCol=_dcLock.dir==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.95)';
+            _dcMain=`LOCKED ${_dcLock.dir}`;
             _dcSub='call is in — do not trade against it';
           }else if(_dcLeft>_dcOpen){
             _dcState='EARLY';
@@ -19079,9 +19159,12 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   if(!taraCall)return null;
 
   // ── stage 1: what Tara decided ──────────────────────────────────────────
-  const _snap=(snapshot&&snapshot.locked)?snapshot:null;
-  const _snapDir=(_snap&&(_snap.call==='UP'||_snap.call==='DOWN'))?_snap.call:null;
-  const _satOut=!!(_snap&&_snap.call==='SIT_OUT');
+  // V13.4.280: routed through readLockState so this card cannot drift from the
+  //   other panels the way they all drifted from each other.
+  const _lockSt=readLockState(snapshot);
+  const _snap=_lockSt.committed?snapshot:null;
+  const _snapDir=_lockSt.dir;
+  const _satOut=_lockSt.satOut;
   const _liveDir=(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call
     :(taraCall.direction==='UP'||taraCall.direction==='DOWN')?taraCall.direction:null;
   // V13.4.275: STABILISE THE PRE-LOCK LEAN. Before this, stage 1 read the raw live
@@ -19112,8 +19195,10 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _leanFlipping=!!(_dispLean&&_liveDir&&_dispLean!==_liveDir);
   // committed snapshot wins over the live read, always
   const dir=_snapDir||(_satOut?null:_dispLean);
-  const _leanDir=_satOut?(_snap._intendedDir||_snap.direction||null):null;
-  const state=_snapDir?'LOCKED':_satOut?'SITTING OUT':_liveDir?'LEANING':'SCANNING';
+  const _leanDir=_lockSt.intendedDir;
+  // V13.4.280: the committed label comes from the helper, so this card and every
+  //   other panel spell the same state the same way.
+  const state=_lockSt.label||(_liveDir?'LEANING':'SCANNING');
   const _src=_snap||taraCall;
   // V13.4.273: `confidence` does NOT mean one thing across the engine. At the
   //   directional-lock site it is stored as the raw posterior P(UP) (L44426,
@@ -19124,13 +19209,17 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   //   50 + conviction is the confidence in whichever side was actually called,
   //   under either convention. Fall back to flipping the raw value only when
   //   conviction is missing.
+  //   V13.4.280: once committed, take it straight from the helper so the frozen
+  //   number is identical everywhere. Pre-commit there is no snapshot to read, so
+  //   the same rule is applied to the live object here.
   const _convict=Number(_src&&_src.conviction);
   const _rawConf=Number(_src&&_src.confidence);
-  const conf=Number.isFinite(_convict)&&_convict>0
-    ?Math.round(50+_convict)
-    :(Number.isFinite(_rawConf)&&_rawConf>0
-        ?Math.round((dir==='DOWN'&&_rawConf<50)?(100-_rawConf):_rawConf)
-        :0);
+  const conf=_lockSt.committed?_lockSt.confidence
+    :(Number.isFinite(_convict)&&_convict>0
+      ?Math.round(50+_convict)
+      :(Number.isFinite(_rawConf)&&_rawConf>0
+          ?Math.round((dir==='DOWN'&&_rawConf<50)?(100-_rawConf):_rawConf)
+          :0));
   const histWR=Number(taraCall._v10_7_43_calHistWR);
   const _k=Number(kalshiYesPrice);
   const _kValid=Number.isFinite(_k)&&_k>0&&_k<100;
