@@ -5510,8 +5510,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.252-armed-by-default';
-const TARA_VERSION_DISPLAY='Tara 13.4.252';
+const BASELINE_VERSION='2026.09.06-v13.4.253-trailing-exit-replaces-fixed';
+const TARA_VERSION_DISPLAY='Tara 13.4.253';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34363,9 +34363,19 @@ function TaraApp(){
         //   Combined expected WR lift: ~66% → ~72% on the surviving trades.
         //   Sentinel 'tara_v10_2_8_audit_optimal_applied' guarantees single-run.
         autoExitOffer:(()=>{
-          let _v=Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85;
+          // V13.4.253: default OFF (0 = no fixed take-profit). Measured negative
+          //   at 8 of 9 levels (70..95c) over 454 replayed calls: 99% of WINS
+          //   touch 80c+ against 34% of losses, so a fixed level truncates
+          //   nearly every winner to spare a third of the losers, and books a
+          //   second fee. The trailing stop in the exit checker replaces it.
+          let _v=Number(v.autoExitOffer)>0?Number(v.autoExitOffer):0;
           try{
-            if(!localStorage.getItem('tara_v10_2_8_audit_optimal_applied')){
+            // one-time: clear a stored fixed TP that came from a preset (80..92c)
+            if(!localStorage.getItem('tara_v13_4_253_exit_rules_measured')&&Number(v.autoExitOffer)>0){
+              try{console.info('[V13.4.253] fixed take-profit '+v.autoExitOffer+'c -> off (measured loser)');}catch(_){}
+              _v=0;
+            }
+            if(!localStorage.getItem('tara_v10_2_8_audit_optimal_applied')&&_v>0){
               // Migrate ONLY if user is on prior default (88 or 85). Otherwise preserve.
               if(Number(v.autoExitOffer)===88||Number(v.autoExitOffer)===85){
                 _v=82;
@@ -34376,6 +34386,10 @@ function TaraApp(){
           return _v;
         })(),
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
+        // V13.4.253: fixed take-profit defaults OFF. Measured negative at 8 of
+        //   9 levels (70..95c) across 454 replayed calls -- 99% of wins touch
+        //   80c+ against 34% of losses, so a fixed level truncates the winners.
+        //   A stored value still wins, so the setting keeps working.
         // V9.19.26: opt-in skip of time-cap-commit / timer-commit locks.
         //   Default OFF — A/B test by enabling. May 14 audit: 322 of 642 resolved
         //   trades (50.2%) were time-cap commits, won only 62.4% (vs 78.5% for
@@ -34395,6 +34409,12 @@ function TaraApp(){
               }
               // Last of the V10.2.8 trio — set the sentinel here
               localStorage.setItem('tara_v10_2_8_audit_optimal_applied','1');
+            }
+            // V13.4.253: same place, same idiom — set the exit-rules sentinel once
+            //   the hydrator has run, so the fixed TP/SL clear happens exactly once
+            //   and a deliberate re-enable afterwards is never undone.
+            if(!localStorage.getItem('tara_v13_4_253_exit_rules_measured')){
+              localStorage.setItem('tara_v13_4_253_exit_rules_measured','1');
             }
           }catch(_){}
           return _v;
@@ -34504,7 +34524,17 @@ function TaraApp(){
         //   bump to 15. Honors customizations (any non-zero value left alone).
         //   Sentinel 'tara_v10_2_5_stoploss_default_applied' ensures single-run.
         stopLossDeltaCents:(()=>{
+          // V13.4.253: default OFF (0 = no fixed stop). Measured negative at ALL
+          //   7 levels tested (10..40c) over the same 454 calls -- the shipped
+           //  presets sat at 10-18c, inside that range. Superseded by the
+          //   trailing stop, which does not cap a winner that keeps running.
           let _v=Number(v.stopLossDeltaCents)>=0?Number(v.stopLossDeltaCents):0;
+          try{
+            if(!localStorage.getItem('tara_v13_4_253_exit_rules_measured')&&_v>0){
+              try{console.info('[V13.4.253] fixed stop-loss '+_v+'c -> off (measured loser)');}catch(_){}
+              _v=0;
+            }
+          }catch(_){}
           try{
             if(!localStorage.getItem('tara_v10_2_5_stoploss_default_applied')){
               if(_v===0){
@@ -34619,8 +34649,8 @@ function TaraApp(){
         tccSmartBypass:true,skipMarginalCaution:true,
         blockUrgencyApplied:false,lockStabilitySec:0,
         // Hunter exits
-        autoExitOffer:82,autoExitSecLeft:20,
-        stopLossDeltaCents:13,timeExitSecLeft:0,
+        autoExitOffer:0,autoExitSecLeft:20,   // V13.4.253: fixed TP off by default
+        stopLossDeltaCents:0,timeExitSecLeft:0,   // V13.4.253: fixed stop off by default
         // Hunter cooldown
         cooldownLossStreak:3,cooldownMinutes:30,
         // Phase 4 advisory (badge shows, doesn't block)
@@ -45108,6 +45138,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const _exitBusyRef=useRef(false);
   const _exitFiredForRef=useRef(null);
 
+  // V13.4.253: per-fill high-water mark for the trailing stop. Keyed on
+  //   ticker+fill time so a fresh position resets rather than inheriting.
+  const _exitTrailRef=useRef({key:null,peak:-1,armed:false});
   const _runExit=useCallback(async(why)=>{
     if(_exitBusyRef.current)return{ok:false,reason:'busy'};
     const st=autoOrderState;
@@ -45181,8 +45214,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const tp=Number(s.autoExitOffer)>0?Number(s.autoExitOffer):null;
       const tExit=Number(s.autoExitSecLeft)>0?Number(s.autoExitSecLeft):null;
 
+      // V13.4.253: TRAILING stop, the only exit rule that measured positive.
+      //   Arm once the position is worth TRAIL_ARM_C, then exit if it gives
+      //   back TRAIL_GIVEBACK_C from its own high. Peak is tracked per fill so
+      //   a new position never inherits the last one_s high.
+      const _tKey=String(st.ticker||"")+":"+String(st.filledAt||st.at||0);
+      const _tr=_exitTrailRef.current;
+      if(_tr.key!==_tKey){_exitTrailRef.current={key:_tKey,peak:value,armed:false};}
+      const _t=_exitTrailRef.current;
+      if(value>_t.peak)_t.peak=value;
+      if(value>=TRAIL_ARM_C)_t.armed=true;
+
       let why=null;
-      if(slDelta>0&&Number.isFinite(fill)&&value<=(fill-slDelta)){
+      if(_t.armed&&(_t.peak-value)>=TRAIL_GIVEBACK_C){
+        why='trailing stop '+value+'c, '+(_t.peak-value)+'c off its '+_t.peak+'c high';
+      }else if(slDelta>0&&Number.isFinite(fill)&&value<=(fill-slDelta)){
         why='stop-loss '+value+'c <= '+(fill-slDelta)+'c';
       }else if(tp!=null&&value>=tp){
         why='take-profit '+value+'c >= '+tp+'c';
