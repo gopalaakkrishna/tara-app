@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.277-fold-the-ticket';
-const TARA_VERSION_DISPLAY='Tara 13.4.277';
+const BASELINE_VERSION='2026.09.06-v13.4.278-manual-positions-count';
+const TARA_VERSION_DISPLAY='Tara 13.4.278';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19063,7 +19063,7 @@ function WindowStrikeChart({tickHistoryRef,targetMargin,currentPrice,timeState,h
 // direction all come from the committed snapshot when one exists.
 function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYesPrice,
                         autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat,
-                        tickHistoryRef,targetMargin,currentPrice}){
+                        tickHistoryRef,targetMargin,currentPrice,manualKalshiEntry}){
   // Declared BEFORE the early return: hooks must run in the same order on every
   //   render, and this component can return null on the very first one.
   const[whyOpen,setWhyOpen]=React.useState(false);
@@ -19155,18 +19155,33 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const dirTone=dir==='UP'?GREEN:dir==='DOWN'?RED:GOLD;
 
   // ── stage 2: what it is worth right now ─────────────────────────────────
-  const _fill=Number(autoOrderState&&autoOrderState.fillPrice);
-  const _haveFill=Number.isFinite(_fill)&&_fill>0;
-  const _side=(autoOrderState&&autoOrderState.dir)||dir||userPosition;
+  // V13.4.278: a position is not only an AUTO one. This read autoOrderState alone,
+  //   so with a manually-entered trade open the header said "POSITION UP @ $79958"
+  //   while this card said "NOT IN · nothing filled yet" -- the card telling him he
+  //   is flat while he is holding. Three ways to be in, in order of how much they
+  //   know: an auto fill, a manually recorded Kalshi fill, or userPosition marked
+  //   with no fill price captured yet.
+  const _autoFill=Number(autoOrderState&&autoOrderState.fillPrice);
+  const _haveAutoFill=Number.isFinite(_autoFill)&&_autoFill>0&&Number(autoOrderState&&autoOrderState.count)>0;
+  const _manFill=Number(manualKalshiEntry&&manualKalshiEntry.entryCents);
+  const _haveManFill=Number.isFinite(_manFill)&&_manFill>0;
+  const _isManual=!_haveAutoFill&&_haveManFill;
+  const _fill=_haveAutoFill?_autoFill:(_haveManFill?_manFill:NaN);
+  const _haveFill=_haveAutoFill||_haveManFill;
+  // marked in, but we do not know what was paid -- worth saying, not worth guessing
+  const _markedOnly=!_haveFill&&(userPosition==='UP'||userPosition==='DOWN');
+  const _side=(autoOrderState&&autoOrderState.dir)||(manualKalshiEntry&&manualKalshiEntry.side)||userPosition||dir;
   const _worth=(_kValid&&_side)?Math.round(_side==='UP'?_k:(100-_k)):null;
   const _delta=(_haveFill&&_worth!=null)?(_worth-_fill):null;
   const _peak=Number(trailPeakCents);
   const _havePeak=Number.isFinite(_peak)&&_peak>0;
 
-  // ── stage 3: what the machine placed ────────────────────────────────────
+  // ── stage 3: what was actually placed ───────────────────────────────────
   const _st=String((autoOrderState&&autoOrderState.status)||'');
-  const _count=Number(autoOrderState&&autoOrderState.count)||0;
-  const _dry=!!(autoOrderState&&autoOrderState.dryRun);
+  const _count=_haveAutoFill
+    ?(Number(autoOrderState&&autoOrderState.count)||0)
+    :(Number(manualKalshiEntry&&manualKalshiEntry.contracts)||0);
+  const _dry=!!(autoOrderState&&autoOrderState.dryRun)&&!_isManual;
   const _placed=_haveFill&&_count>0;
   const _tp=Number(autoExecSettings&&autoExecSettings.autoExitOffer)||0;
   const _sl=Number(autoExecSettings&&autoExecSettings.stopLossDeltaCents)||0;
@@ -19249,8 +19264,9 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 
       {/* ── 2 ── */}
       <Stage n="2" title="how it's going"
-             badge={!_placed?'not in':_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat'}
-             badgeTone={!_placed?DIM:_delta>0?GREEN:_delta<0?RED:DIM}>
+             badge={_placed?(_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat')
+                    :_markedOnly?'in · unpriced':'not in'}
+             badgeTone={_placed?(_delta>0?GREEN:_delta<0?RED:DIM):_markedOnly?GOLD:DIM}>
         {_placed&&_worth!=null?(
           <>
             <div className="text-[15px] leading-snug text-[#EDEDED]/85">
@@ -19264,6 +19280,14 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
                 trail arms at <span className="text-[11px] text-[#EDEDED]/80 tabular-nums font-bold ml-0.5">{TRAIL_ARM_C}¢</span></span>
             </div>
           </>
+        ):_markedOnly?(
+          /* V13.4.278: in, but no fill price captured -- say what IS known and what
+             is missing, rather than reporting flat. */
+          <div className="text-[13px] leading-snug" style={{color:'rgba(237,237,237,0.62)'}}>
+            You are in on <span style={{color:_side==='UP'?GREEN:RED}}>{_side}</span>
+            {_worth!=null&&<>, now worth <span className="tabular-nums">{_worth}¢</span></>}.
+            {' '}No fill price recorded, so profit and loss cannot be tracked yet.
+          </div>
         ):(
           <div className="text-[13px] text-[#EDEDED]/40 leading-snug">
             {state==='LOCKED'?'Locked, but nothing filled yet.'
@@ -19275,13 +19299,23 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 
       {/* ── 3 ── */}
       <Stage n="3" title="what it did"
-             badge={!_placed?(_st?_st.toUpperCase():'nothing yet'):(_dry?'simulated':'filled · live')}
-             badgeTone={!_placed?DIM:_dry?GOLD:GREEN}>
+             badge={_placed?(_isManual?'you · manual':_dry?'simulated':'filled · live')
+                    :_markedOnly?'no fill logged':(_st?_st.toUpperCase():'nothing yet')}
+             badgeTone={_placed?(_isManual?'#EDEDED':_dry?GOLD:GREEN):_markedOnly?GOLD:DIM}>
         {_placed?(
           <div className="text-[15px] leading-snug text-[#EDEDED]/85">
-            {_dry?'Would have bought':'Bought'} <span className="font-semibold tabular-nums">{_count}</span> at{' '}
+            {/* V13.4.278: say WHO bought. A manual fill is his own order, and calling
+                it "Bought" as though the machine did it is the kind of small lie that
+                makes the rest of the card untrustworthy. */}
+            {_isManual?'You bought':_dry?'Would have bought':'Bought'}{' '}
+            <span className="font-semibold tabular-nums">{_count}</span> at{' '}
             <span className="font-semibold tabular-nums">{Math.round(_fill)}¢</span>
             {' — '}<span className="tabular-nums">${((_fill*_count)/100).toFixed(2)}</span> in.
+          </div>
+        ):_markedOnly?(
+          <div className="text-[13px] text-[#EDEDED]/55 leading-snug">
+            You marked yourself in on {_side}, but no fill was recorded. Enter it under
+            {' '}REAL KALSHI FILL so this can track the trade.
           </div>
         ):(
           <div className="text-[13px] text-[#EDEDED]/40 leading-snug">
@@ -38690,9 +38724,22 @@ function TaraApp(){
   },[manualKalshiEntry]);
   // Auto-clear manualKalshiEntry when userPosition is cleared (toggle off,
   //   asset switch, window roll — all of which already null userPosition).
+  // V13.4.278: this fired on EVERY PAGE LOAD and silently deleted the recorded
+  //   fill. manualKalshiEntry hydrates synchronously from localStorage in its
+  //   useState initializer, but userPosition starts null and is restored later,
+  //   so the first render always looked like "position cleared while a fill
+  //   exists" and wiped it. The user was then holding a position the app said
+  //   had no fill price -- which is exactly what the dashboard was showing.
+  //   Fix: clear only on a real TRANSITION from held to not-held. A null on the
+  //   first render is "not restored yet", not "position closed".
+  const _prevUserPosRef=useRef(undefined);
   useEffect(()=>{
+    const _prev=_prevUserPosRef.current;
+    _prevUserPosRef.current=userPosition;
+    if(_prev===undefined)return;            // first render — nothing to compare against
+    if(!_prev)return;                        // was already flat; not a transition
     if(!userPosition&&manualKalshiEntry){
-      try{console.info('[V10.2.9] auto-clearing manualKalshiEntry (userPosition cleared)');}catch(_){}
+      try{console.info('[V13.4.278] clearing manualKalshiEntry — position went '+_prev+' -> none');}catch(_){}
       setManualKalshiEntry(null);
     }
   },[userPosition,manualKalshiEntry]);
@@ -53089,6 +53136,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             kalshiYesPrice={kalshiYesPrice}
             autoOrderState={autoOrderState}
             userPosition={userPosition}
+            manualKalshiEntry={manualKalshiEntry}
             trailPeakCents={_exitTrailRef.current?.peak}
             tickHistoryRef={tickHistoryRef}
             targetMargin={targetMargin}
