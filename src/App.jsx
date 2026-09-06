@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.278-manual-positions-count';
-const TARA_VERSION_DISPLAY='Tara 13.4.278';
+const BASELINE_VERSION='2026.09.06-v13.4.279-clock-needs-a-real-lock';
+const TARA_VERSION_DISPLAY='Tara 13.4.279';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18569,12 +18569,20 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
             }catch(_e){return '--';}
           };
-          const _hasCall=!!(taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN'));
+          // V13.4.279: this read "taraCall has a direction", which is true on every
+          //   tick once a lean forms -- so the clock announced LOCKED, and told him
+          //   not to trade against a call, before anything was committed. Seen live
+          //   next to its own PHASE strip reading "LEANING · 33s to commit", and
+          //   next to THIS TRADE reading LEANING. Third panel this session to infer
+          //   a lock from the presence of a direction (see V13.4.275).
+          //   The committed snapshot decides, and the label reads from the snapshot
+          //   too, so the clock can never name a direction the commit did not make.
+          const _hasCall=!!(isLockedSnap&&snap&&(snap.call==='UP'||snap.call==='DOWN'));
           let _dcState,_dcMain,_dcSub,_dcCol;
           if(_hasCall){
             _dcState='LOCKED';
-            _dcCol=taraCall.call==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.95)';
-            _dcMain=`LOCKED ${taraCall.call}`;
+            _dcCol=snap.call==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.95)';
+            _dcMain=`LOCKED ${snap.call}`;
             _dcSub='call is in — do not trade against it';
           }else if(_dcLeft>_dcOpen){
             _dcState='EARLY';
