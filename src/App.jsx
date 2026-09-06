@@ -5584,8 +5584,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.281-why-must-say-something';
-const TARA_VERSION_DISPLAY='Tara 13.4.281';
+const BASELINE_VERSION='2026.09.06-v13.4.282-name-which-lock';
+const TARA_VERSION_DISPLAY='Tara 13.4.282';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33394,11 +33394,33 @@ function ScalperAdvisorPanel({
           React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#23B981',letterSpacing:'0.02em',textTransform:'none'}},'this round'),
           _winLabel&&React.createElement('span',{className:'text-[10px] text-[#EDEDED]/55 tabular-nums mt-0.5',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},_winLabel),
         ),
-        React.createElement('span',{className:'text-[10px] font-bold px-2 py-0.5 rounded-lg',style:{
-          background:_taraDirColor.replace('rgb(','rgba(').replace(')',',0.15)').replace('0.92','0.18'),
-          color:_taraDirColor,
-          letterSpacing:'0.06em',textTransform:'uppercase',
-        }},'locked'),
+        // V13.4.282: this chip always said "LOCKED", which put it in direct
+        //   contradiction with THIS TRADE / PHASE / DECISION CLOCK reading LEANING
+        //   on the same window. Both were true: the ticket follows the ENGINE lock,
+        //   which fires earlier than Tara's settled call -- that is exactly what the
+        //   TARA'S CALL / TARA'S TRADE toggle above selects. The chip just never
+        //   said WHICH lock it meant.
+        //   getTaraDirection already reports where the direction came from, so the
+        //   label is read from that rather than assumed.
+        (()=>{
+          const _fromEngine=/^lock/.test(String((_taraDirRes&&_taraDirRes.source)||''));
+          // Engine lock is the earlier, less settled layer -- muted so it does not
+          //   read with the same authority as a committed call.
+          const _chipCol=_fromEngine?'rgba(237,237,237,0.62)':_taraDirColor;
+          return React.createElement('span',{
+            className:'text-[10px] font-bold px-2 py-0.5 rounded-lg',
+            title:_fromEngine
+              ?"Engine lock — the engine has picked a side, but Tara has not committed the round yet. It fires earlier than her settled call and can still differ from it. This ticket follows it because signal source is set to Tara's Trade."
+              :"Tara's committed call for this round.",
+            style:{
+              background:_fromEngine?'rgba(237,237,237,0.07)'
+                :_taraDirColor.replace('rgb(','rgba(').replace(')',',0.15)').replace('0.92','0.18'),
+              color:_chipCol,
+              border:_fromEngine?'1px solid rgba(237,237,237,0.18)':'1px solid transparent',
+              letterSpacing:'0.06em',textTransform:'uppercase',
+            },
+          },_fromEngine?'engine lock':'call locked');
+        })(),
       ),
       // V9.17.5: patient entry status banner if applicable
       autoOrderState&&autoOrderState.status==='patient-waiting'&&React.createElement('div',{
