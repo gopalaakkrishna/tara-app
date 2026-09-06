@@ -4090,12 +4090,20 @@ const DEFAULT_WEIGHTS={gap:55.00,momentum:28.00,structure:35.00,flow:40.00,techn
   //   weight learning loop tunes how much that ±10 nudge influences the final score.
   //   Starts neutral; if 4-asset shocks reliably predict outcome direction, it'll buff
   //   toward 2.5; if not, decay toward 0.
-  macroShock:1.00,
+  // V13.4.254: the macroShock / calendarRisk / tapeAccel / spotPerpDiv WEIGHT
+  //   entries were removed here. Each had 0 read sites -- declared as tunable
+  //   multipliers and never multiplied by anything.
+  //
+  //   THE SIGNALS THEMSELVES ARE LIVE and must not be deleted: they add to
+  //   totalScore directly (e.g. totalScore+=_tapeAccelAdj) and write into
+  //   rawSignalScores. They simply never routed through the weight system, so
+  //   the learning loop could never tune them. Re-add an entry here only
+  //   together with a _weightOf() call at the signal's own site.
   // V9.14: three new signals, each a multiplier on its respective raw output.
   //   - calendarRisk: dampener during macro events, default 1.0 means apply ±25-35 as-is
   //   - tapeAccel: ±10 raw, multiplier tunes effective strength
   //   - spotPerpDiv: ±8 raw, multiplier tunes effective strength
-  calendarRisk:1.00,tapeAccel:1.00,spotPerpDiv:1.00};
+};
 
 // V13.4.244: resolve a signal weight without the falsy-zero trap.
 //   `W.k||1.0` turns a DELIBERATE zero into full weight, which silently undid
@@ -5510,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.253-trailing-exit-replaces-fixed';
-const TARA_VERSION_DISPLAY='Tara 13.4.253';
+const BASELINE_VERSION='2026.09.06-v13.4.254-declutter';
+const TARA_VERSION_DISPLAY='Tara 13.4.254';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20305,42 +20313,14 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           //
           // ── 2. Daily caps ────────────────────────────────────────────────────
           //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #24242E'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Daily caps'),
-          ),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
-            React.createElement('label',{className:'block'},
-              _labelTip('max-trades-day','Max trades / day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 5 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
-              React.createElement('input',{
-                type:'number',min:0,max:200,step:1,value:autoExecSettings?.maxAutoTradesPerDay??10,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerDay:Math.max(0,Math.min(200,_num(e.target.value,10)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                const _n=Number(autoExecSettings?.maxAutoTradesPerDay);
-                if(_n===0)return '= DISABLED (no daily count cap — not recommended)';
-                return `= block auto-exec for the rest of the day after ${_n} trade${_n===1?'':'s'} placed`;
-              })()),
-              _tipBox('max-trades-day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 5 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
-            ),
-            React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('max-daily-loss','Max daily loss ($)','HARD CAP. When auto-exec net P&L for today drops to -$X or worse, auto-exec is blocked until UTC midnight. Honest discipline guard. Counts auto-exec trades only (manual trades ignored). Re-added in V10.2.x after the V9.17.3 removal, now that per-trade P&L is captured on the call log. 0 disables.'),
-                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V10.2'),
-              ),
-              React.createElement('input',{
-                type:'number',min:0,max:10000,step:1,value:autoExecSettings?.maxDailyLoss??50,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxDailyLoss:Math.max(0,Math.min(10000,_num(e.target.value,50)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
-                const _n=Number(autoExecSettings?.maxDailyLoss);
-                if(_n===0)return '= DISABLED (no daily $ loss cap — not recommended)';
-                return `= block auto-exec for the rest of the day when net auto-exec P&L ≤ -$${_n}`;
-              })()),
-              _tipBox('max-daily-loss','HARD CAP. When auto-exec net P&L for today drops to -$X or worse, auto-exec is blocked until UTC midnight. Honest discipline guard. Counts auto-exec trades only (manual trades ignored). Re-added in V10.2.x after the V9.17.3 removal, now that per-trade P&L is captured on the call log. 0 disables.'),
-            ),
-          ),
+          // V13.4.254: the "Daily caps" section was removed from this modal.
+          //   It rendered two inputs both labelled HARD CAP -- max trades/day and
+          //   max daily loss -- describing enforcement that does not exist:
+          //   maxAutoTradesPerDay and maxDailyLoss are compared against nothing
+          //   anywhere in this file, and _runEntry references neither. A control
+          //   that looks authoritative and enforces nothing is worse than no
+          //   control, so the UI is gone. The settings keys are still hydrated,
+          //   so wiring them later needs only the check, not the form.
           //
           // ── 3. Per-window cap ────────────────────────────────────────────────
           //
@@ -22299,38 +22279,9 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   );
 }
 
-// ── V8.2: TAKE-PROFIT / CUT-LOSS BANNER ────────────────────────────────────
-// Surfaces when user has an active position and TP or SL trigger condition is met.
-function TPSLBanner({settings,userPosition,currentOffer,positionStatus,positionOpenTime}){
-  if(!settings)return null;
-  if(!userPosition)return null;
-  // V10.4.1a: suggest TP/SL layer disabled — merged into autoExec exit thresholds.
-  //   The "Take-profit hit · offer $0.19" misfires (offering exit at 19¢ on a
-  //   position with 84¢ expected value) were originating from this code path.
-  //   Hard return null; autoExec layer fires actual exits at 88¢/13¢.
-  return null;
-  // eslint-disable-next-line no-unreachable
-  const _offerVal=parseFloat(currentOffer)||0;
-  const _ageMin=positionOpenTime?(Date.now()-positionOpenTime)/60000:0;
-  const _hitTP=settings.takeProfitEnabled&&_offerVal>=Number(settings.takeProfitOffer);
-  const _hitSL=settings.cutLossEnabled&&positionStatus?.pnlPct<0&&_ageMin>=Number(settings.cutLossMinutes);
-  if(!_hitTP&&!_hitSL)return null;
-  const _msg=_hitTP
-    ?`Take-profit hit · offer $${_offerVal.toFixed(2)} ≥ $${Number(settings.takeProfitOffer).toFixed(2)} · consider exit`
-    :`Cut-loss · in loss for ${Math.round(_ageMin)}min · consider exit`;
-  return React.createElement('div',{
-    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2 animate-pulse',
-    style:{
-      border:'1px solid '+(_hitTP?'rgba(35,185,129,0.45)':'rgba(232,69,94,0.45)'),
-      background:_hitTP?'rgba(35,185,129,0.05)':'rgba(232,69,94,0.05)',
-    },
-  },
-    React.createElement('div',{className:'flex items-baseline gap-2'},
-      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-wider shrink-0',style:{color:_hitTP?'rgb(35,185,129)':'rgb(232,69,94)'}},_hitTP?'⚑ take profit':'⚑ cut loss'),
-      React.createElement('span',{className:'text-[11px] text-[#EDEDED]/80'},_msg),
-    ),
-  );
-}
+// V13.4.254: TPSLBanner removed. It returned null unconditionally from
+//   V10.4.1a onward -- ~30 lines of unreachable JSX behind a hard return.
+//   Its TP/SL settings now drive the auto-exec exit checker instead (v13.4.253).
 
 // ── V8.3: TAB PRESENCE PILL ──────────────────────────────────────────────────
 // Shows when other tabs of Tara are open in the same browser. Reassures the user
@@ -34814,7 +34765,8 @@ function TaraApp(){
   //   kept as a no-op so any lingering callers don't error.
   const[simpleMode]=useState(true);
   const setSimpleMode=()=>{};
-  useEffect(()=>{try{localStorage.setItem('taraSimpleMode_v1','true');}catch(e){}},[]);
+  // V13.4.254: removed a mount effect that wrote taraSimpleMode_v1='true' and
+  //   was never read. It set a flag nothing consulted.
   const[overviewTab,setOverviewTab]=useState('overview'); // overview | tape | schedule | stats | brain | settings
   // V9.17: SCALPER state. Separate from Tara's lock state. State machine:
   //   IDLE → SUGGEST → HOLD (after user enters) → exit → COOLDOWN → IDLE
@@ -35571,8 +35523,8 @@ function TaraApp(){
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
           }
-          localStorage.setItem('taraCallLog_importedAt',String(Date.now()));
-          localStorage.setItem('taraCallLog_importedCount',String(_save.length));
+          // V13.4.254: dropped taraCallLog_importedAt / _importedCount writes --
+          //   neither was ever read.
           sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
         }catch(_){}
         // Trigger cloud sync after state commits
@@ -35819,11 +35771,10 @@ function TaraApp(){
   const displayedCallLog=React.useMemo(()=>{
     return(taraCallLog||[]).filter(e=>!!e&&(e.asset||'BTC')==='BTC');
   },[taraCallLog,currentAsset]);
-  // V5.7.1: scorecards/tara cloud doc is legacy. Local-only — no setTaraScorecards exists.
-  //   localStorage cached for fast paint on next mount.
-  React.useEffect(()=>{
-    try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
-  },[taraScorecards]);
+  // V13.4.254: removed a localStorage write of taraCallScorecards_v1. Its own
+  //   comment claimed "cached for fast paint on next mount" and nothing ever
+  //   read it -- taraScorecards is a useMemo over taraCallLog, so it is
+  //   recomputed on every mount and the cache could never have been consulted.
   // V9.2.2: ML auto-retrain — runs after taraCallLog is in scope. Debounced 2s.
   useEffect(()=>{
     if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);
@@ -36632,7 +36583,8 @@ function TaraApp(){
         }
         if(_newLatencyRows){
           if(_syncLatencyRef.current.length>500)_syncLatencyRef.current=_syncLatencyRef.current.slice(-500);
-          try{localStorage.setItem('tara_syncLatencyLog_v1',JSON.stringify(_syncLatencyRef.current));}catch(_){}
+          // V13.4.254: dropped a tara_syncLatencyLog_v1 write -- never read back.
+          //   _syncLatencyRef is still live in memory for the sync panel.
           if(typeof window!=='undefined')window._taraSyncLatencyLog=_syncLatencyRef.current;
         }
       }catch(_){}
@@ -41417,7 +41369,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // V10.7.66: also explicitly null the cloud snapshot path so lock-watch
         //   can't re-adopt stale cloud data before cloud clears propagate.
         //   _clearLock handles the primary path but the snapshot doc may lag.
-        try{if(typeof cloudWrite==='function')cloudWrite('state/taraSnapshot',null);}catch(_){}
+        // V13.4.254: removed a cloudWrite('state/taraSnapshot',null) here -- it
+        //   deleted a doc that nothing in this file ever writes or reads.
         _hasRestoredLockRef.current=false; // allow restore on next window if user refreshes
         _cloudRestoreCompletedRef.current=false; // V7.10.3: re-arm cloud-restore gate for new window
         // V9.2.0: Stamp rollover time. Engine IIFE checks this to force SEARCH mode for
@@ -52334,14 +52287,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           settings={tradingSettings}
         />
 
-        {/* V8.2: TP / SL trigger banner */}
-        <TPSLBanner
-          settings={tradingSettings}
-          userPosition={userPosition}
-          currentOffer={currentOffer}
-          positionStatus={positionStatus}
-          positionOpenTime={positionEntry?.time}
-        />
 
         {/* V9.7.0: Mission Mode compact widget — only renders when active */}
         <MissionPanel
