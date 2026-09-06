@@ -308,9 +308,7 @@ const _idbRead=async(key)=>{
 
 // One-shot write: insert or update a single doc. Best-effort, fire-and-forget
 //   (no error throws to caller). Used for non-RMW paths.
-const _VERIFY_NO_WRITES=true;
 const cloudSupabaseWrite=async(path,data)=>{
-  if(_VERIFY_NO_WRITES)return false;
   if(!_sbClient||!path)return false;
   try{
     const {error}=await _sbClient.from('tara_state').upsert({
@@ -828,7 +826,6 @@ const cloudSupabaseWatch=(path,callback)=>{
 const cloudSupabaseDelete=async(path)=>{
   if(!_sbClient||!path)return false;
   try{
-    if(_VERIFY_NO_WRITES)return false;
     const {error}=await _sbClient.from('tara_state').delete().eq('doc_path',path);
     if(error){console.warn('[Supabase] delete failed',path,error.message);return false;}
     return true;
@@ -881,7 +878,6 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
       _attempts++;
       try{
         // Read current state
-        if(_VERIFY_NO_WRITES)return false;
         const {data:_cur,error:_readErr}=await _sbClient.from('tara_state')
           .select('data,updated_at').eq('doc_path',path).maybeSingle();
         if(_readErr&&_readErr.code!=='PGRST116'){
@@ -5522,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.271-this-trade-leads';
-const TARA_VERSION_DISPLAY='Tara 13.4.271';
+const BASELINE_VERSION='2026.09.06-v13.4.272-restore-cloud-writes';
+const TARA_VERSION_DISPLAY='Tara 13.4.272';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
