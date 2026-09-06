@@ -1,10 +1,12 @@
-name: Deploy Tara to GitHub Pages
+name: Redirect old GitHub Pages URL to Cloudflare Pages
 
-# Builds the Vite SPA and publishes dist/ to GitHub Pages on every push to main.
-# The site is served at https://gopalaakkrishna.github.io/tara-app/ so the
-# build uses that subpath as its base. API calls are sent to the host named in
-# the repository variable VITE_API_BASE (Settings > Secrets and variables >
-# Actions > Variables); leave it empty and the shim stays off.
+# Tara now lives at https://taracalls.pages.dev. This workflow no longer
+# builds the app; it publishes a one-page stub so the old Pages link
+# (https://gopalaakkrishna.github.io/tara-app/) forwards there instead of
+# serving a stale copy of the dashboard that would drift out of date.
+#
+# Delete this workflow, and disable Pages in the repo settings, once the old
+# link is no longer in anyone's history or bookmarks.
 
 on:
   push:
@@ -20,33 +22,44 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  NEW_URL: https://taracalls.pages.dev/
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - run: npm run build
-        env:
-          VITE_BASE: /tara-app/
-          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
-
-      # Pages has no SPA fallback; serving index.html for unknown paths keeps
-      # deep links and stale PWA start URLs from landing on a 404 page.
-      - run: cp dist/index.html dist/404.html
+      - name: Build the redirect stub
+        run: |
+          mkdir -p out
+          cat > out/index.html <<HTML
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Tara has moved</title>
+              <meta http-equiv="refresh" content="0; url=${NEW_URL}" />
+              <link rel="canonical" href="${NEW_URL}" />
+              <style>
+                body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+                       justify-content: center; background: #0A0C0F; color: #EDEDED;
+                       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+                a { color: #23B981; }
+              </style>
+            </head>
+            <body>
+              <p>Tara has moved to <a href="${NEW_URL}">${NEW_URL}</a></p>
+            </body>
+          </html>
+          HTML
+          cp out/index.html out/404.html
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: out
 
   deploy:
     needs: build
