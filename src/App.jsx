@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.264-sitout-gates-actually-off';
-const TARA_VERSION_DISPLAY='Tara 13.4.264';
+const BASELINE_VERSION='2026.09.06-v13.4.265-one-decision-one-number';
+const TARA_VERSION_DISPLAY='Tara 13.4.265';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16236,6 +16236,14 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   const _lockedDir=(lockedSnapshot&&lockedSnapshot.locked
     &&(lockedSnapshot.call==='UP'||lockedSnapshot.call==='DOWN'))?lockedSnapshot.call:null;
   const locked=!!_lockedDir;
+  // V13.4.265: `locked` above answers "is there a tradeable directional lock",
+  //   and must keep requiring a direction -- a sit-out displaying as a locked
+  //   trade is the bug the V13.4.161 guard was written to prevent.
+  //   But it was ALSO being used to mean "has Tara decided yet", and a sit-out
+  //   is a decision. That second meaning gets its own name here, so the panel
+  //   can freeze its numbers on any commit without ever calling one tradeable.
+  const _committedSnap=(lockedSnapshot&&lockedSnapshot.locked)?lockedSnapshot:null;
+  const _committedSitOut=!!(_committedSnap&&_committedSnap.call==='SIT_OUT');
   // V13.4.161 FIX: the REAL cause of the header/reason contradiction, which the
   //   V13.4.148 debounce-lag fix did not catch (confirmed by a fresh screenshot
   //   showing "LEANING DOWN -- HOLD" over "TRAJ-priority lock·UP" with NO active
@@ -16284,15 +16292,23 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   }
   // True when the debounce is actively holding a side the live engine has left.
   const _leanFlipping=!locked&&(call==='UP'||call==='DOWN')&&(_liveDir==='UP'||_liveDir==='DOWN')&&_liveDir!==call;
-  const isDir=call==='UP'||call==='DOWN';
-  const isSitOut=call==='SIT_OUT'||!call;
+  // V13.4.265: a committed sit-out is NOT a directional read, whatever the live
+  //   engine has drifted to since. Without this the headline said SITTING OUT
+  //   while the sections under it still quoted an entry price and told him his
+  //   position matched Tara -- the same contradiction one level down.
+  const isDir=(call==='UP'||call==='DOWN')&&!_committedSitOut;
+  const isSitOut=call==='SIT_OUT'||!call||_committedSitOut;
   // V13.4.119: SAME live-vs-frozen bug as direction, now fixed for every field the panel
   //   shows. When locked, read confidence/reason/qScore from the FROZEN lockedSnapshot
   //   (taraCallSnapshotRef.current, captured at the moment of lock) instead of the live
   //   taraCall, which keeps recomputing every tick. Real screenshot showed 'confidence
   //   29%' here while the ticket panel showed '20.3pt STRONG conviction' / 'Tara 70%' --
   //   same underlying mismatch as the direction bug, just a different field.
-  const _src=locked&&lockedSnapshot?lockedSnapshot:taraCall;
+  // V13.4.265: was `locked&&lockedSnapshot`, so a committed SIT-OUT fell through
+  //   to the live taraCall and this panel showed a confidence that kept drifting
+  //   after the decision was frozen -- 58% here against 71% on Tara's Call, from
+  //   the same snapshot. Any commit freezes it now.
+  const _src=_committedSnap||taraCall;
   const conf=Number(_src&&_src.confidence)||0;
   const qScore=Number.isFinite(_src&&_src.qScore)?_src.qScore:null;
   const rawReason=(_src&&_src.reason)||'';
@@ -16308,7 +16324,20 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     .split(/\s*\u2014\s*was:\s*/)[0]
     .trim();
   let label,sub,color,bg,border;
-  if(isDir&&locked){
+  // V13.4.265: committed sit-out is checked FIRST. There was no branch for it,
+  //   so it fell into the `isDir&&!locked` lean branch and told him to "wait for
+  //   Tara to commit" on a round she had already committed. Now it reads the same
+  //   way Tara's Call reads it: sitting out, with the lean kept as context.
+  if(_committedSitOut){
+    label='SITTING OUT';
+    const _leanDir=_committedSnap._intendedDir||_committedSnap.direction||null;
+    sub='Tara committed to sitting this round out'
+      +((_leanDir==='UP'||_leanDir==='DOWN')?' — she would have leaned '+_leanDir+'.':'.')
+      +(reason?' '+reason:'');
+    color='rgba(212,162,76,0.95)';
+    bg='rgba(212,162,76,0.08)';
+    border='rgba(212,162,76,0.30)';
+  }else if(isDir&&locked){
     // V13.4.169: en dash, not a double hyphen. "BUY DOWN -- LOCKED" read as raw text.
     label=(call==='UP'?'BUY UP':'BUY DOWN')+' – LOCKED';
     sub='Tara has committed this round. '+(reason?reason:'');
@@ -16347,7 +16376,11 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   },
     React.createElement('div',{className:'text-[10px] uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.5)'}},'Trade Coach'),
     React.createElement('div',{className:'text-2xl font-bold mb-1',style:{color}},label),
-    isDir&&React.createElement('div',{className:'text-[11px] mb-1',style:{color:'rgba(237,237,237,0.6)'}},'confidence '+conf.toFixed(0)+'%'),
+    // V13.4.265: `isDir` is false on a committed sit-out, so the confidence line
+    //   vanished on exactly the state where the two panels disagreed. Shown for
+    //   both now, and labelled so it cannot be misread as a live tradeable read.
+    (isDir||_committedSitOut)&&conf>0&&React.createElement('div',{className:'text-[11px] mb-1',style:{color:'rgba(237,237,237,0.6)'}},
+      (_committedSitOut?'would lean · ':'confidence ')+conf.toFixed(0)+'%'),
     React.createElement('div',{className:'text-[12px] leading-snug',style:{color:'rgba(237,237,237,0.75)'}},sub),
     // V13.4.117: SITUATION AWARENESS. User feedback: coach 'not aware of position and
     //   situation to win max money' -- a bare UP/DOWN direction with no price or time
@@ -17601,7 +17634,16 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       const _impliedDir=_snap.direction||(_snap.atPosterior!=null?(_snap.atPosterior>=50?'UP':'DOWN'):null);
       if(!_impliedDir)return _snap; // can't promote, leave as-is (TaraCallCard SCANNING fallback)
       const _post=typeof _snap.atPosterior==='number'?_snap.atPosterior:50;
-      const _conf=_impliedDir==='UP'?Math.max(50,Math.round(_post)):Math.max(50,Math.round(100-_post));
+      // V13.4.265: prefer the snapshot's OWN frozen confidence. This derivation
+      //   from atPosterior exists for genuinely legacy snapshots that predate the
+      //   field -- but it was overriding modern snapshots that carry the real
+      //   committed value, giving this panel a number no other panel could
+      //   reproduce. Falls back to the derivation when the field is absent or 0
+      //   (some sit-out builders write `_commitConf||0`).
+      const _snapConf=Number(_snap.confidence);
+      const _conf=(Number.isFinite(_snapConf)&&_snapConf>0)
+        ?Math.round(_snapConf)
+        :(_impliedDir==='UP'?Math.max(50,Math.round(_post)):Math.max(50,Math.round(100-_post)));
       return{
         ..._snap,
         call:_impliedDir,
