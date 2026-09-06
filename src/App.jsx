@@ -5510,8 +5510,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.249-no-sitouts-7min-lock-deadline';
-const TARA_VERSION_DISPLAY='Tara 13.4.249';
+const BASELINE_VERSION='2026.09.06-v13.4.250-no-gates';
+const TARA_VERSION_DISPLAY='Tara 13.4.250';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5575,20 +5575,35 @@ const NO_SITOUT_MODE=true;
 //   "losses lock avg 777s vs wins 744s", so an earlier deadline is the same
 //   direction the existing evidence already pointed.
 const LOCK_DEADLINE_SEC=420;
-// Sit-out categories that SURVIVE. Everything here is about the market, not
-//   about how good the read is:
-//     - nothing to trade (no open market, no price)
-//     - entry cost outside the band that getEntryMinCost documents as the only
-//       profitable one (55-69c = +1,079c/n206; 70-74c = -1,127c/n106)
-//   Delete an entry to let that case trade too.
+// V13.4.250 — NO GATES, per explicit instruction. Every price/EV/edge gate is
+//   gone; the only two cases left are physical impossibilities, not decisions:
+//     kalshi-window-closed          -- no contract exists to buy
+//     no-go-price-unavailable-sitout -- no price, so nothing can be sized or costed
+//   Committing a call in either would write a log entry against a market that
+//   is not there, which is data corruption rather than a trade. If those should
+//   go too, empty this set.
+//
+//   REMOVED HERE (all of these now trade): no-go-edge, edge-sitout,
+//   no-go-edge-band-sitout, no-go-edge-dead-window, v1123-ev-gate,
+//   time-cap-band-sitout. See NO_ENTRY_GATES below -- the cost band itself is
+//   what actually enforced most of these, in 7 separate places.
 const _SITOUT_KEEP=new Set([
   'kalshi-window-closed',
   'no-go-price-unavailable-sitout',
-  'no-go-edge','edge-sitout','no-go-edge-band-sitout','no-go-edge-dead-window',
-  'v1123-ev-gate','time-cap-band-sitout',
 ]);
-const getEntryMinCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:55;}catch(_e13428a){return 55;}};
-const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e13428b){return 70;}};
+// V13.4.250: the entry-cost band is read at 7+ call sites (entry quality, time-cap
+//   commit, the V11.2 odds ceiling, the hourly ladder, the band sit-outs). Rather
+//   than unpick each one, the two getters open all the way when this is on, so
+//   every band comparison passes and no site can quietly keep gating.
+//
+//   WHAT THIS TURNS OFF, in his own log's numbers (see the note below the getters):
+//     <55c    n=44   -12.5c/ct   -548c
+//     70-74c  n=106  -10.6c/ct   -1,127c   <- the band's whole reason for existing
+//     95c+    n=13   -15.1c/ct
+//   Set NO_ENTRY_GATES=false to restore the 55-70c band everywhere at once.
+const NO_ENTRY_GATES=true;
+const getEntryMinCost=()=>{if(NO_ENTRY_GATES)return 0;try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:55;}catch(_e13428a){return 55;}};
+const getEntryMaxCost=()=>{if(NO_ENTRY_GATES)return 100;try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e13428b){return 70;}};
 // V13.4.180: SLIM signal telemetry for cloud sync. The V10.7.58 egress fix stripped
 //   signalScoresAtLock from cloud writes entirely ("analysis reads from local") --
 //   which made the learning loop's raw material localStorage-only: the V13.4.179
