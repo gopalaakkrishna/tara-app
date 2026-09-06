@@ -5522,8 +5522,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.270-coach-is-alerts-only';
-const TARA_VERSION_DISPLAY='Tara 13.4.270';
+const BASELINE_VERSION='2026.09.06-v13.4.271-this-trade-leads';
+const TARA_VERSION_DISPLAY='Tara 13.4.271';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17117,8 +17117,13 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
               dimmed every lock except the newest, so a still-open position looked
               half-cancelled -- part of why these get missed. Every open lock is a real
               position and renders at full strength. */}
-          {LOCKS.map((LK)=>(
-            <div key={LK.ms} className={'rounded-lg border p-2 '+(LK.dir==='UP'?'border-emerald-500/60 bg-emerald-500/10':'border-rose-500/60 bg-rose-500/10')}>
+          {/* V13.4.271: key was LK.ms alone, which React reported as a duplicate `0`
+              -- two open locks lacking a timestamp both keyed on 0. Duplicate keys let
+              React duplicate or DROP siblings, which on a ladder of open positions
+              means a real lock can silently fail to render. Index makes it unique
+              without losing the identity ms gives when it is present. */}
+          {LOCKS.map((LK,_lkIdx)=>(
+            <div key={String(LK.ms||'no-ms')+'|'+_lkIdx} className={'rounded-lg border p-2 '+(LK.dir==='UP'?'border-emerald-500/60 bg-emerald-500/10':'border-rose-500/60 bg-rose-500/10')}>
               <div className="flex items-center justify-between">
                 {/* V13.4.169: every open lock is locked -- only the newest said so,
                     which made the older one look like a pending suggestion. */}
@@ -17190,7 +17195,11 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
           React.createElement('summary',{className:'text-[10px] text-zinc-500 cursor-pointer select-none'},'settled history ('+rec.history.length+' total, showing last '+_recent.length+')'),
           React.createElement('div',{className:'mt-1.5 space-y-1'},
             _recent.map((h,i)=>React.createElement('div',{
-              key:h.ticker+i,
+              // V13.4.271: was h.ticker+i, which is ADDITION, not concatenation, when
+              //   ticker is a number or undefined -- undefined+0 is NaN, and every row
+              //   then keys NaN. Index first makes it a string and unique regardless of
+              //   what ticker holds.
+              key:'h'+i+'-'+String(h.ticker||''),
               className:'flex items-center justify-between text-[11px] rounded px-2 py-1 '+(h.won?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'),
             },
               React.createElement('span',null,(h.won?'WIN ':'LOSS ')+h.side+' @ '+(h.strike!=null?Number(h.strike).toFixed(0):'?')),
@@ -17224,7 +17233,13 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
               :(isWatch?{txt:(side||'')+' WATCH '+L.ticks+'/'+CONFIRM_TICKS,cls:'text-amber-400'}
                       :{txt:'',cls:'text-zinc-700'});
             return(
-              <div key={r.ticker} className={'grid grid-cols-5 gap-2 text-[11px] py-0.5 '+(near?'text-zinc-100':'text-zinc-500')}>
+              // V13.4.271: keyed on r.ticker, which React reported as a duplicate.
+              //   This component already knows ticker is not unique on its own -- the
+              //   open-lock code above builds ticker+'|'+side for exactly that reason.
+              //   A strike ladder has one row per strike, so strike IS the identity.
+              //   Duplicate keys let React drop siblings, i.e. a strike silently
+              //   missing from the ladder.
+              <div key={'strike-'+r.strike} className={'grid grid-cols-5 gap-2 text-[11px] py-0.5 '+(near?'text-zinc-100':'text-zinc-500')}>
                 <div className="tabular-nums">{r.strike.toFixed(0)}</div>
                 <div className="text-right tabular-nums">{r.modelPct.toFixed(0)}%</div>
                 <div className={'text-right tabular-nums '+(yesLocked?'text-emerald-400 font-semibold':(side==='YES'&&cheap?'text-emerald-400':''))}>{r.ask}c</div>
@@ -52834,6 +52849,30 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <>
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
+          {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
+              the first and largest thing on screen, because it is the only card that
+              answers "what is happening with my money right now". It was sitting in
+              the middle column under the strike, depth and tape chrome.
+              The wrapper is the grid child now, so the column count and auto-rows-fr
+              height matching are unchanged -- same pattern as the middle column. */}
+          <div className="flex flex-col gap-3 min-w-0">
+          {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
+              numbered stages, always present. Replaces the scattered TARA'S CALL
+              headline + TRADE COACH + auto-exec status that all described the same
+              round from three different columns. */}
+          <ThisTradeCard
+            taraCall={taraCall}
+            snapshot={taraCallSnapshotRef.current||null}
+            analysis={analysis}
+            timeState={timeState}
+            windowType={windowType}
+            kalshiYesPrice={kalshiYesPrice}
+            autoOrderState={autoOrderState}
+            userPosition={userPosition}
+            trailPeakCents={_exitTrailRef.current?.peak}
+            autoExecSettings={autoExecSettings}
+            timeFormat={timeFormat}
+          />
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
@@ -53095,30 +53134,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 element again, this is the spot. */}
             <div className="mt-auto pt-3 min-w-0"/>
           </div>
+          </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ──
               v13.4.153: wrapped so News + Live Feeds can sit directly beneath
               Tara's Call. The wrapper is the grid child now, so the column
               count is unchanged and auto-rows-fr still matches heights. */}
           <div className="flex flex-col gap-3 min-w-0">
-          {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
-              numbered stages, always present. Replaces the scattered TARA'S CALL
-              headline + TRADE COACH + auto-exec status that all described the same
-              round from three different columns. */}
-          <ThisTradeCard
-            taraCall={taraCall}
-            snapshot={taraCallSnapshotRef.current||null}
-            analysis={analysis}
-            timeState={timeState}
-            windowType={windowType}
-            kalshiYesPrice={kalshiYesPrice}
-            autoOrderState={autoOrderState}
-            userPosition={userPosition}
-            trailPeakCents={_exitTrailRef.current?.peak}
-            autoExecSettings={autoExecSettings}
-            timeFormat={timeFormat}
-          />
-
           {/* V13.4.263: stages 2 and 3 of the trade -- how it is going, and what
               the auto-exec did about it. Returns null with no open position, so it
               leads this column only while a trade is live, which is the one time
