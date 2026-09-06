@@ -5584,8 +5584,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.284-posterior-phantom-cluster';
-const TARA_VERSION_DISPLAY='Tara 13.4.284';
+const BASELINE_VERSION='2026.09.06-v13.4.285-right-object-this-time';
+const TARA_VERSION_DISPLAY='Tara 13.4.285';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17437,7 +17437,10 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   //   could never render. Its trajectory chip was dead too, for the same root cause
   //   further down (convictionHistoryRef never filled). Two of its five chips were
   //   unreachable; it only ever appeared when the size / cooldown / risk chip fired.
-  const _post=Number(taraCall.rawProbAbove??0);
+  // V13.4.285 CORRECTION: v284 changed this from taraCall.posterior to
+  //   taraCall.rawProbAbove — both are phantoms on taraCall. `analysis` is the
+  //   object that exposes rawProbAbove, and it is already a prop here.
+  const _post=Number(analysis?.rawProbAbove??0);
   const _hasPost=Number.isFinite(_post)&&_post>0;
   const _dir=taraCall.snapshot?taraCall.snapshot.call:taraCall.direction;
   const _isLocked=taraCall.snapshot&&_dir!=='SIT_OUT'&&taraCall.snapshot.call!=='NO_TRADE';
@@ -18174,11 +18177,29 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           //   directly beside "CONFIDENCE 75%".
           //   The V10.7.67b note above describes fixing exactly this symptom by
           //   preferring tc.posterior; that fix could never have worked.
-          const _livePost=tc?.rawProbAbove??snap?.atPosterior??50;
+          //   V13.4.285 CORRECTION: v284 swapped tc.posterior for tc.rawProbAbove,
+          //   which taraCall does not carry either — it is built by its own IIFE
+          //   (~L44185) that CONSUMES analysis.rawProbAbove but returns only
+          //   {call, reason, confidence, direction, conviction, phase, ...}. So the
+          //   DEADZONE reading survived the fix. `analysis` is the object that
+          //   actually exposes rawProbAbove (engine return ~L43758).
+          const _livePost=analysis?.rawProbAbove??snap?.atPosterior??50;
           const _post=Number(_livePost);
           if(!isFinite(_post))return null;
           const _conv=Math.abs(_post-50);
-          const _dir=_post>=50?'UP':'DOWN';
+          // V13.4.285: the MAGNITUDE is symmetric (|p-50|) so it is direction-agnostic,
+          //   but the arrow must follow the CALL, not the raw posterior sign. The engine
+          //   can flip away from the raw read (BRTI snap-back / universal-flip paths at
+          //   ~L45548 return a call opposite the posterior), and with the meter finally
+          //   showing a real number this immediately rendered "14.5pt DOWN" beside a card
+          //   reading "UP" on a flipped window. Committed call first, then the live call,
+          //   and only then the raw posterior's own sign.
+          const _dir=(()=>{
+            const _c=(snap&&(snap.call==='UP'||snap.call==='DOWN'))?snap.call
+              :(tc&&(tc.call==='UP'||tc.call==='DOWN'))?tc.call
+              :(tc&&(tc.direction==='UP'||tc.direction==='DOWN'))?tc.direction:null;
+            return _c||(_post>=50?'UP':'DOWN');
+          })();
           const _zone=_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
           const _zoneLabel=_conv<5?'DEADZONE — coin flip':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
           const _zoneColor=_conv<5?'rgb(232,69,94)':_conv<10?'#23B981':_conv<15?'rgb(35,185,129)':'rgb(52,211,153)';
@@ -46297,8 +46318,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   convictionTrajectory permanently {state:'UNKNOWN'} (it needs >=4 samples),
       //   and _showTrajectory is `state!=='UNKNOWN'` — so the BUILDING/FADING
       //   conviction arrow has never rendered once.
-      if(!taraCall||taraCall.rawProbAbove==null)return;
-      const _post=Number(taraCall.rawProbAbove);
+      // V13.4.285 CORRECTION: taraCall carries neither `posterior` (v283 bug) nor
+      //   `rawProbAbove` (v284's wrong fix). analysis is the object that has it.
+      const _post=Number(analysis?.rawProbAbove);
       if(!Number.isFinite(_post))return;
       const _now=Date.now();
       convictionHistoryRef.current.push({time:_now,post:_post});
@@ -46326,7 +46348,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     return{state:'STABLE',delta:_delta};
     // V13.4.284: dep was taraCall?.posterior — permanently undefined, so this memo
     //   never recomputed on a posterior tick even once the ref does fill.
-  },[taraCall?.rawProbAbove]);
+    // V13.4.285 CORRECTION: taraCall?.rawProbAbove is undefined too; analysis is the
+    //   object that carries the posterior.
+  },[analysis?.rawProbAbove]);
   // V5.7.8: mirror confluence into the ref so the engine cooldown gate can read it
   confluenceStateRef.current={
     isConfluent:taraCall?._ctx?.isConfluent||taraCall?._ctx?.isRisingConfluence||false,
@@ -47229,8 +47253,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _postNow=(()=>{
       const _a=Number(analysis?.rawProbAbove);
       if(Number.isFinite(_a))return _a;
-      const _t=Number(tc?.rawProbAbove);
-      return Number.isFinite(_t)?_t:50;
+      // V13.4.285: the old `tc` fallback is gone — taraCall never carries this field,
+      //   so it was dead weight that made the expression look like it had a backup.
+      return 50;
     })();
     const _convictionNow=Math.max(50,Math.min(95,50+Math.abs(_postNow-50)));
     //   V10.7.71: conviction-scaled threshold. V10.7.74: floor raised 55¢ → 45¢.
@@ -47826,7 +47851,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           regime:analysis?.regime||'',
           dir:snapshot.call==='NO_TRADE'?(snapshot.direction||'NO_TRADE'):snapshot.call,
           confidence:snapshot.confidence||0,
-          posterior:(typeof taraCall!=='undefined'&&taraCall&&Number.isFinite(Number(taraCall.rawProbAbove)))?Number(taraCall.rawProbAbove):(Number.isFinite(Number(snapshot.atPosterior))?Number(snapshot.atPosterior):(Number.isFinite(Number(analysis?.rawProbAbove))?Number(analysis.rawProbAbove):null)),/*V13.4.65: log LIVE taraCall.rawProbAbove; snapshot.atPosterior was NaN from stale analysis so posterior logged null on every lock, starving calibration*/
+          posterior:(Number.isFinite(Number(analysis?.rawProbAbove))?Number(analysis.rawProbAbove):(Number.isFinite(Number(snapshot.atPosterior))?Number(snapshot.atPosterior):null)),/*V13.4.65: log LIVE taraCall.rawProbAbove; snapshot.atPosterior was NaN from stale analysis so posterior logged null on every lock, starving calibration*/
           qScore:snapshot.qScore||Math.round(qualityGate?.score||0),
           fgt:snapshot.fgt||analysis?.mtfAlignment,
           tier:snapshot.tier||'unknown',
