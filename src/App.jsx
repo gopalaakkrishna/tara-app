@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.273-confidence-in-called-side';
-const TARA_VERSION_DISPLAY='Tara 13.4.273';
+const BASELINE_VERSION='2026.09.06-v13.4.274-window-vs-strike';
+const TARA_VERSION_DISPLAY='Tara 13.4.274';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18926,6 +18926,96 @@ function BestPracticesModal({open,onClose}){
   );
 }
 
+// ── V13.4.274: WINDOW vs STRIKE ─────────────────────────────────────────────
+// NOT a replacement for the TradingView chart. That widget is real candles, real
+// volume, 1m-1h, tied to whichever price source is selected -- nothing drawn by
+// hand here beats it, so it stays exactly where it is.
+//
+// This answers the one question TradingView structurally CANNOT, because it is a
+// third-party embed with no drawing API on the widget URL: where is price
+// relative to MY strike, inside THIS window. That is the line the mockup's chart
+// draws, and it is the only thing that decides whether the contract pays.
+//
+// Accuracy: this is not a smoothed or synthetic series. It plots
+// tickHistoryRef.current, the same real trade ticks the engine reads, cleared at
+// every window rollover -- so the x-axis is exactly this window and nothing else.
+function WindowStrikeChart({tickHistoryRef,targetMargin,currentPrice,timeState,height=96}){
+  const strike=Number(targetMargin);
+  const spot=Number(currentPrice);
+  if(!Number.isFinite(strike)||strike<=0||!Number.isFinite(spot)||spot<=0)return null;
+
+  const _all=(tickHistoryRef&&Array.isArray(tickHistoryRef.current))?tickHistoryRef.current:[];
+  // Downsample by stride rather than by averaging: an average would invent prices
+  //   that never traded, and the extremes are the part that matters near a strike.
+  const MAX_PTS=140;
+  const _stride=Math.max(1,Math.ceil(_all.length/MAX_PTS));
+  const pts=[];
+  for(let i=0;i<_all.length;i+=_stride){
+    const p=Number(_all[i]&&_all[i].p);
+    if(Number.isFinite(p)&&p>0)pts.push({p,t:Number(_all[i].time)||0});
+  }
+  // Always end on the live price so the right edge is never stale.
+  if(pts.length===0||pts[pts.length-1].p!==spot)pts.push({p:spot,t:Date.now()});
+  if(pts.length<2)return null;
+
+  const W=1000, H=Math.max(60,height), PAD_T=10, PAD_B=10;
+  // Scale must ALWAYS include the strike, otherwise the line it is being measured
+  //   against can sit off-canvas and the chart quietly lies about the distance.
+  let lo=Math.min(strike,...pts.map(d=>d.p));
+  let hi=Math.max(strike,...pts.map(d=>d.p));
+  if(hi-lo<1e-9){hi=lo+1;}
+  const _pad=(hi-lo)*0.18;
+  lo-=_pad; hi+=_pad;
+  const y=(v)=>PAD_T+(H-PAD_T-PAD_B)*(1-(v-lo)/(hi-lo));
+  const x=(i)=>(W*i)/(pts.length-1);
+
+  const above=spot>=strike;
+  const GREEN='#23B981', RED='#E8455E';
+  const tone=above?GREEN:RED;
+  const yStrike=y(strike);
+  const line=pts.map((d,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(d.p).toFixed(1)).join(' ');
+  // Fill between the price line and the strike, so the shaded band IS the money:
+  //   how far, and on which side, this window is sitting.
+  const area=line+' L'+W+' '+yStrike.toFixed(1)+' L0 '+yStrike.toFixed(1)+' Z';
+  const gapBps=((spot-strike)/strike)*10000;
+  const _gid='wsc'+Math.round(strike);
+
+  return (
+    <div className="px-4 pt-1 pb-3">
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <span className="text-[9.5px] uppercase font-bold tracking-[0.15em] text-[#EDEDED]/40">this window vs strike</span>
+        <span className="text-[10px] tabular-nums font-semibold" style={{color:tone}}>
+          {above?'above':'below'} by {Math.abs(gapBps).toFixed(0)}bps
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+           style={{width:'100%',height:H+'px',display:'block',overflow:'visible'}}>
+        <defs>
+          <linearGradient id={_gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={tone} stopOpacity="0.22"/>
+            <stop offset="100%" stopColor={tone} stopOpacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <path d={area} fill={`url(#${_gid})`} stroke="none"/>
+        {/* the strike itself — dashed, labelled, never off-canvas */}
+        <line x1="0" y1={yStrike} x2={W} y2={yStrike}
+              stroke="rgba(237,237,237,0.38)" strokeWidth="1" strokeDasharray="6 5" vectorEffect="non-scaling-stroke"/>
+        <path d={line} fill="none" stroke={tone} strokeWidth="1.6"
+              strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+        <circle cx={W} cy={y(spot)} r="3" fill={tone} vectorEffect="non-scaling-stroke"/>
+      </svg>
+      <div className="flex items-baseline justify-between gap-2 mt-1">
+        <span className="text-[9px] uppercase tracking-[0.12em] text-[#EDEDED]/28">
+          strike <span className="tabular-nums text-[#EDEDED]/50">{strike.toFixed(0)}</span>
+        </span>
+        <span className="text-[9px] uppercase tracking-[0.12em] text-[#EDEDED]/28 tabular-nums">
+          {pts.length} ticks{timeState?` · ${timeState.minsRemaining||0}m ${timeState.secsRemaining||0}s left`:''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ── V13.4.268: THIS TRADE ────────────────────────────────────────────────────
 // The card from the mockup, and the actual merge he asked for. One trade told
 // as three numbered stages in plain sentences, in one place:
@@ -18946,7 +19036,8 @@ function BestPracticesModal({open,onClose}){
 // Numbers freeze on commit, never drift -- the v265 rule. Confidence, reason and
 // direction all come from the committed snapshot when one exists.
 function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYesPrice,
-                        autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat}){
+                        autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat,
+                        tickHistoryRef,targetMargin,currentPrice}){
   // Declared BEFORE the early return: hooks must run in the same order on every
   //   render, and this component can return null on the very first one.
   const[whyOpen,setWhyOpen]=React.useState(false);
@@ -19085,6 +19176,16 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
           </div>
         )}
       </Stage>
+
+      {/* V13.4.274: the picture of the same trade, between the decision and how it
+          is going, because that is the order you actually read it in. Renders null
+          without a strike or a price, so it never leaves an empty band. */}
+      <WindowStrikeChart
+        tickHistoryRef={tickHistoryRef}
+        targetMargin={targetMargin}
+        currentPrice={currentPrice}
+        timeState={timeState}
+      />
 
       {/* ── 2 ── */}
       <Stage n="2" title="how it's going"
@@ -52881,6 +52982,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             autoOrderState={autoOrderState}
             userPosition={userPosition}
             trailPeakCents={_exitTrailRef.current?.peak}
+            tickHistoryRef={tickHistoryRef}
+            targetMargin={targetMargin}
+            currentPrice={currentPrice}
             autoExecSettings={autoExecSettings}
             timeFormat={timeFormat}
           />
