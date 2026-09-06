@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.275-one-voice-on-the-lean';
-const TARA_VERSION_DISPLAY='Tara 13.4.275';
+const BASELINE_VERSION='2026.09.06-v13.4.276-close-the-column-gap';
+const TARA_VERSION_DISPLAY='Tara 13.4.276';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -53296,21 +53296,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               />
             }/>
 
-            {/* V9.2.0: Schedule relocated from RightPanel to projections column.
-                User feedback: "put schedule in the news place." */}
-            <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid #24242E'}}>
-              {/* V9.8.18: day-aware schedule banner — shows today's character (weekday/weekend, holiday flag, activity level, rank vs other days, next strong window). */}
-              <DayAwareScheduleHeader dayContext={dayContext}/>
-              <TradeScheduleStrip taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} onOpenFullSchedule={()=>setScheduleModalMain(true)}/>
-            </div>
-            {scheduleModalMain&&taraCallLog&&(
-              <TradeScheduleModal
-                taraCallLog={taraCallLog}
-                currentAsset={currentAsset}
-                timeFormat={timeFormat}
-                onClose={()=>setScheduleModalMain(false)}
-              />
-            )}
 
             {/* V9.10.2: PerformanceCard removed — consolidated into UnifiedTodayCard
                 above. The mt-auto + pt-3 wrapper that pinned it to column bottom no
@@ -53407,13 +53392,40 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               gating this to 'projections' would have parked News under a tab
               that has no Tara's Call on it. DOM order puts this right after the
               prediction card once the grid collapses to one column. */}
-          <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
+          {/* V13.4.276: this panel absorbs the column's leftover height on desktop.
+              The grid stretches all three columns to the tallest, and this one is the
+              shortest, so the slack used to show as raw whitespace beside the other
+              two. Giving it to the LIVE FEED is not padding -- the feed is a scrolling
+              list that was being truncated, so the space becomes more visible rows.
+              lg: only; on mobile the column is a single stack with nothing to absorb. */}
+          <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 lg:flex-1 lg:min-h-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
             <T2Stamp code="FEED · 016"/>
             <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
-            <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+            <div className="pt-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
               <LiveFeedsCard tapeRef={tapeRef} bloomberg={bloomberg} whaleLog={whaleLog} timeFormat={timeFormat}/>
             </div>
           </div>
+          {/* V13.4.276: schedule moved here from the prediction column. Its own
+              comment above records the original ask -- "put schedule in the news
+              place" -- and it had drifted into column 1 instead, where it was 455px
+              of the 2,275px that made that column the tallest and left this one with
+              1,420px of dead space. It is reference material, not live trade state,
+              so it belongs beside the news rather than under the auto-exec controls. */}
+            {/* V9.2.0: Schedule relocated from RightPanel to projections column.
+                User feedback: "put schedule in the news place." */}
+            <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid #24242E'}}>
+              {/* V9.8.18: day-aware schedule banner — shows today's character (weekday/weekend, holiday flag, activity level, rank vs other days, next strong window). */}
+              <DayAwareScheduleHeader dayContext={dayContext}/>
+              <TradeScheduleStrip taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} onOpenFullSchedule={()=>setScheduleModalMain(true)}/>
+            </div>
+            {scheduleModalMain&&taraCallLog&&(
+              <TradeScheduleModal
+                taraCallLog={taraCallLog}
+                currentAsset={currentAsset}
+                timeFormat={timeFormat}
+                onClose={()=>setScheduleModalMain(false)}
+              />
+            )}
           </div>{/* /Tara's Call column */}
 
           {/* ── V111: RIGHT PANEL - Engine Log (col 3) ── */}
