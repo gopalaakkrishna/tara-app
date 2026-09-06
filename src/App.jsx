@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.263-merge-trade-blocks';
-const TARA_VERSION_DISPLAY='Tara 13.4.263';
+const BASELINE_VERSION='2026.09.06-v13.4.264-sitout-gates-actually-off';
+const TARA_VERSION_DISPLAY='Tara 13.4.264';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46609,7 +46609,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             snapshot.v11Prime=!!_g.primeSetup;
             snapshot.v11Late=!!_g.isLate;
             snapshot.v11Expanding=!!_g.isExpanding;
-          }else if(_g){
+          }else if(_g&&!NO_ENTRY_GATES){
+            // V13.4.264: was `else if(_g)`. Now honours NO_ENTRY_GATES like every
+            //   other gate. When gates are off the v11* telemetry fields above are
+            //   simply not stamped, which is correct -- there was no gate decision.
             // Blocked: convert to a sit-out shaped like every other sit-out in
             //   this file (see the V10.7.97 weak-gap sitout for the template),
             //   preserving the intended direction for analytics.
@@ -46787,7 +46790,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             ?(((_ewDir==='UP'?(currentPrice-targetMargin):(targetMargin-currentPrice))/targetMargin)*10000)
             :null;
           const _ewGapOpposed=_ewGapAligned!=null&&_ewGapAligned<=0;
-          if(_ewBlocked||_ewGapOpposed){
+          // V13.4.264: THIS is the gate that kept sitting out on v256 and v262
+          //   after v249/v251 were supposed to have ended sit-outs. It hardcodes
+          //   55 / 70-84 / 95 instead of reading getEntryMinCost()/getEntryMaxCost(),
+          //   so turning that dial to 0-100 left this one enforcing the old band on
+          //   every edge-watch tier. Same flag reaches it now.
+          //   Stamped rather than silent, so what the gate WOULD have blocked stays
+          //   answerable from the existing log with no new plumbing.
+          if((_ewBlocked||_ewGapOpposed)&&NO_ENTRY_GATES){
+            snapshot._v264WouldHaveSatOut=_ewGapOpposed?'gap-opposed':'cost-band';
+            snapshot._v264WouldHaveCost=Math.round(_ewCost);
+          }
+          if((_ewBlocked||_ewGapOpposed)&&!NO_ENTRY_GATES){
             const _ewZone=_ewGapOpposed?`gap-opposed (price ${Math.abs(_ewGapAligned).toFixed(0)}bps on the wrong side of the strike — 25% WR measured)`:_ewCost<55?'below 55c (22.7% WR, -14.5c/ct measured)':(_ewCost>=95?'95c+ (needs >95% WR to break even)':'the 70-84c dead zone (-11.1c/ct measured at 70-74)');
             snapshot.call='SIT_OUT';
             snapshot.wasOverriddenNoTrade=true;
@@ -46838,6 +46852,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _g_regime=snapshot.regime||analysis?.regime||'';
           const _g_htfDir=snapshot.htfDominantDir||(analysis?.htfDominantDir)||null;
           const _g_sit=(why)=>{
+            // V13.4.264: several rule branches below call this. Neutralising it here
+            //   covers all of them at once, rather than guarding each rule and
+            //   missing one -- which is exactly how v249 came to miss these gates.
+            if(NO_ENTRY_GATES){snapshot._v264WouldHaveSatOut='ev-gate';return;}
             snapshot.call='SIT_OUT';snapshot.wasOverriddenNoTrade=true;
             snapshot.noGoCategory='v1123-ev-gate';
             snapshot.caution=`V11.2.3 EV gate: ${why}`;
