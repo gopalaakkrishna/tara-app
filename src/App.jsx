@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.258-sports-screen-rebuild';
-const TARA_VERSION_DISPLAY='Tara 13.4.258';
+const BASELINE_VERSION='2026.09.06-v13.4.259-weather-and-record-rebuild';
+const TARA_VERSION_DISPLAY='Tara 13.4.259';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24579,26 +24579,26 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#EDEDED]/5 text-[#EDEDED]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
       ),
-      React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
-        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+      React.createElement('div',{className:`grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-px mb-4 overflow-hidden ${UI2_PANEL} ${UI2_GRID_BG}`},
+        React.createElement('div',{className:'bg-[#0A0A0E] p-3.5'},
           // V13.4.166: say which window these totals cover. The log is capped to the
           //   cloud window, so an unqualified "Total calls" read as a lifetime count.
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},`Calls · ${_TARA_RECORD_WINDOW_LABEL}`),
           React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums',style:{fontFamily:'"IBM Plex Mono",monospace'}},counts.total),
         ),
-        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#0A0A0E] p-3.5'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Win rate'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(35,185,129)':_wr>=50?'#fff':'rgb(232,69,94)',fontFamily:'"IBM Plex Mono",monospace'}},_wr!==null?`${_wr}%`:'—'),
         ),
-        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#0A0A0E] p-3.5'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Wins'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(35,185,129)',fontFamily:'"IBM Plex Mono",monospace'}},counts.wins),
         ),
-        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#0A0A0E] p-3.5'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Losses'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(232,69,94)',fontFamily:'"IBM Plex Mono",monospace'}},counts.losses),
         ),
-        React.createElement('div',{className:'bg-[#101014] border border-[#2A2A34] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#0A0A0E] p-3.5'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Sat out'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD,fontFamily:'"IBM Plex Mono",monospace'}},counts.sitouts),
         ),
@@ -29252,9 +29252,9 @@ function WeatherView({onClose,weatherPicks}){
         </div>
 
         {S.err?(
-          <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 text-[12px]" style={{color:'#E8455E'}}>{S.err}</div>
+          <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 text-[12px]" style={{color:'#E8455E'}}>{S.err}</div>
         ):S.loading&&!S.rows.length?(
-          <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-6 text-center text-[12px]" style={{color:'rgba(255,255,255,0.45)'}}>loading…</div>
+          <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-6 text-center text-[12px]" style={{color:'rgba(255,255,255,0.45)'}}>loading…</div>
         ):(
           <div>
             {/* V13.4.217: the gate states its own case, so a blank edge column
@@ -29285,14 +29285,14 @@ function WeatherView({onClose,weatherPicks}){
                 ['observed max today',S.runMax!=null?S.runMax.toFixed(1)+'°F':'—'],
                 ['observations',S.obsN+' · '+(S.hourLocal!=null?S.hourLocal+':00 local':'—')],
                 ['model spread (σ)',(S.sigma!=null?'±'+S.sigma+'°':'—')+(S.wholeC?' · ±0.9 read':'')]].map(([k,v])=>(
-                <div key={k} className="bg-[#151A21] border border-[#24242E] rounded-xl p-3">
+                <div key={k} className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-3">
                   <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-1" style={{color:'rgba(255,255,255,0.45)'}}>{k}</div>
                   <div className="text-[16px] tabular-nums font-bold" style={{color:'rgba(255,255,255,0.92)'}}>{v}</div>
                 </div>
               ))}
             </div>
 
-            <div className="bg-[#151A21] border border-[#24242E] rounded-xl overflow-hidden mb-4">
+            <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] overflow-hidden mb-4">
               {/* V13.4.224: below sm this stops being a table. Measured at 320px,
                   the 12-column grid handed each data column 22px while its
                   contents needed 28-45px, so "YES +5c" and the open-interest
@@ -29362,7 +29362,7 @@ function WeatherView({onClose,weatherPicks}){
             {/* V13.4.221: the record. Two tiers kept apart on purpose — mixing a
                 measured edge with a model's opinion produces a number that
                 describes neither. */}
-            <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 mb-4">
+            <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 mb-4">
               <div className="flex items-baseline justify-between mb-3">
                 <span className="text-[9px] uppercase tracking-[0.14em] font-bold" style={{color:'rgba(255,255,255,0.85)'}}>Record</span>
                 <span className="text-[9px] uppercase tracking-[0.12em]" style={{color:'rgba(255,255,255,0.28)'}}>settled by Kalshi, not by this panel</span>
@@ -29465,7 +29465,7 @@ function WeatherView({onClose,weatherPicks}){
               )}
             </div>
 
-            <div className="bg-[#151A21] border border-[#24242E] rounded-xl p-4 text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.55)'}}>
+            <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.55)'}}>
               <div className="text-[9px] uppercase tracking-[0.14em] font-bold mb-2" style={{color:'rgba(255,255,255,0.85)'}}>Read this before trading it</div>
               <div className="mb-1.5"><span style={{color:'#D4A03A'}}>Basis risk.</span> Kalshi settles this series on <b>The Weather Company</b>. This panel reads <b>NWS {city.station}</b> — free and open, but a different source. They track closely and can still differ by a degree exactly at a bucket boundary, which is where the money is. &ldquo;Passed&rdquo; means passed on the NWS proxy, not settled fact.</div>
               <div className="mb-1.5"><span style={{color:'#D4A03A'}}>No track record.</span> BTC has 1,000 logged calls behind its numbers. This lane has none. Every percentage here is a model output, not a measured edge — paper trade it before risking size.</div>
