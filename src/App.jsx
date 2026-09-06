@@ -5518,8 +5518,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.274-window-vs-strike';
-const TARA_VERSION_DISPLAY='Tara 13.4.274';
+const BASELINE_VERSION='2026.09.06-v13.4.275-one-voice-on-the-lean';
+const TARA_VERSION_DISPLAY='Tara 13.4.275';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10054,14 +10054,25 @@ const computeAdvisor=(params)=>{
 
   // V6.2.8: Tara summary — used in both minimal pre-entry and post-entry cross-reference.
   //   Determines what Tara is calling, what she'd have leaned if she sat out, edge math.
-  const _taraDir=taraSnapshot?.call==='UP'||taraSnapshot?.call==='DOWN'?taraSnapshot.call
+  // V13.4.275: a direction alone is NOT a commitment. This required only that the
+  //   snapshot carry UP/DOWN, so an uncommitted snapshot rendered as "Locked DOWN"
+  //   with an ENTER button while THIS TRADE, reading the same object, correctly
+  //   said LEANING. The snapshot's own `locked` flag decides now.
+  const _taraCommitted=!!(taraSnapshot&&taraSnapshot.locked);
+  const _taraDir=_taraCommitted&&(taraSnapshot?.call==='UP'||taraSnapshot?.call==='DOWN')?taraSnapshot.call
     :(taraLean?.dir||null); // even on SIT_OUT, taraLean might exist if she had a forming direction
   const _taraSatOut=taraSnapshot?.call==='SIT_OUT';
   // Implied direction Tara would have called if forced — useful display when sitting out.
   //   Use posterior if available, else lean.
   const _taraImpliedDir=_taraDir||(taraPosterior!=null?(taraPosterior>=50?'UP':'DOWN'):null);
+  // V13.4.275: prefer the snapshot's conviction, expressed the same way THIS TRADE
+  //   expresses it (50 + conviction). Deriving from atPosterior here while the card
+  //   derived from conviction is why the two panels showed 78% and 56% for the same
+  //   call. atPosterior stays as the fallback for snapshots without conviction.
+  const _snapConvict=Number(taraSnapshot?.conviction);
   const _taraImpliedConf=_taraImpliedDir
-    ?(_taraDir==='UP'?(taraSnapshot?.atPosterior||taraPosterior||50)
+    ?((Number.isFinite(_snapConvict)&&_snapConvict>0)?(50+_snapConvict)
+      :_taraDir==='UP'?(taraSnapshot?.atPosterior||taraPosterior||50)
       :_taraDir==='DOWN'?(100-(taraSnapshot?.atPosterior||taraPosterior||50))
       :(taraPosterior!=null?(taraPosterior>=50?taraPosterior:(100-taraPosterior)):50))
     :50;
@@ -10091,7 +10102,11 @@ const computeAdvisor=(params)=>{
       };
     }
     // Tara has committed UP/DOWN — show as a simple badge with edge, no shouting
-    if(taraSnapshot&&(taraSnapshot.call==='UP'||taraSnapshot.call==='DOWN')){
+    // V13.4.275: now also requires the snapshot's own `locked` flag. The comment
+    //   above always said "has committed", but the condition only checked that a
+    //   direction existed -- so this branch fired on an uncommitted snapshot and
+    //   offered an ENTER button for a lock that had not happened.
+    if(_taraCommitted&&(taraSnapshot.call==='UP'||taraSnapshot.call==='DOWN')){
       const _isUserForcedLock=taraSnapshot.isUserForced;
       const _color=taraSnapshot.call==='UP'?'emerald':'rose';
       const _conf=Math.round(_taraImpliedConf);
@@ -17275,6 +17290,17 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
 }
 function TaraAdvisorPanel({advisor,executeAction}){
   if(!advisor||!advisor.label||advisor.label==='CONNECTING...')return null;
+  // V13.4.275: this panel no longer restates a PRE-COMMIT lean. Stage 1 of THIS
+  //   TRADE owns that now, and the two could never agree: this reads the
+  //   sample-confirmed lean (taraCallSampleRef) while the card reads the engine's
+  //   live call, so on screen it was "LEANING UP" beside "Tara watching DOWN" for
+  //   the same window. Two different quantities, both true, both labelled as though
+  //   they were Tara's opinion.
+  //   What this panel still does that nothing else does is kept: the ENTER action on
+  //   a committed lock, and the STALE-LOCK warning that kills that button when
+  //   conditions have inverted since the lock. Both carry hasAction or animate.
+  const _isWatching=/^Tara (watching|scanning)/i.test(String(advisor.label||''));
+  if(_isWatching&&!advisor.hasAction&&!advisor.animate)return null;
   const colorMap={
     emerald:'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
     rose:   'border-rose-500/40 bg-rose-500/10 text-rose-400',
@@ -19041,6 +19067,7 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   // Declared BEFORE the early return: hooks must run in the same order on every
   //   render, and this component can return null on the very first one.
   const[whyOpen,setWhyOpen]=React.useState(false);
+  const _leanStickyRef=React.useRef({dir:null,since:0});
   if(!taraCall)return null;
 
   // ── stage 1: what Tara decided ──────────────────────────────────────────
@@ -19049,8 +19076,34 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _satOut=!!(_snap&&_snap.call==='SIT_OUT');
   const _liveDir=(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call
     :(taraCall.direction==='UP'||taraCall.direction==='DOWN')?taraCall.direction:null;
+  // V13.4.275: STABILISE THE PRE-LOCK LEAN. Before this, stage 1 read the raw live
+  //   call every tick, so it flipped UP/DOWN with each price wobble and disagreed
+  //   with the advisor, which reads the sample-confirmed lean. That flip-chasing is
+  //   the exact behaviour he reported once already ("it suggests that position and
+  //   hold and switches instantly, theres no lock to it"), and TradeCoachCall grew
+  //   a debounce for it in V13.4.121. Same idea here: hold a displayed lean for a
+  //   minimum stretch before allowing it to flip.
+  //   Applies ONLY pre-commit -- a committed snapshot is never debounced.
+  const LEAN_HOLD_MS=8000;
+  const _stick=_leanStickyRef.current;
+  let _dispLean=_liveDir;
+  if(!_snapDir&&!_satOut&&_liveDir){
+    const _now=Date.now();
+    if(_stick.dir!==_liveDir){
+      // adopt a new direction only once the current one has been shown long enough
+      if(!_stick.dir||(_now-_stick.since)>=LEAN_HOLD_MS){
+        _leanStickyRef.current={dir:_liveDir,since:_now};
+        _dispLean=_liveDir;
+      }else{
+        _dispLean=_stick.dir;
+      }
+    }else{
+      _dispLean=_stick.dir;
+    }
+  }
+  const _leanFlipping=!!(_dispLean&&_liveDir&&_dispLean!==_liveDir);
   // committed snapshot wins over the live read, always
-  const dir=_snapDir||(_satOut?null:_liveDir);
+  const dir=_snapDir||(_satOut?null:_dispLean);
   const _leanDir=_satOut?(_snap._intendedDir||_snap.direction||null):null;
   const state=_snapDir?'LOCKED':_satOut?'SITTING OUT':_liveDir?'LEANING':'SCANNING';
   const _src=_snap||taraCall;
@@ -19157,6 +19210,13 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
         </div>
         {_satOut&&_leanDir&&(
           <div className="text-[11px] text-[#EDEDED]/45 mt-1.5">would have leaned {_leanDir}</div>
+        )}
+        {/* V13.4.275: say plainly that the read is moving, rather than either hiding
+            the hold or letting the headline flip. This is exactly when not to act. */}
+        {_leanFlipping&&(
+          <div className="text-[11px] mt-1.5" style={{color:GOLD}}>
+            Read is unstable — live signal just moved to {_liveDir}. Holding {dir} until it settles.
+          </div>
         )}
         <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 mt-3">
           {conf>0&&<span className="text-[9.5px] uppercase tracking-[0.11em] text-[#EDEDED]/35 font-semibold">
@@ -43285,6 +43345,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           atPosterior:taraCallSnapshotRef.current.atPosterior,
           kalshiAtLock:taraCallSnapshotRef.current.kalshiAtLock,
           isUserForced:taraCallSnapshotRef.current.isUserForced,
+          // V13.4.275: `locked` was NOT copied here. The advisor then had no way to
+          //   tell a committed lock from an uncommitted snapshot, so it inferred one
+          //   from direction alone and printed "Locked DOWN" with an ENTER button on
+          //   a round Tara had not committed. Same object, one missing field, two
+          //   panels contradicting each other on screen.
+          locked:taraCallSnapshotRef.current.locked,
+          // Carried so the advisor can express confidence the same way THIS TRADE
+          //   does (50 + conviction) instead of re-deriving it from atPosterior and
+          //   landing on a different number for the same call.
+          conviction:taraCallSnapshotRef.current.conviction,
         }:null,
         // Tara's current lean during scanning — derived from sample ref (claimed direction)
         //   and posterior conviction. taraCallSampleRef is a ref so safe to access here.
