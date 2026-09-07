@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.302-remove-engine-log';
-const TARA_VERSION_DISPLAY='Tara 13.4.302';
+const BASELINE_VERSION='2026.09.07-v13.4.303-remove-score-breakdown-and-chart';
+const TARA_VERSION_DISPLAY='Tara 13.4.303';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19409,95 +19409,12 @@ function BestPracticesModal({open,onClose}){
   );
 }
 
-// ── V13.4.274: WINDOW vs STRIKE ─────────────────────────────────────────────
-// NOT a replacement for the TradingView chart. That widget is real candles, real
-// volume, 1m-1h, tied to whichever price source is selected -- nothing drawn by
-// hand here beats it, so it stays exactly where it is.
-//
-// This answers the one question TradingView structurally CANNOT, because it is a
-// third-party embed with no drawing API on the widget URL: where is price
-// relative to MY strike, inside THIS window. That is the line the mockup's chart
-// draws, and it is the only thing that decides whether the contract pays.
-//
-// Accuracy: this is not a smoothed or synthetic series. It plots
-// tickHistoryRef.current, the same real trade ticks the engine reads, cleared at
-// every window rollover -- so the x-axis is exactly this window and nothing else.
-function WindowStrikeChart({tickHistoryRef,targetMargin,currentPrice,timeState,height=96}){
-  const strike=Number(targetMargin);
-  const spot=Number(currentPrice);
-  if(!Number.isFinite(strike)||strike<=0||!Number.isFinite(spot)||spot<=0)return null;
-
-  const _all=(tickHistoryRef&&Array.isArray(tickHistoryRef.current))?tickHistoryRef.current:[];
-  // Downsample by stride rather than by averaging: an average would invent prices
-  //   that never traded, and the extremes are the part that matters near a strike.
-  const MAX_PTS=140;
-  const _stride=Math.max(1,Math.ceil(_all.length/MAX_PTS));
-  const pts=[];
-  for(let i=0;i<_all.length;i+=_stride){
-    const p=Number(_all[i]&&_all[i].p);
-    if(Number.isFinite(p)&&p>0)pts.push({p,t:Number(_all[i].time)||0});
-  }
-  // Always end on the live price so the right edge is never stale.
-  if(pts.length===0||pts[pts.length-1].p!==spot)pts.push({p:spot,t:Date.now()});
-  if(pts.length<2)return null;
-
-  const W=1000, H=Math.max(60,height), PAD_T=10, PAD_B=10;
-  // Scale must ALWAYS include the strike, otherwise the line it is being measured
-  //   against can sit off-canvas and the chart quietly lies about the distance.
-  let lo=Math.min(strike,...pts.map(d=>d.p));
-  let hi=Math.max(strike,...pts.map(d=>d.p));
-  if(hi-lo<1e-9){hi=lo+1;}
-  const _pad=(hi-lo)*0.18;
-  lo-=_pad; hi+=_pad;
-  const y=(v)=>PAD_T+(H-PAD_T-PAD_B)*(1-(v-lo)/(hi-lo));
-  const x=(i)=>(W*i)/(pts.length-1);
-
-  const above=spot>=strike;
-  const GREEN='#23B981', RED='#E8455E';
-  const tone=above?GREEN:RED;
-  const yStrike=y(strike);
-  const line=pts.map((d,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(d.p).toFixed(1)).join(' ');
-  // Fill between the price line and the strike, so the shaded band IS the money:
-  //   how far, and on which side, this window is sitting.
-  const area=line+' L'+W+' '+yStrike.toFixed(1)+' L0 '+yStrike.toFixed(1)+' Z';
-  const gapBps=((spot-strike)/strike)*10000;
-  const _gid='wsc'+Math.round(strike);
-
-  return (
-    <div className="px-4 pt-1 pb-3">
-      <div className="flex items-baseline justify-between gap-2 mb-1.5">
-        <span className="text-[9.5px] uppercase font-bold tracking-[0.15em] text-[#EDEDED]/40">this window vs strike</span>
-        <span className="text-[10px] tabular-nums font-semibold" style={{color:tone}}>
-          {above?'above':'below'} by {Math.abs(gapBps).toFixed(0)}bps
-        </span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-           style={{width:'100%',height:H+'px',display:'block',overflow:'visible'}}>
-        <defs>
-          <linearGradient id={_gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={tone} stopOpacity="0.22"/>
-            <stop offset="100%" stopColor={tone} stopOpacity="0.02"/>
-          </linearGradient>
-        </defs>
-        <path d={area} fill={`url(#${_gid})`} stroke="none"/>
-        {/* the strike itself — dashed, labelled, never off-canvas */}
-        <line x1="0" y1={yStrike} x2={W} y2={yStrike}
-              stroke="rgba(237,237,237,0.38)" strokeWidth="1" strokeDasharray="6 5" vectorEffect="non-scaling-stroke"/>
-        <path d={line} fill="none" stroke={tone} strokeWidth="1.6"
-              strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
-        <circle cx={W} cy={y(spot)} r="3" fill={tone} vectorEffect="non-scaling-stroke"/>
-      </svg>
-      <div className="flex items-baseline justify-between gap-2 mt-1">
-        <span className="text-[9px] uppercase tracking-[0.12em] text-[#EDEDED]/28">
-          strike <span className="tabular-nums text-[#EDEDED]/50">{strike.toFixed(0)}</span>
-        </span>
-        <span className="text-[9px] uppercase tracking-[0.12em] text-[#EDEDED]/28 tabular-nums">
-          {pts.length} ticks{timeState?` · ${timeState.minsRemaining||0}m ${timeState.secsRemaining||0}s left`:''}
-        </span>
-      </div>
-    </div>
-  );
-}
+// ── V13.4.303 REMOVED: WindowStrikeChart ("this window vs strike"). Direct
+// request -- "take off the graph too, its making my pc lag and taking up too
+// much resources". The per-tick SVG polyline rebuild (up to 140 downsampled
+// points, area fill, gradient defs) was real per-frame layout+paint cost on a
+// lower-powered machine. Its one remaining call site (center price panel,
+// v301 removed the ThisTradeCard duplicate) is gone too, so nothing calls it.
 
 // ── V13.4.268: THIS TRADE ────────────────────────────────────────────────────
 // The card from the mockup, and the actual merge he asked for. One trade told
@@ -29077,127 +28994,11 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
         </div>
       )}
-      {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
-      <div className="shrink-0">
-        {/* V13.4.299: gold -> neutral .k cap, same reasoning as Live Feeds. */}
-        <div className={'text-[9px] uppercase tracking-[0.15em] font-bold mb-2 text-[#EDEDED]/30'}>Score Breakdown</div>
-        {(()=>{
-          const sig=analysis?.rawSignalScores||{};
-          const mtf=analysis?.mtfAlignment;
-          const post=analysis?.rawProbAbove||50;
-          const dir=post>=50?'UP':'DOWN';
-          // Total directional pull from each signal
-          const entries=[
-            {k:'gap',label:'Gap',v:sig.gap||0},
-            {k:'mom',label:'Momentum',v:sig.momentum||0},
-            {k:'str',label:'Structure',v:sig.structure||0},
-            {k:'flow',label:'Flow',v:sig.flow||0},
-            {k:'tech',label:'Technical',v:sig.technical||0},
-            {k:'reg',label:'Regime',v:sig.regime||0},
-            {k:'rng',label:'Range Pos',v:sig.rangePosition||0},
-          ];
-          // FGT effective contribution: V2.9 weighted bonus (≥3.5=±42, ≥2.5=±26, ≥1.5=±14, ≥0.7=±6)
-          const fgtAbs=Math.abs(mtf||0);
-          // V3.1.7: V2.9 weighted FGT can produce fractional values — round display to 1 dp.
-          const fgtAbsDisplay=fgtAbs<0.05?'0':fgtAbs.toFixed(1).replace(/\.0$/,'');
-          // V2.9 weighted FGT bonus tiers (must match the actual engine):
-          //   ≥3.5 → ±42, ≥2.5 → ±26, ≥1.5 → ±14, ≥0.7 → ±6
-          // V3.1.11 FIX: Display was using V136 stale calibration (4=±30, 3=±18, 2=±8).
-          //   That made the breakdown show 18-26 fewer points than FGT actually contributed.
-          const fgtContribution=mtf!=null?(fgtAbs>=3.5?42:fgtAbs>=2.5?26:fgtAbs>=1.5?14:fgtAbs>=0.7?6:0)*Math.sign(mtf):0;
-          const totalAll=entries.reduce((s,e)=>s+e.v,0); /* V13.3.7: FGT excluded (removed from synthesis V10.7.25). Total = directional signal sum only. */
-          // Render rows
-          const maxAbs=Math.max(8,...entries.map(e=>Math.abs(e.v)),Math.abs(fgtContribution));
-          const colorFor=v=>v>0.5?'bg-emerald-400':v<-0.5?'bg-rose-400':'bg-[#EDEDED]/15';
-          return(
-            <div className="space-y-1">
-              {entries.map(e=>(
-                <div key={e.k} className="flex items-center gap-2 text-[10px]">
-                  <span className={'text-[#EDEDED]/50 w-16 shrink-0'}>{e.label}</span>
-                  <div className="flex-1 relative h-3 bg-[#050508] rounded-lg overflow-hidden">
-                    {/* center line at 50% */}
-                    <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
-                    {/* bar */}
-                    <div className={'absolute top-0 bottom-0 '+colorFor(e.v)} style={{
-                      left:e.v>=0?'50%':`calc(50% - ${(Math.abs(e.v)/maxAbs)*50}%)`,
-                      width:`${(Math.abs(e.v)/maxAbs)*50}%`,
-                    }}></div>
-                  </div>
-                  <span className={'font-mono text-[10px] w-10 shrink-0 text-right '+(e.v>0.5?'text-emerald-300':e.v<-0.5?'text-rose-300':'text-[#EDEDED]/30')}>{formatSignedInt(e.v)}</span>
-                </div>
-              ))}
-              {/* FGT row — primary signal, separated with gold-tinted divider (V2.1) */}
-              <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-0.5" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-                <span className={'w-16 shrink-0 font-bold'} style={{color:T2_GOLD}}>FGT {fgtAbsDisplay}/4</span>
-                <div className="flex-1 relative h-3 bg-[#050508] rounded-lg overflow-hidden">
-                  <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
-                  <div className={'absolute top-0 bottom-0 '+(fgtContribution>0?'bg-emerald-400':fgtContribution<0?'bg-rose-400':'bg-[#EDEDED]/15')} style={{
-                    left:fgtContribution>=0?'50%':`calc(50% - ${(Math.abs(fgtContribution)/maxAbs)*50}%)`,
-                    width:`${(Math.abs(fgtContribution)/maxAbs)*50}%`,
-                  }}></div>
-                </div>
-                <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold text-[#EDEDED]/30'}>{formatSignedInt(fgtContribution)}</span>
-              </div>
-              {/* V6.2.0/V6.2.1: Structural primary indicators — Grand Trend + Trend Channel.
-                   Now show multi-TF alignment (1m/5m/15m) like the user's TradingView workflow.
-                   These don't directly contribute to posterior score (they're used by Tara's
-                   gate as structural-led trigger), but state is shown so user can see the
-                   multi-hour context driving fast-lock decisions. */}
-              {(()=>{
-                const gt=analysis?.grandTrend;
-                const tc=analysis?.trendChannel;
-                const struct=analysis?.structAlignment;
-                if(!gt?.valid&&!tc?.valid)return null;
-                const _arrowFor=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
-                const _colorFor=(d)=>d==='UP'?'text-emerald-300':d==='DOWN'?'text-rose-300':'text-[#EDEDED]/30';
-                // Per-TF mini-grid: shows 1m/5m/15m arrows for each indicator
-                const _tcDirs=tc?.multiTfDirs||['?','?','?'];
-                const _gtDirs=gt?.multiTfDirs||['?','?','?'];
-                const _channelPosPct=tc?.valid?Math.round(tc.channelPos*100):null;
-                const _structDir=struct?.dir||'NEUTRAL';
-                const _structCount=struct?.count||0;
-                const _structColor=_colorFor(_structDir);
-                return React.createElement(React.Fragment,null,
-                  // Combined alignment header
-                  React.createElement('div',{className:'flex items-center gap-2 text-[10px] pt-1.5 mt-0.5',style:{borderTop:'1px solid rgba(196,181,253,0.18)'}},
-                    React.createElement('span',{className:'w-16 shrink-0 font-bold text-[10px]',style:{color:T2_GOLD}},'Structural'),
-                    React.createElement('span',{className:`flex-1 ${_structColor} text-[10px] font-bold`},`${_arrowFor(_structDir)} ${_structDir} · ${_structCount}/6 align`),
-                    React.createElement('span',{className:'w-10 shrink-0 text-right font-mono text-[10px] text-[#EDEDED]/40'},_structCount>=4?'gate':_structCount>=3?'edge':'mixed')
-                  ),
-                  // Grand Trend per-timeframe row
-                  React.createElement('div',{className:'flex items-center gap-2 text-[10px]'},
-                    React.createElement('span',{className:'w-16 shrink-0 text-[10px] text-[#EDEDED]/55'},'Grand Tr.'),
-                    React.createElement('div',{className:'flex-1 flex items-center gap-1.5 text-[10px]'},
-                      ['1m','5m','15m'].map((tf,i)=>React.createElement('span',{key:tf,className:'flex items-baseline gap-0.5'},
-                        React.createElement('span',{className:'text-[#EDEDED]/35 text-[9px]'},tf),
-                        React.createElement('span',{className:`font-bold ${_colorFor(_gtDirs[i])}`},_arrowFor(_gtDirs[i]))
-                      ))
-                    ),
-                    React.createElement('span',{className:`w-10 shrink-0 text-right font-mono text-[10px] ${_colorFor(gt?.dir)}`},gt?.valid?`${gt.projectionBps>0?'+':''}${gt.projectionBps}`:'—')
-                  ),
-                  // Trend Channel per-timeframe row
-                  React.createElement('div',{className:'flex items-center gap-2 text-[10px]'},
-                    React.createElement('span',{className:'w-16 shrink-0 text-[10px] text-[#EDEDED]/55'},'Trend Ch.'),
-                    React.createElement('div',{className:'flex-1 flex items-center gap-1.5 text-[10px]'},
-                      ['1m','5m','15m'].map((tf,i)=>React.createElement('span',{key:tf,className:'flex items-baseline gap-0.5'},
-                        React.createElement('span',{className:'text-[#EDEDED]/35 text-[9px]'},tf),
-                        React.createElement('span',{className:`font-bold ${_colorFor(_tcDirs[i])}`},_arrowFor(_tcDirs[i]))
-                      ))
-                    ),
-                    React.createElement('span',{className:`w-10 shrink-0 text-right font-mono text-[10px] ${_colorFor(tc?.trendDir)}`},tc?.valid?`${_channelPosPct}%`:'—')
-                  )
-                );
-              })()}
-              {/* Total row with gold accent divider above (V2.1 — major boundary) */}
-              <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-1" style={{borderTop:'1px solid '+T2_GOLD_BORDER}}>
-                <span className="w-16 shrink-0 font-bold uppercase tracking-[0.18em] text-[8px]" style={{color:T2_GOLD}}>Total</span>
-                <span style={T2_MONO_STYLE} className={'flex-1 text-[#EDEDED]/40'}>vs posterior {post.toFixed(0)}% {dir}</span>
-                <span style={T2_MONO_STYLE} className={'w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{formatSignedInt(totalAll)}</span>
-              </div>
-            </div>
-          );
-        })()}
-      </div>
+      {/* V13.4.303 REMOVED: Score Breakdown (per-signal contribution bars +
+          FGT/Structural/Grand Trend/Trend Channel/Total rows). Direct request
+          ("score breakdown can go off too. dont care much about it"). Like
+          Engine Log, it was never in the approved mockup's column map -- kept
+          from the pre-rebuild layout, not something the design called for. */}
       {/* V13.4.302 REMOVED: Engine Log (the raw [TAG] reasoning-string dump).
           It was never in the approved mockup's column map to begin with (kept
           from the pre-rebuild layout as "not in the mockup as such but not
@@ -54362,14 +54163,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </div>
             );
           })()}
-          {/* V13.4.296: compact price-vs-strike chart, matching the mockup's
-              merged Price+Strike+Depth+Chart center-column panel.
-              V13.4.301: this is now the ONLY WindowStrikeChart. The duplicate
-              inside ThisTradeCard is gone, so the hidden lg:block wrapper that
-              v298 added to stop the two colliding on mobile has been removed
-              too -- with nothing left to collide with, the chart belongs at
-              every width, which is also where the mockup puts it. */}
-          <WindowStrikeChart tickHistoryRef={tickHistoryRef} targetMargin={targetMargin} currentPrice={currentPrice} timeState={timeState} height={110}/>
+          {/* V13.4.303 REMOVED: the "this window vs strike" chart. Direct
+              request -- "take off the graph too, its making my pc lag and
+              taking up too much resources". The SVG polyline redraws on every
+              live tick, which is exactly the kind of per-frame layout+paint
+              work that adds up on a lower-powered machine. WindowStrikeChart
+              had no other call site (v301 removed the ThisTradeCard duplicate),
+              so the component definition is deleted too rather than left dead. */}
         </div>
 
         {/* V13.4.293: Smart Money, relocated here from column 1 (it used to
