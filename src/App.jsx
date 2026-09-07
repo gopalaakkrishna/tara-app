@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.305-remove-redundant-mobile-tab-bar';
-const TARA_VERSION_DISPLAY='Tara 13.4.305';
+const BASELINE_VERSION='2026.09.07-v13.4.306-autoexec-safe-defaults-and-banner';
+const TARA_VERSION_DISPLAY='Tara 13.4.306';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20797,26 +20797,20 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             'Stored in your browser only. Anthropic / Tara servers never see these values. Test calls /portfolio/balance.',
           ),
         ),
-        // V13.4.235: CORRECTS V13.4.234, which was wrong and shipped a false warning.
-        //   v234 told the user this panel "will place real orders with your Kalshi
-        //   key the first time a lock qualifies". It cannot. Verified by reference
-        //   count: kalshiPlaceOrder, kalshiCancelOrder, kalshiExitPosition and
-        //   kalshiGetOrder each appear exactly once in the file -- their own
-        //   definition, no callers. The read-only calls (kalshiPing,
-        //   kalshiFetchPositions, kalshiAuthedFetch) are wired; every mutating one
-        //   is orphaned. _handlePlaceOrderOnTaraCall is literally a no-op that logs
-        //   "[V13.4.75] auto-exec removed".
-        //
-        //   So the engine was removed on purpose in V13.4.75, and V13.4.76 replaced
-        //   it with auto-follow: on a lock, copy the call into the tracked position
-        //   so the coach manages it, and never place an order. dryRun:false is
-        //   therefore inert, not dangerous.
-        //
-        //   Two earlier readings in this session were also wrong and are corrected
-        //   here: the empty taraAutoExecLog_v1 and the zero autoExec:true flags were
-        //   read as "it has never fired". Both are dead instrumentation --
-        //   _autoExecLogPush has no call sites and nothing ever writes autoExec:true
-        //   -- so their absence said nothing about activity either way.
+        // V13.4.306 REWRITTEN. The V13.4.235 text below this banner claimed
+        //   "the order engine was removed in V13.4.75 and never replaced...
+        //   nothing on this panel can reach Kalshi" and that dryRun:false
+        //   "changes nothing either way". That was true when V13.4.235 wrote
+        //   it, but the entry effect was rebuilt on 2026-09-05: _runEntry
+        //   calls kalshiRunEntryLadder (which calls kalshiPlaceOrder), and
+        //   _runExit calls kalshiExitPosition -- both real, both reachable,
+        //   confirmed live this session. Enabled + not-dry-run genuinely
+        //   places real orders now. The banner was telling the user the
+        //   exact opposite of the truth in precisely the state where that
+        //   matters most. Content below is otherwise unchanged: it still
+        //   lists which standard safety filters are off, which is real and
+        //   still useful information -- only the framing (a truthful "this is
+        //   live" instead of a false "this cannot fire") changed.
         (()=>{
           const a=autoExecSettings||{};
           if(!a.enabled||a.dryRun)return null;
@@ -20828,18 +20822,14 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           if(a.enabledWindowTypes&&a.enabledWindowTypes['5m'])off.push('5m enabled, a series with no open markets');
           if(!off.length)return null;
           return React.createElement('div',{className:'mb-3 p-3 rounded-lg',
-            style:{background:'rgba(212,160,58,0.07)',border:'1px solid rgba(212,160,58,0.30)'}},
-            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:T2_SITOUT_FG}},
-              'these settings do not place orders'),
+            style:{background:'rgba(232,69,94,0.08)',border:'1px solid rgba(232,69,94,0.30)'}},
+            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:'#E8455E'}},
+              'live — real orders, missing standard filters'),
             React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(255,255,255,0.66)'}},
-              'The order engine was removed in V13.4.75 and never replaced. ',
-              React.createElement('code',{style:{color:'rgba(255,255,255,0.8)'}},'kalshiPlaceOrder'),
-              ', cancel and exit-position all still exist and have no callers, so nothing on this panel can reach Kalshi — including the dry-run switch, which currently reads ',
-              React.createElement('b',{style:{color:T2_SITOUT_FG}},'off'),
-              ' but changes nothing either way. What does run is auto-follow (V13.4.76): when Tara locks, the call is copied into your tracked position so the coach manages it. You place the order yourself.',
-              React.createElement('div',{className:'mt-1.5',style:{color:'rgba(255,255,255,0.45)'}},
-                'For when it is wired again, these are the values that are off: ',off.join(', '),
-                '. Hawk sets a 70c cap and rests before taking, worth about 2.8c a contract on your own record.')));
+              'Enabled and not dry-run: a qualifying lock places a real order on Kalshi with your key, and exits (trailing stop / take-profit / cut-loss) place real orders too. Right now these are ',
+              React.createElement('b',{style:{color:'#E8455E'}},'off'),
+              ': ',off.join(', '),
+              '. Hawk sets a 70c cap and rests before taking, worth about 2.8c a contract on your own record.'));
         })(),
         // V13.4.227: READINESS. A professional does not arm an algo without
         //   knowing its measured edge and its error bars, so the number goes
@@ -35278,16 +35268,19 @@ function TaraApp(){
       const _v267IsPresetTP=(n)=>Number(n)===78||Number(n)===88;
       const _v267IsPresetSL=(n)=>Number(n)===15||Number(n)===20;
       return{
-        // V13.4.252: default ARMED. Was !!v.enabled (false unless explicitly
-        //   stored true). A stored false still wins, so the settings toggle
-        //   keeps working in both directions -- this changes the default only.
-        enabled:v.enabled!==false,                   // master toggle — armed by default
-        // V13.4.252: default LIVE. Was dryRun:v.dryRun!==false (simulate unless
-        //   explicitly stored false). A stored true still wins, so the toggle
-        //   keeps working. Note the path this arms was rebuilt on 2026-09-05 and
-        //   has never placed a live order -- its own commit shipped it "disarmed
-        //   and dry run by default" for that reason.
-        dryRun:v.dryRun===true,                      // default OFF — real orders
+        // V13.4.306 REVERTED: v252 flipped both these to arm-by-default,
+        //   reasoning the rebuilt order path (2026-09-05) had never placed a
+        //   live order yet so arming it changed nothing in practice at the
+        //   time. That justification no longer holds -- Mission Mode is being
+        //   wired to size real orders off live Kelly math (see
+        //   project_tara_autoexec_simplify memory), so a fresh install or a
+        //   new device arming for real money with zero explicit action is a
+        //   real hazard now, not a historical curiosity. Back to the safe
+        //   direction: a stored value (true OR false) still always wins for
+        //   anyone with existing settings -- this only changes what a
+        //   missing/unparseable value falls back to.
+        enabled:v.enabled===true,                    // master toggle — disarmed by default
+        dryRun:v.dryRun!==false,                      // default ON — simulate unless explicitly stored false
         // V10.2.4: same safe-defaults migration as maxAutoTradesPerDay below.
         maxBetPerTrade:(()=>{
           let _v=Number(v.maxBetPerTrade)>0?Number(v.maxBetPerTrade):25;
@@ -35698,7 +35691,11 @@ function TaraApp(){
       //   fires on parse failure / no localStorage entry).
       //   Hunter targets: 70-72% WR, 6-10 trades/day.
       return{
-        enabled:true,dryRun:false,   // V13.4.252: fresh-install defaults follow the same change
+        // V13.4.306 REVERTED, same reasoning as the migration path above:
+        //   fresh-install/parse-failure now lands disarmed, not armed. Every
+        //   other Hunter value below (sizing, filters, cooldown) still applies
+        //   -- only these two flags changed.
+        enabled:false,dryRun:true,
         // Hunter sizing
         maxBetPerTrade:2.5,maxDailyLoss:6,maxAutoTradesPerDay:8,maxAutoTradesPerWindow:1,
         // Hunter filters
