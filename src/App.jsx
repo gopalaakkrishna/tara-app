@@ -5633,8 +5633,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.06-v13.4.289-edge-at-lock-not-live';
-const TARA_VERSION_DISPLAY='Tara 13.4.289';
+const BASELINE_VERSION='2026.09.07-v13.4.290-sports-board-by-sport-only';
+const TARA_VERSION_DISPLAY='Tara 13.4.290';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29027,6 +29027,19 @@ function SportsRow({r,grid,showResult}){
     return d.toLocaleString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'});
   })();
   const tierCol=r.tier==='HIGH'?SPORTS_GREEN:r.tier==='MEDIUM'?T2_GOLD:'#EDEDED';
+  // A search link, not a real broadcast lookup — there is no single free API
+  // that carries TV/streaming info across soccer, baseball, NFL and whatever
+  // sport is added next, and a wrong hard-coded network is worse than a
+  // search. This works for any sport with zero new data pipeline: the match
+  // text plus league is already enough for a search engine to answer "where
+  // is this on". Only shown for upcoming/live picks — the question does not
+  // apply to a settled row in the Record tab.
+  const watchUrl=(()=>{
+    const ev=String(r.event||r.match||'').replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/,'');
+    if(!ev)return null;
+    const q=`${ev} ${r.league||''} where to watch live stream`.replace(/\s+/g,' ').trim();
+    return 'https://www.google.com/search?q='+encodeURIComponent(q);
+  })();
   return(
     <div className="border-b border-[#1C1C1C] last:border-b-0 py-2">
       <div className="flex items-start gap-2 flex-wrap">
@@ -29061,7 +29074,18 @@ function SportsRow({r,grid,showResult}){
           </div>
           {/* The ledger appends "(YYYY-MM-DD)" to events; the date column
               already carries it, so drop it rather than print it twice. */}
-          <div className="text-[10.5px] text-[#EDEDED]/40">{String(r.event||r.match||'').replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/,'')}</div>
+          <div className="text-[10.5px] text-[#EDEDED]/40 flex items-center gap-1.5 flex-wrap">
+            <span>{String(r.event||r.match||'').replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/,'')}</span>
+            {watchUrl&&!showResult&&(
+              <a href={watchUrl} target="_blank" rel="noopener noreferrer"
+                onClick={ev=>ev.stopPropagation()}
+                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border normal-case hover:opacity-80"
+                style={{color:'#7CA6E8',borderColor:'rgba(124,166,232,0.35)',background:'rgba(124,166,232,0.08)'}}
+                title="Search for where to watch this">
+                📺 watch
+              </a>
+            )}
+          </div>
         </div>
         <div className="text-right shrink-0" style={T2_MONO_STYLE}>
           <div className="text-[12px] text-white">{pct(r.model)}</div>
@@ -30288,19 +30312,12 @@ function SportsView({onClose}){
   const[data,setData]=React.useState(null);
   const[err,setErr]=React.useState(null);
   const[tab,setTab]=React.useState('board');
-  // high | all | tracked. Defaults to HIGH CONVICTION because that is the set
-  // actually worth reading each day — model agrees with the market AND clears
-  // the coin-flip floor. On the settled record so far, that subset ran 13-8
-  // (62%) against 23-20 (53%) for everything, almost entirely by excluding a
-  // 50-55% band that went 1-7. See export_tara.autolock for why that floor
-  // exists (chiefly Kalshi's fee peaking at a coin flip).
-  const[filter,setFilter]=React.useState('high');
   const[sportFilter,setSportFilter]=React.useState('all');
   // Which date groups the user has explicitly opened or closed. Anything not
   // in here falls back to the default (nearest few open) — so changing tab or
-  // filter re-applies the default instead of stranding a stale open/closed set.
+  // sport re-applies the default instead of stranding a stale open/closed set.
   const[dateOverrides,setDateOverrides]=React.useState({});
-  React.useEffect(()=>{setDateOverrides({});},[tab,filter,sportFilter]);
+  React.useEffect(()=>{setDateOverrides({});},[tab,sportFilter]);
   // Local clock tick. 30s, no network, no cloud read — the only thing it does
   // is re-evaluate which fixtures have kicked off since the payload was built.
   const[nowMs,setNowMs]=React.useState(()=>Date.now());
@@ -30382,23 +30399,10 @@ function SportsView({onClose}){
     // ONE board of everything unresolved, plus the settled record. "Upcoming"
     // and "Open" were 94% the same rows — 17 of 18 open predictions also sat in
     // upcoming, the same pick twice with two framings. Tracked-or-not is a
-    // property of a row, so it is a badge now, and `filter` selects on it.
+    // property of a row (a badge in SportsRow), not a filter any more — the
+    // board tab shows everything the model priced, sliced only by sport.
     const src=tab==='board'?(data.board||data.upcoming):data.settled;
     let list=(src||[]);
-    // `high_conviction` is computed in the export so the app shows exactly the
-    // set the pipeline tracks. But the app and the data now deploy
-    // independently — the board is fetched live from the sports-model repo —
-    // so a freshly deployed app can meet a payload written before the field
-    // existed. Falling back to the same rule locally keeps the filter working
-    // instead of silently rendering an empty board, which is exactly what
-    // happened the first time this shipped.
-    const floor=(data&&data.min_conviction)||0.55;
-    const isHigh=(r)=>r.high_conviction!==undefined
-      ? r.high_conviction
-      : (r.advice==='ALIGNED'&&(r.model||0)>=floor);
-    if(tab==='board'&&filter==='high')list=list.filter(isHigh);
-    if(tab==='board'&&filter==='aligned')list=list.filter(r=>r.advice==='ALIGNED');
-    if(tab==='board'&&filter==='tracked')list=list.filter(r=>r.tracked);
     if(tab!=='record'){
       // Re-stamp advice from the CURRENT time before anything filters on it.
       // The export said TAKE at 19:23; by 19:50 two of those had first pitch
@@ -30407,7 +30411,7 @@ function SportsView({onClose}){
         ?{...r,advice:'STARTED',_wasAdvice:r.advice}:r);
     }
         return list;
-  },[data,tab,filter,nowMs]);
+  },[data,tab,nowMs]);
 
   const sportCounts=React.useMemo(()=>{
     const m={};
@@ -30708,19 +30712,15 @@ function SportsView({onClose}){
                 <button key={id} onClick={()=>setTab(id)} className={'px-3 py-1.5 text-xs uppercase font-bold tracking-wider rounded-lg transition-colors '+(tab===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
               ))}
             </div>
-            {tab==='board'&&(
-              <div className="flex gap-1 ml-1 p-1 rounded-lg bg-[#101014] w-fit border border-[#24242E]">
-                {[['high','High conviction'],['all','All'],['tracked','Tracked']].map(([id,lab])=>(
-                  <button key={id} onClick={()=>setFilter(id)} className={'px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg transition-colors '+(filter===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={filter===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
-                ))}
-              </div>
-            )}
           </div>
-          {/* These three tabs are not the same list at three stages, and that
-              was not obvious: a TAKE call could sit in Upcoming and be absent
-              from Open, which is exactly how two picks went untracked. */}
+          {/* The board used to gate on a conviction tier (High / All / Tracked)
+              before sport. That tier is gone by request: every fixture the
+              model priced shows, sport is now the only axis you slice on (the
+              chips below), and `tracked` survives only as a per-row badge —
+              which picks actually count toward the record is still visible,
+              just not something you filter down to. */}
           <div className="text-[11px] text-[#EDEDED]/40 mb-4 leading-relaxed">
-            {tab==='board'&&<span><b className="text-white/70">High conviction</b> is the day's actual picks: the model agrees with the market <i>and</i> the call clears {data.min_conviction?Math.round(data.min_conviction*100):55}% — below that is a coin flip where Kalshi's fee peaks and the model has nothing to say. Those are committed to the record automatically within 36h of kick-off (<b className="text-white/70">Tracked</b>). <b className="text-white/70">All</b> shows every fixture the model priced, most of which are not picks.</span>}
+            {tab==='board'&&<span><b className="text-white/70">Board</b> is every fixture the model priced, across every sport it covers. A <span className="text-white/70 font-bold">tracked</span> badge means that pick is committed to the record; everything else is shown but not scored.</span>}
             {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}</div>
 
           {/* Split by strategy. The headline record was hiding two different
@@ -30797,7 +30797,7 @@ function SportsView({onClose}){
             </div>
           )}
 
-          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='board'&&filter!=='all'?'Nothing matches this filter.':''}</div>}
+          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='board'&&sportFilter!=='all'?'Nothing matches this sport filter.':''}</div>}
 
           {grouped.map((day,di)=>{
             const open=isDayOpen(day.key,di);
