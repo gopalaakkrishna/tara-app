@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.306-autoexec-safe-defaults-and-banner';
-const TARA_VERSION_DISPLAY='Tara 13.4.306';
+const BASELINE_VERSION='2026.09.07-v13.4.307-autoexec-simple-panel';
+const TARA_VERSION_DISPLAY='Tara 13.4.307';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20553,6 +20553,14 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
         );
       })(),
+      // V13.4.307: simple auto-exec surface — take-profit dial, cut-loss dial,
+      //   Mission Mode toggle, and (when Mission is off) flat dollar presets
+      //   instead of the free-text max-bet field. Always visible, above the
+      //   advanced accordion, per direct request ("extremely simple form").
+      //   Reads/writes the exact same autoExecSettings/mission fields the
+      //   advanced accordion below already does -- no separate state, so the
+      //   two surfaces cannot drift out of sync with each other.
+      React.createElement(AutoExecSimplePanel,{autoExecSettings,setAutoExecSettings,mission,setMission}),
       // Bet size + win payout
       //   V10.4.1a: REMOVED misleading "Net per win / Required WR for breakeven"
       //   calculation. That math doesn't reflect Kalshi binary mechanics — actual
@@ -20596,6 +20604,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
       //   auto-exec config) hides behind a single click. Uses native <details>
       //   so no extra state needed and persists nothing across reloads.
       React.createElement('details',{
+        id:'tara-advanced-settings', // V13.4.307: target for AutoExecSimplePanel's "expand Mission settings" link
         className:'mb-4 rounded-lg',
         style:{background:'rgba(0,0,0,0.20)',border:'1px solid #24242E'},
       },
@@ -22830,6 +22839,173 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
       onClick:_resetMission,
       className:'mt-2 text-[9px] uppercase tracking-wider text-[#EDEDED]/45 hover:text-[#EDEDED]/70',
     },'Reset mission state'),
+  );
+}
+
+// ── V13.4.307: SIMPLE AUTO-EXEC PANEL ────────────────────────────────────────
+// "extremely simple" surface requested directly: a take-profit dial, a
+//   cut-loss dial, a Mission Mode toggle, and (when Mission Mode is off)
+//   flat dollar-preset buttons instead of the free-text max-bet field.
+//   Reads/writes the exact same autoExecSettings/mission fields the advanced
+//   accordion already uses (autoExitOffer, stopLossDeltaCents,
+//   maxBetPerTrade, mission.*) -- no separate state, so the two surfaces
+//   cannot drift. Per direct instruction ("real dials, no risk"): TP/cut-loss
+//   stay real and unrestricted -- no new blocking logic, only the same
+//   informational captions the advanced fields already carry, condensed.
+// Mission on/off mirrors MissionPanel's own transitions exactly:
+//   turning on with an existing paused mission -> status:'active' (App.jsx
+//   ~22698, "Resume mission"); turning on with no mission, or one that ended
+//   (hit/busted/expired), -> a 2-field bootstrap that calls the same
+//   _startMission shape with sane fixed defaults (7d, 20% floor, quarter-
+//   Kelly, 15% max fraction) -- open the advanced Mission panel to fine-tune
+//   those. Turning off -> status:'paused' (App.jsx ~22683, "Pause"). Neither
+//   path ever wipes bankroll history; only Reset (advanced panel) does that.
+function AutoExecSimplePanel({autoExecSettings,setAutoExecSettings,mission,setMission}){
+  const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
+  const[_bootstrap,_setBootstrap]=React.useState(null); // {startBankroll,target} while composing a new mission, else null
+  const _isActive=mission.active&&mission.status==='active';
+  const _resumable=mission.status==='paused';
+  const _cap=Number(autoExecSettings?.maxBetPerTrade)||0;
+  const PRESETS=[1,2,4,6,8,10];
+  // If the mission goes active while a bootstrap draft is still open (e.g. the
+  //   advanced Mission panel's own Start button was used instead), drop the
+  //   stale draft rather than leave it showing alongside the now-active summary.
+  React.useEffect(()=>{if(_isActive&&_bootstrap)_setBootstrap(null);},[_isActive]);
+
+  const _startWithDefaults=()=>{
+    const sb=Number(_bootstrap?.startBankroll)||0;
+    const tgt=Number(_bootstrap?.target)||0;
+    if(!sb||!tgt||tgt<=sb){alert('Need a positive starting bankroll and a target above it.');return;}
+    const floor=Math.max(0,Number((Math.min(sb-0.5,sb*0.2)).toFixed(2)));
+    const _now=Date.now();
+    setMission({
+      ...mission,
+      active:true,
+      startBankroll:sb,
+      currentBankroll:sb,
+      target:tgt,
+      startDate:new Date(_now).toISOString(),
+      endDate:new Date(_now+7*86400000).toISOString(),
+      floor,
+      kellyMult:0.25,
+      maxBetFraction:0.15,
+      status:'active',
+      tradesAttempted:0,tradesWon:0,tradesLost:0,
+      lastBankrollUpdate:_now,
+      bankrollHistory:[{t:_now,b:sb}],
+    });
+    _setBootstrap(null);
+  };
+
+  const _toggleMission=()=>{
+    if(_isActive){setMission(prev=>({...prev,status:'paused'}));return;}
+    if(_resumable){setMission(prev=>({...prev,status:'active'}));return;}
+    const _sb=mission.startBankroll||25;
+    _setBootstrap({startBankroll:_sb,target:mission.target&&mission.target>_sb?mission.target:_sb*2});
+  };
+
+  const _expandAdvancedMission=()=>{
+    const el=document.getElementById('tara-advanced-settings');
+    if(el){el.open=true;el.scrollIntoView({behavior:'smooth',block:'start'});}
+  };
+
+  const _tpVal=Number(autoExecSettings?.autoExitOffer)||0;
+  const _tpCaption=_tpVal===0?'off — recommended, trailing stop only'
+    :_tpVal<=TRAIL_ARM_C?`fires before the ${TRAIL_ARM_C}¢ trail can arm — measured worse`
+    :`sells at ${_tpVal}¢ on a 100¢ contract`;
+  const _tpColor=_tpVal===0?'#23B981':_tpVal<=TRAIL_ARM_C?'#E8455E':'rgba(237,237,237,0.55)';
+
+  const _slVal=Number(autoExecSettings?.stopLossDeltaCents)||0;
+  const _slCaption=_slVal===0?'off — recommended, holds to settlement'
+    :`exits ${_slVal}¢ below fill price`;
+  const _slColor=_slVal===0?'#23B981':_slVal>=30?'#E8455E':'rgba(237,237,237,0.55)';
+
+  return React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#050508] border border-[#24242E]'},
+    React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'Auto-Exec — Simple'),
+    React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
+      React.createElement('label',{className:'block'},
+        React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Take-profit (¢)'),
+        React.createElement('input',{
+          type:'number',min:0,max:99,step:1,value:_tpVal,
+          onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(0,Math.min(99,_num(e.target.value,0)))})),
+          className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
+        }),
+        React.createElement('div',{className:'text-[9px] mt-1',style:{color:_tpColor}},_tpCaption),
+      ),
+      React.createElement('label',{className:'block'},
+        React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Cut-loss (¢)'),
+        React.createElement('input',{
+          type:'number',min:0,max:50,step:1,value:_slVal,
+          onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
+          className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
+        }),
+        React.createElement('div',{className:'text-[9px] mt-1',style:{color:_slColor}},_slCaption),
+      ),
+    ),
+    React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer gap-2 mb-2 pt-2',style:{borderTop:'1px solid #1B1B22'}},
+      React.createElement('div',null,
+        React.createElement('div',{className:'text-[11px] font-bold text-[#EDEDED]/85'},'Mission Mode'),
+        React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-0.5'},'Kelly-scaled sizing, grows the stake as bankroll grows'),
+      ),
+      React.createElement('input',{
+        type:'checkbox',checked:_isActive,onChange:_toggleMission,
+        className:'w-4 h-4 accent-[#23B981]',
+      }),
+    ),
+    _bootstrap&&React.createElement('div',{className:'p-2 rounded-lg mb-2',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.20)'}},
+      React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[9px] text-[#EDEDED]/55 mb-1'},'Starting bankroll ($)'),
+          React.createElement('input',{
+            type:'number',min:1,max:100000,step:1,value:_bootstrap.startBankroll,
+            onChange:(e)=>_setBootstrap(prev=>({...prev,startBankroll:Math.max(1,Math.min(100000,_num(e.target.value,25)))})),
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
+          }),
+        ),
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[9px] text-[#EDEDED]/55 mb-1'},'Target ($)'),
+          React.createElement('input',{
+            type:'number',min:2,max:1000000,step:1,value:_bootstrap.target,
+            onChange:(e)=>_setBootstrap(prev=>({...prev,target:Math.max(2,Math.min(1000000,_num(e.target.value,50)))})),
+            className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
+          }),
+        ),
+      ),
+      React.createElement('div',{className:'flex gap-2'},
+        React.createElement('button',{
+          onClick:_startWithDefaults,
+          className:'flex-1 px-2 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider',
+          style:{background:'rgba(35,185,129,0.15)',color:'#23B981',border:'1px solid rgba(35,185,129,0.40)'},
+        },'Start mission'),
+        React.createElement('button',{
+          onClick:()=>_setBootstrap(null),
+          className:'px-2 py-1.5 rounded-lg text-[10px] uppercase tracking-wider text-[#EDEDED]/55',
+        },'Cancel'),
+      ),
+      React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1.5'},'7-day deadline, 20% drawdown floor, quarter-Kelly — expand Mission in advanced settings to change these.'),
+    ),
+    _isActive
+      ?React.createElement('div',{className:'p-2 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.20)'}},
+          React.createElement('div',{className:'text-[11px] text-[#EDEDED]/65'},'bankroll $',Number(mission.currentBankroll||0).toFixed(2),' → target $',Number(mission.target||0).toFixed(2)),
+          React.createElement('button',{
+            onClick:_expandAdvancedMission,
+            className:'text-[9px] uppercase tracking-wider text-[#23B981] mt-1.5',
+          },'Expand Mission settings ↓'),
+        )
+      :React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1.5'},'Max bet / trade'),
+          React.createElement('div',{className:'flex flex-wrap gap-1.5'},
+            PRESETS.map(v=>React.createElement('button',{
+              key:v,
+              onClick:()=>setAutoExecSettings(prev=>({...prev,maxBetPerTrade:Math.max(1,Math.min(500,v))})),
+              className:'px-3 py-1.5 rounded-lg text-[11px] font-bold tabular-nums',
+              style:_cap===v
+                ?{background:'rgba(35,185,129,0.18)',color:'#23B981',border:'1px solid rgba(35,185,129,0.45)'}
+                :{background:'transparent',color:'rgba(237,237,237,0.65)',border:'1px solid #2A2A34'},
+            },'$',v)),
+          ),
+          !PRESETS.includes(_cap)&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1.5'},`custom: $${_cap.toFixed(2)} — use Advanced to fine-tune`),
+        ),
   );
 }
 
