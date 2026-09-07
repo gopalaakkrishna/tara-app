@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.299-mockup-visual-language';
-const TARA_VERSION_DISPLAY='Tara 13.4.299';
+const BASELINE_VERSION='2026.09.07-v13.4.300-mono-numbers-complete';
+const TARA_VERSION_DISPLAY='Tara 13.4.300';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -52700,7 +52700,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 green dot. The build number is not an outcome, so under the
                 mockup's one-accent rule it has no claim on green at all -- and
                 the mockup renders it as plain mono text at 34% ink. */}
-            <span className={'hidden sm:flex items-center text-[10px] font-sans tabular-nums tracking-wider'} style={{color:'rgba(237,237,237,0.34)'}}>
+            {/* V13.4.299b: font-sans removed -- it beat the global mono rule at
+                equal specificity, so the build number was the one label still in
+                the sans face. The mockup sets it in .m. */}
+            <span className={'hidden sm:flex items-center text-[10px] tabular-nums tracking-wider'} style={{color:'rgba(237,237,237,0.34)'}}>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
             {/* V13.1: telemetry-health badge - confirms rich-entry stamping after deploy */}
@@ -54171,7 +54174,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 {/* Big live price */}
                 {currentPrice>0&&(
                   <div className="flex flex-col">
-                    <div className={`flex items-center gap-1 font-serif font-bold tabular-nums ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
+                    {/* V13.4.299b: font-serif dropped. It was the one thing on the
+                        page overriding the mono rule on the single most prominent
+                        number, so the live price rendered in Space Grotesk while
+                        every other figure went mono. The mockup sets the price in
+                        .m like the rest. Colour stays: a ticking price up/down is
+                        an outcome, which is what green/red is for. */}
+                    <div className={`flex items-center gap-1 font-bold tabular-nums ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
                       <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#EDEDED]/30'}`}/>
                       <span className="text-lg sm:text-xl leading-tight">${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                     </div>
