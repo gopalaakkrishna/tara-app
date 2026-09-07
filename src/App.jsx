@@ -18245,26 +18245,34 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _livePost=analysis?.rawProbAbove??snap?.atPosterior??50;
           const _post=Number(_livePost);
           if(!isFinite(_post))return null;
-          const _conv=Math.abs(_post-50);
-          // V13.4.285: the MAGNITUDE is symmetric (|p-50|) so it is direction-agnostic,
-          //   but the arrow must follow the CALL, not the raw posterior sign. The engine
-          //   can flip away from the raw read (BRTI snap-back / universal-flip paths at
-          //   ~L45548 return a call opposite the posterior), and with the meter finally
-          //   showing a real number this immediately rendered "14.5pt DOWN" beside a card
-          //   reading "UP" on a flipped window. Committed call first, then the live call,
-          //   and only then the raw posterior's own sign.
+          // V13.4.285: the arrow follows the CALL, not the raw posterior sign, because
+          //   the engine can flip away from the raw read (BRTI snap-back / universal-flip
+          //   paths at ~L45548 return a call opposite the posterior).
           const _dir=(()=>{
             const _c=(snap&&(snap.call==='UP'||snap.call==='DOWN'))?snap.call
               :(tc&&(tc.call==='UP'||tc.call==='DOWN'))?tc.call
               :(tc&&(tc.direction==='UP'||tc.direction==='DOWN'))?tc.direction:null;
             return _c||(_post>=50?'UP':'DOWN');
           })();
-          const _zone=_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
-          const _zoneLabel=_conv<5?'DEADZONE — coin flip':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
-          const _zoneColor=_conv<5?'rgb(232,69,94)':_conv<10?'#23B981':_conv<15?'rgb(35,185,129)':'rgb(52,211,153)';
-          const _zoneBg=_conv<5?'rgba(232,69,94,0.06)':_conv<10?'rgba(35,185,129,0.06)':_conv<15?'rgba(35,185,129,0.06)':'rgba(52,211,153,0.08)';
-          const _zoneBorder=_conv<5?'rgba(232,69,94,0.30)':_conv<10?'rgba(35,185,129,0.30)':_conv<15?'rgba(35,185,129,0.30)':'rgba(52,211,153,0.40)';
-          const _dirColor=_dir==='UP'?'rgb(35,185,129)':'rgb(232,69,94)';
+          // V13.4.290 CORRECTION (R2): v285 computed magnitude and direction from TWO
+          //   INDEPENDENT sources -- |livePost-50| paired with whatever _dir resolved to
+          //   above -- so they could silently disagree in sign. A committed UP call whose
+          //   live posterior later drifted to 34% rendered "16.0pt UP": sixteen points of
+          //   DOWN conviction, relabelled onto the UP arrow it happened to sit beside.
+          //   Fixed by measuring conviction ON THE SIDE THE ARROW SHOWS, so the two
+          //   numbers can never come from different sides again. >=0 means the live read
+          //   still supports the call; <0 means it has moved to actively oppose it -- that
+          //   gets its own honest state instead of a sign flip painted as strength.
+          const _dirPost=_dir==='UP'?_post:(100-_post);
+          const _signedConv=_dirPost-50;
+          const _opposing=_signedConv<0;
+          const _conv=Math.abs(_signedConv);
+          const _zone=_opposing?'opposing':_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
+          const _zoneLabel=_opposing?'OPPOSING — live has moved against this call':_conv<5?'DEADZONE — coin flip':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
+          const _zoneColor=_opposing?'rgb(232,69,94)':_conv<5?'rgb(232,69,94)':_conv<10?'#23B981':_conv<15?'rgb(35,185,129)':'rgb(52,211,153)';
+          const _zoneBg=_opposing?'rgba(232,69,94,0.08)':_conv<5?'rgba(232,69,94,0.06)':_conv<10?'rgba(35,185,129,0.06)':_conv<15?'rgba(35,185,129,0.06)':'rgba(52,211,153,0.08)';
+          const _zoneBorder=_opposing?'rgba(232,69,94,0.40)':_conv<5?'rgba(232,69,94,0.30)':_conv<10?'rgba(35,185,129,0.30)':_conv<15?'rgba(35,185,129,0.30)':'rgba(52,211,153,0.40)';
+          const _dirColor=_opposing?'rgb(232,69,94)':(_dir==='UP'?'rgb(35,185,129)':'rgb(232,69,94)');
           // Position on 0-30+ scale (clamp at 30 for visual)
           const _maxScale=30;
           const _convClamped=Math.min(_conv,_maxScale);
@@ -18274,7 +18282,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               <div className="flex items-center justify-between mb-1 gap-2">
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_zoneColor}}>Conviction</span>
-                  <span className="text-[10px] font-bold tabular-nums" style={{color:_dirColor}}>{_conv.toFixed(1)}pt {_dir==='UP'?'▲':'▼'}</span>
+                  <span className="text-[10px] font-bold tabular-nums" style={{color:_dirColor}}>{_conv.toFixed(1)}pt {_opposing?'⚠':(_dir==='UP'?'▲':'▼')}</span>
                 </div>
                 <span className="text-[9px] uppercase tracking-wider font-bold" style={{color:_zoneColor}}>{_zoneLabel}</span>
               </div>
@@ -19395,6 +19403,23 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _delta=(_haveFill&&_worth!=null)?(_worth-_fill):null;
   const _peak=Number(trailPeakCents);
   const _havePeak=Number.isFinite(_peak)&&_peak>0;
+  // V13.4.290 (ORD-3): readOrderState already computes `exited`/`errored` from
+  //   status, but nothing here consulted them -- `placed` requires only a fill,
+  //   which the merge-based writer keeps set forever once an order fills, through
+  //   'exiting', 'exited' and any post-fill 'error'. So a CLOSED position read as
+  //   "holding up / filled · live" with no way to tell it apart from one still open,
+  //   and a FAILED EXIT -- the one state where the user most needs to know Kalshi
+  //   did not do what was asked -- showed the identical calm green badge.
+  //   Manual fills carry neither field (autoOrderState is untouched by them), so
+  //   these are gated on _haveAutoFill.
+  const _autoExited=_haveAutoFill&&_ord.exited;
+  const _autoExitErrored=_haveAutoFill&&_ord.errored;
+  // Same scale fix as ORD-1: exitCents is the RAW YES price sent to Kalshi
+  // (_exitYesLimitCents), our-side for DOWN only after this conversion.
+  const _exitWorth=(_autoExited&&Number.isFinite(_ord.exitCents))
+    ?(_side==='DOWN'?(100-_ord.exitCents):_ord.exitCents)
+    :null;
+  const _realized=(_exitWorth!=null&&Number.isFinite(_fill))?(_exitWorth-_fill):null;
 
   // ── stage 3: what was actually placed ───────────────────────────────────
   const _st=_ord.status;
@@ -19484,11 +19509,23 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 
       {/* ── 2 ── */}
       <Stage n="2" title="how it's going"
-             badge={_placed?(_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat')
+             badge={_autoExited?(_realized==null?'closed':_realized>0?'closed · won':_realized<0?'closed · lost':'closed · flat')
+                    :_placed?(_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat')
                     :_markedOnly?'in · unpriced':'not in'}
-             badgeTone={_placed?(_delta>0?GREEN:_delta<0?RED:DIM):_markedOnly?GOLD:DIM}>
-        {_placed&&_worth!=null?(
+             badgeTone={_autoExited?(_realized>0?GREEN:_realized<0?RED:DIM)
+                    :_placed?(_delta>0?GREEN:_delta<0?RED:DIM):_markedOnly?GOLD:DIM}>
+        {_autoExited?(
+          <div className="text-[15px] leading-snug text-[#EDEDED]/85">
+            Closed. {_exitWorth!=null&&<>Sold at <span className="font-semibold tabular-nums">{_exitWorth}¢</span>, </>}
+            {_realized!=null&&<>realized <span className="font-semibold tabular-nums" style={{color:_realized>0?GREEN:_realized<0?RED:'#EDEDED'}}>{_realized>0?'+':''}{_realized}¢</span>/contract from a {_fill}¢ entry.</>}
+          </div>
+        ):_placed&&_worth!=null?(
           <>
+            {_autoExitErrored&&(
+              <div className="text-[12px] leading-snug mb-2" style={{color:RED}}>
+                ⚠ Exit attempt failed{autoOrderState?.reason?': '+autoOrderState.reason:''}. Still holding — may need manual action on Kalshi.
+              </div>
+            )}
             <div className="text-[15px] leading-snug text-[#EDEDED]/85">
               Worth <span className="font-semibold tabular-nums" style={{color:_delta>0?GREEN:_delta<0?RED:'#EDEDED'}}>{_worth}¢</span>
               {_delta!=null&&<>, {_delta>0?'up':_delta<0?'down':'flat'}{_delta!==0?' '+Math.abs(_delta)+'¢':''} from entry.</>}
@@ -19519,9 +19556,13 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 
       {/* ── 3 ── */}
       <Stage n="3" title="what it did"
-             badge={_placed?(_isManual?'you · manual':_dry?'simulated':'filled · live')
+             badge={_autoExited?(_realized==null?'exited':_realized>0?'exited · profit':_realized<0?'exited · loss':'exited · flat')
+                    :_autoExitErrored?'⚠ exit failed'
+                    :_placed?(_isManual?'you · manual':_dry?'simulated':'filled · live')
                     :_markedOnly?'no fill logged':(_st?_st.toUpperCase():'nothing yet')}
-             badgeTone={_placed?(_isManual?'#EDEDED':_dry?GOLD:GREEN):_markedOnly?GOLD:DIM}>
+             badgeTone={_autoExited?(_realized>0?GREEN:_realized<0?RED:'#EDEDED')
+                    :_autoExitErrored?RED
+                    :_placed?(_isManual?'#EDEDED':_dry?GOLD:GREEN):_markedOnly?GOLD:DIM}>
         {_placed?(
           <div className="text-[15px] leading-snug text-[#EDEDED]/85">
             {/* V13.4.278: say WHO bought. A manual fill is his own order, and calling
@@ -19531,6 +19572,11 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
             <span className="font-semibold tabular-nums">{_count}</span> at{' '}
             <span className="font-semibold tabular-nums">{Math.round(_fill)}¢</span>
             {' — '}<span className="tabular-nums">${((_fill*_count)/100).toFixed(2)}</span> in.
+            {/* V13.4.290 (ORD-3): say what happened AFTER the fill too -- this
+                sentence used to be the whole story forever, through exit and any
+                exit failure. */}
+            {_autoExited&&_exitWorth!=null&&<> Exited at <span className="font-semibold tabular-nums">{_exitWorth}¢</span>.</>}
+            {_autoExitErrored&&<span style={{color:RED}}> Exit attempt failed{autoOrderState?.reason?': '+autoOrderState.reason:''}.</span>}
           </div>
         ):_markedOnly?(
           <div className="text-[13px] text-[#EDEDED]/55 leading-snug">
@@ -33028,7 +33074,20 @@ function ScalperAdvisorPanel({
       _liveUnrealDollars=(_liveUnrealCents*_liveContractsActual)/100;
     }
     if(_isExited){
-      _liveExitCents=_ordS.exitCents;
+      // V13.4.290: _ordS.exitCents (autoOrderState.exitAtCents) is the RAW YES limit
+      //   price sent to Kalshi (_exitYesLimitCents -- for DOWN that is q.ask, the YES
+      //   ask), while _liveEntryCents is already OUR-SIDE (_execCostCents converts
+      //   DOWN to 100-q.bid). Subtracting them directly mixed two different scales on
+      //   every DOWN trade -- UP was correct only because its our-side price and its
+      //   YES price are the same number (both q.bid).
+      //   Converted to our-side here using the SAME rule _execCostCents uses, so the
+      //   arrow ("entry -> exit") and the profit line below it are computed from one
+      //   consistent scale instead of two different silently-mismatched ones.
+      //   The writer already computes the correct P&L independently as
+      //   pnlCentsPerContract (via _exitValueCents, the our-side mirror) -- kept as a
+      //   cross-check, not the primary path, so a real disagreement is visible rather
+      //   than silently overwritten.
+      _liveExitCents=_liveDir==='DOWN'?(100-_ordS.exitCents):_ordS.exitCents;
       _liveRealCents=_liveExitCents-_liveEntryCents;
       _liveRealDollars=(_liveRealCents*_liveContractsActual)/100;
       _liveIsWin=_liveRealCents>0;
@@ -42281,6 +42340,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         taraCallSnapshotRef.current=null;
         taraCallSampleRef.current={dir:null,count:0};
         taraSampleRateRef.current=[]; // V5.7.2: clear rate history for new window
+        // V13.4.290 (ORD-2): autoOrderState was never cleared here. A comment at
+        //   ~L46392 ("CLEANUP ON WINDOW ROLL ... When the window changes, clear stale
+        //   auto-order state") describes exactly this fix, but only a ref got
+        //   declared under it (_lastSeenWindowIdRef, read nowhere) -- the effect body
+        //   itself was never written. Once v286 made the 'exited' state finally
+        //   readable, an order that filled and closed in window N kept _liveValid true
+        //   in window N+1 (it only requires the ORDER's direction to match the CURRENT
+        //   call), so the trade ticket rendered last window's entry/exit/stake/result
+        //   instead of a fresh plan, and its "edit values for this window" control
+        //   stayed hidden -- for every subsequent same-direction window, since nothing
+        //   ever produced a fresh 'placing' write to displace it. Cleared in the one
+        //   place every other per-window ref already resets, so it can't be missed by
+        //   a future rollover-detection change made only here.
+        setAutoOrderState(null);
         taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
         // V10.7.62: force re-render immediately after refs clear so UI flushes
         //   stale lock display. lockedCallRef is a ref (not state) — without this,
@@ -45932,7 +46005,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
     _entryFiredForRef.current=lockKey;
     _entryBusyRef.current=true;
-    setAutoOrderState({status:'placing',dir,ticker,dryRun,manual:!!manual,offerCents:costCents,at:Date.now()});
+    // V13.4.290 (ORD-4): the partial-fill explainer's own gate
+    //   (`autoOrderState.requestedCount>0`) has been unreachable since it was written
+    //   -- no write anywhere ever set this field, so the guard was always false and
+    //   the '⚠ partial fill' warning could never render, on a genuine partial fill or
+    //   otherwise. Stamped here, at the one place the intended size is actually known:
+    //   how many whole contracts this stake buys at the quoted per-contract cost. The
+    //   ladder may fill at slightly different rungs as it works the price, which is
+    //   exactly the comparison "requested vs filled" needs to make.
+    const requestedCount=Math.max(1,Math.floor((stake*100)/costCents));
+    setAutoOrderState({status:'placing',dir,ticker,dryRun,manual:!!manual,offerCents:costCents,requestedCount,at:Date.now()});
 
     try{
       const res=await kalshiRunEntryLadder({
@@ -46397,15 +46479,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   declared on the line above. Putting the dep array on `[taraCall]` further up caused
   //   a TDZ ReferenceError.
   useEffect(()=>{
+    // V13.4.290 CORRECTION (R3): v285's field-name fix was inert. The dep array here
+    //   is `[taraCall]`, and taraCall is a fresh object literal from its own IIFE on
+    //   EVERY render (~L44282) -- and the app re-renders every second because the
+    //   window clock's setInterval writes fresh timeState every 1000ms. So this
+    //   effect's cleanup ran roughly one second after each setInterval call, and the
+    //   5000ms callback below was never once reached. convictionHistoryRef stayed
+    //   permanently empty, convictionTrajectory stayed permanently 'UNKNOWN', and the
+    //   BUILDING/FADING arrow never rendered -- exactly as the comment already here
+    //   said, except it was describing a still-broken build, not a fixed one.
+    //   Mounted once instead, reading the live posterior through analysisRef
+    //   (~L44089, already kept current on every `analysis` change by its own effect)
+    //   rather than closing over the `analysis` prop directly -- `analysis` is a
+    //   useMemo whose own deps include timeState.minsRemaining/secsRemaining, so it
+    //   is exactly as unstable a dependency as taraCall was.
     const iv=setInterval(()=>{
-      // V13.4.284: gated on the phantom `taraCall.posterior`, so this guard ALWAYS
-      //   returned and convictionHistoryRef was never written to. That in turn made
-      //   convictionTrajectory permanently {state:'UNKNOWN'} (it needs >=4 samples),
-      //   and _showTrajectory is `state!=='UNKNOWN'` — so the BUILDING/FADING
-      //   conviction arrow has never rendered once.
-      // V13.4.285 CORRECTION: taraCall carries neither `posterior` (v283 bug) nor
-      //   `rawProbAbove` (v284's wrong fix). analysis is the object that has it.
-      const _post=Number(analysis?.rawProbAbove);
+      const _post=Number(analysisRef.current?.rawProbAbove);
       if(!Number.isFinite(_post))return;
       const _now=Date.now();
       convictionHistoryRef.current.push({time:_now,post:_post});
@@ -46414,7 +46503,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       convictionHistoryRef.current=convictionHistoryRef.current.filter(h=>h.time>=_cutoff);
     },5000);
     return()=>clearInterval(iv);
-  },[taraCall]);
+  },[]);
   // BUILDING / STABLE / FADING / UNKNOWN — recompute on each posterior tick
   const convictionTrajectory=useMemo(()=>{
     const h=convictionHistoryRef.current;
@@ -54056,9 +54145,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 );
               }
               if(_ls.satOut){
+                // V13.4.290 CORRECTION: this shipped as v288 using bg-amber-500/12
+                //   text-amber-400/90, Tailwind UTILITY classes. index.html:76-78 aliases
+                //   the entire amber/orange/yellow family onto the WIN GREEN precisely so a
+                //   stray utility class can never paint something sit-out -- amber-400 is
+                //   byte-identical to emerald-400, #23B981. So this "fixed" badge rendered a
+                //   green pill, same size and border as the LOCKED UP pill, for the majority
+                //   state of the bar. Worse than the bug it replaced, which was at least a
+                //   visibly different colour (rose). The real token, used inline (never as a
+                //   class) everywhere else in this file, is T2_SITOUT/_FG/_BG.
+                //   Also drops the "(leaned X)" suffix (MBR-2): it can add ~80px to a pill
+                //   that already has none to spare on a 375px phone with no wrap protection,
+                //   pushing the fixed bar to a second line. The lean is still shown, just not
+                //   here -- TaraCallCard already prints "would lean X * N%" for it.
                 return(
-                  <span className="font-bold px-2 py-1 rounded-lg bg-amber-500/12 text-amber-400/90 border border-amber-500/30">
-                    · SITTING OUT{_ls.intendedDir?' (leaned '+_ls.intendedDir+')':''}
+                  <span className="font-bold px-2 py-1 rounded-lg whitespace-nowrap"
+                        style={{color:T2_SITOUT_FG,background:T2_SITOUT_BG,border:'1px solid rgba(212,160,58,0.30)'}}>
+                    SIT OUT
                   </span>
                 );
               }
