@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.296-dashboard-mockup-rebuild-pass4';
-const TARA_VERSION_DISPLAY='Tara 13.4.296';
+const BASELINE_VERSION='2026.09.07-v13.4.297-dashboard-risk-chip-and-mobile-dup-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.297';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17501,7 +17501,7 @@ function TaraAdvisorPanel({advisor,executeAction}){
 // Renders inside TaraCallCard. Surfaces FOUR signals that should change how user
 // trades the current window: conviction trajectory, edge vs Kalshi, suggested
 // position size, and cooldown after loss.
-function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayData,analysis,movementRisk,bestWindowsToday}){
+function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayData,analysis,movementRisk,bestWindowsToday,desktopSplit}){
   if(!taraCall)return null;
   // V13.4.284: `taraCall.posterior` is never written (engine exposes rawProbAbove),
   //   so _post was always 0 and _hasPost always false — this component's EDGE chip
@@ -17626,7 +17626,11 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold',style:{color:_trajColor}},convictionTrajectory.state),
         ),
         // V8.1: Movement risk chip — only when ELEVATED or higher (clutter avoidance)
-        movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME')&&React.createElement('div',{
+        // V13.4.297: skipped on desktop (desktopSplit) -- RiskBannerCard shows
+        //   this in column 3 now, so the chip here would just be a second,
+        //   less complete copy of the same movementRisk. Mobile (no
+        //   desktopSplit prop, no separate Risk panel) keeps showing it.
+        !desktopSplit&&movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME')&&React.createElement('div',{
           className:'flex items-baseline gap-1 px-1.5 py-0.5 rounded-lg',
           style:{
             background:movementRisk.level==='EXTREME'?'rgba(232,69,94,0.08)':'rgba(35,185,129,0.06)',
@@ -17644,7 +17648,10 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
         ),
       ),
       // V8.1: Predictive readout strip (only when notable signal)
-      movementRisk&&movementRisk.predictive&&movementRisk.score>=45&&React.createElement('div',{
+      // V13.4.297: skipped on desktop (desktopSplit) -- same text as
+      //   RiskBannerCard's body ("-> {predictive}"), which now shows it in
+      //   column 3. Mobile keeps showing it here, its only Risk surface.
+      !desktopSplit&&movementRisk&&movementRisk.predictive&&movementRisk.score>=45&&React.createElement('div',{
         className:'mt-2 text-[10px] italic',
         style:{color:movementRisk.level==='EXTREME'?'rgba(232,69,94,0.85)':'rgba(35,185,129,0.85)'},
       },
@@ -19094,6 +19101,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           analysis={analysis}
           movementRisk={movementRisk}
           bestWindowsToday={bestWindowsToday}
+          desktopSplit={desktopSplit}
         />
 
         {/* V9.9.0: Predictive reversal — chip + Tara-native forecast SVG. Renders only
@@ -53737,9 +53745,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {/* V13.4.294: Conviction + Entry Pricing, matching the mockup's left
               column order (This Trade -> Conviction -> Entry Pricing). Both
               extracted from TaraCallCard, which skips them here on desktop
-              (desktopSplit) -- see project_tara_dashboard_mockup_rebuild memory. */}
+              (desktopSplit) -- see project_tara_dashboard_mockup_rebuild memory.
+              V13.4.298: wrapped hidden lg:block -- this div had no mobile gate,
+              so both showed a second time on mobile alongside TaraCallCard's
+              own bundled Conviction Meter / Execution Row (mobile's call site
+              never sets desktopSplit, by design, so it still renders them). */}
+          <div className="hidden lg:flex lg:flex-col gap-3">
           <ConvictionMeterCard taraCall={taraCall} analysis={analysis}/>
           <EntryPricingCard taraCall={taraCall}/>
+          </div>
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
@@ -54266,8 +54280,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               the two placements serve different questions (This Trade: is
               THIS trade in the money; here: price at a glance alongside
               depth/smart-money/tape/today). Self-contained, returns null with
-              no live tick history yet. */}
-          <WindowStrikeChart tickHistoryRef={tickHistoryRef} targetMargin={targetMargin} currentPrice={currentPrice} timeState={timeState} height={110}/>
+              no live tick history yet.
+              V13.4.298: wrapped hidden lg:block -- this call had no mobile
+              gate, so it showed a second time on mobile right below
+              ThisTradeCard's own copy (same chart, same data, no reason for a
+              user to see it twice). Desktop-only now, matching every other
+              new panel this dashboard rebuild added. */}
+          <div className="hidden lg:block">
+            <WindowStrikeChart tickHistoryRef={tickHistoryRef} targetMargin={targetMargin} currentPrice={currentPrice} timeState={timeState} height={110}/>
+          </div>
         </div>
 
         {/* V13.4.293: Smart Money, relocated here from column 1 (it used to
@@ -54452,6 +54473,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               matched here (Risk banner not built yet; Hourly Ladder belongs in
               its own bottom row per the mockup, not column 3 -- deferred). */}
           <div className="flex flex-col gap-3 min-w-0">
+          {/* V13.4.298: this whole block (Record/Risk/News+LiveFeeds/Memory) is
+              new to column 3 as of the dashboard-mockup-rebuild passes, and none
+              of it had mobile-visibility gating -- it sat in a plain,
+              always-rendered div, so at mobile widths (grid-cols-1, everything
+              stacks vertically) it showed up a SECOND time alongside
+              TaraCallCard's own mobile-bundled Record/Memory (desktopSplit is
+              never set on that call site, by design, so it still renders its
+              own copies). hidden lg:block restricts this block to desktop,
+              where it's genuinely additive, restoring what every commit message
+              for these passes already claimed: mobile is unaffected. */}
+          <div className="hidden lg:flex lg:flex-col gap-3 min-w-0">
           <RecordCard taraScorecards={taraScorecards} windowType={windowType}/>
           <RiskBannerCard movementRisk={movementRisk}/>
           {/* V13.4.294: News + Live Feeds, relocated here from column 2. */}
@@ -54502,6 +54534,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               return next;
             });
           }}/>
+          </div>
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}
             taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}
             onHourlyLock={_onHourlyLock}/>
