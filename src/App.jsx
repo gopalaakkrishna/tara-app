@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.301-hairline-panels-single-chart';
-const TARA_VERSION_DISPLAY='Tara 13.4.301';
+const BASELINE_VERSION='2026.09.07-v13.4.302-remove-engine-log';
+const TARA_VERSION_DISPLAY='Tara 13.4.302';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29055,12 +29055,11 @@ function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
   );
 }
 
-// ── V111: RightPanel - Engine Log (col 3) ──
+// ── V111: RightPanel (col 3) ── V13.4.302: Engine Log removed, see below.
 function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast,
                      taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition,onHourlyLock}){
   // V9.1.1: full-schedule popup state
   const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
-  const reasoning=analysis?.reasoning||[];
   // v13.4.153: tape/bloomberg/whale derivations moved with the Live Feeds card.
 
   return(
@@ -29199,25 +29198,14 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           );
         })()}
       </div>
-      {/* Engine Log - flexible, fills available space */}
-      <div className="flex-1 min-h-[120px] flex flex-col pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-        <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2 shrink-0'} style={{color:T2_GOLD}}>Engine Log</div>
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-1 text-[10px] font-mono">
-          {reasoning.length===0?(
-            <div className={'text-[#EDEDED]/30 italic'}>Waiting for signals...</div>
-          ):reasoning.slice(0,20).map((r,i)=>{
-            const tag=(r.match(/^\[(\w+)\]/)||[])[1]||'';
-            const tagCls={GAP:'text-amber-400',MOMENTUM:'text-indigo-400',STRUCTURE:'text-purple-400',FLOW:'text-emerald-400',TECHNICAL:'text-cyan-400',REGIME:'text-rose-400',CAP:'text-orange-400',MEMORY:'text-pink-400',CAL:'text-blue-400',TIME:'text-yellow-400',ATR:'text-teal-400','GRAND-TREND':'text-violet-300',CHANNEL:'text-violet-300',STRUCT:'text-violet-200'}[tag]||'text-[#EDEDED]/40';
-            const text=r.replace(/^\[(\w+)\]\s*/,'');
-            return(
-              <div key={i} className="flex gap-1.5">
-                {tag&&<span className={tagCls+' font-bold shrink-0'}>[{tag}]</span>}
-                <span className={'text-[#EDEDED]/60 break-all'}>{text}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* V13.4.302 REMOVED: Engine Log (the raw [TAG] reasoning-string dump).
+          It was never in the approved mockup's column map to begin with (kept
+          from the pre-rebuild layout as "not in the mockup as such but not
+          deleted" per project_tara_dashboard_mockup_rebuild) -- a dozen
+          rainbow-coloured debug tags with no equivalent panel in the design.
+          `reasoning` is now unused in this component; left as a prop so the
+          parent call site doesn't need touching, exactly like removing a
+          feature elsewhere in this file without chasing every caller. */}
       {/* v13.4.153: News & Live Feeds moved out of this panel and down under
           Tara's Call (the projections column). This panel keeps the engine
           internals — coach, score breakdown, reasoning log. */}
