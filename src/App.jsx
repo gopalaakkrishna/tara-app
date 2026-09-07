@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.295-dashboard-mockup-rebuild-pass3';
-const TARA_VERSION_DISPLAY='Tara 13.4.295';
+const BASELINE_VERSION='2026.09.07-v13.4.296-dashboard-mockup-rebuild-pass4';
+const TARA_VERSION_DISPLAY='Tara 13.4.296';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -54259,6 +54259,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </div>
             );
           })()}
+          {/* V13.4.296: compact price-vs-strike chart, matching the mockup's
+              merged Price+Strike+Depth+Chart center-column panel.
+              WindowStrikeChart already existed (built for ThisTradeCard's
+              stage 1) -- called a second time here rather than moved, since
+              the two placements serve different questions (This Trade: is
+              THIS trade in the money; here: price at a glance alongside
+              depth/smart-money/tape/today). Self-contained, returns null with
+              no live tick history yet. */}
+          <WindowStrikeChart tickHistoryRef={tickHistoryRef} targetMargin={targetMargin} currentPrice={currentPrice} timeState={timeState} height={110}/>
         </div>
 
         {/* V13.4.293: Smart Money, relocated here from column 1 (it used to
