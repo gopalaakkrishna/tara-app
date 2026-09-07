@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.303-remove-score-breakdown-and-chart';
-const TARA_VERSION_DISPLAY='Tara 13.4.303';
+const BASELINE_VERSION='2026.09.07-v13.4.304-toast-mobile-width-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.304';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -31914,8 +31914,17 @@ function TaraToastStack({toasts,onDismiss}){
   },[toasts,onDismiss]);
   if(!toasts||toasts.length===0)return null;
   return React.createElement('div',{
-    className:'fixed top-20 right-4 z-[100] flex flex-col gap-2 pointer-events-none',
-    style:{maxWidth:'340px',minWidth:'280px'},
+    // V13.4.304: this stack renders at the app root, before any Sports/Weather
+    //   tab switching -- toasts are global BY DESIGN (a BTC velocity spike is
+    //   worth seeing even while checking the weather board), so scoping them to
+    //   one tab is not the fix. The bug was sizing: a fixed minWidth:280px badge
+    //   anchored right-4 is a small desktop corner element, but on a 375px phone
+    //   it eats ~75% of the screen width and overlaps whatever tab is showing
+    //   underneath -- caught covering Weather's city pills and header. Below sm,
+    //   left-2/right-2 with no explicit width lets the browser size the box from
+    //   its insets (full width minus 16px margins); at sm+ it reverts to the
+    //   original right-anchored corner badge.
+    className:'fixed top-20 left-2 right-2 sm:left-auto sm:right-4 z-[100] flex flex-col gap-2 pointer-events-none sm:min-w-[280px] sm:max-w-[340px]',
   },toasts.map(t=>React.createElement('div',{
     key:t.id,
     'data-tara-toast':'1',
