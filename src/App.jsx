@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.304-toast-mobile-width-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.304';
+const BASELINE_VERSION='2026.09.07-v13.4.305-remove-redundant-mobile-tab-bar';
+const TARA_VERSION_DISPLAY='Tara 13.4.305';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29065,7 +29065,6 @@ function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource})
   );
 }
 
-// ── V111: MobileTabBar - 4 tabs: signal/projections/logs/chart ──
 
 // ══════════════════════════════════════════════════════════════════════════
 // SportsView — the sports prediction record, alongside Tara's BTC work.
@@ -31043,47 +31042,10 @@ function SportsView({onClose}){
   );
 }
 
-const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats,setShowSports}){
-  const tabs=[
-    {id:'signal',label:'SIGNAL'},
-    {id:'projections',label:'TARGETS'},
-    {id:'logs',label:'LOGS'},
-    {id:'chart',label:'CHART'},
-  ];
-  // V13.4.224: same clipping bug as the other two mobile bars, and the same fix.
-  //   Seven items in one row wanted 452px inside 323px at 375px wide, so Brain,
-  //   Stats and Sports sat past the edge with nothing able to scroll to them. The
-  //   four tab buttons carry `flex-1` but default min-width:auto, so they will not
-  //   shrink below their own labels ("TARGETS") and the whole shortfall lands on
-  //   the shrink-0 icons after them.
-  //
-  //   The tabs get their own row; the three shortcuts get another. These three
-  //   exist ONLY because the header hides them at this width, so clipping them
-  //   here left no way to reach Brain, Stats or Sports on a phone at all.
-  return(
-    <div className="md:hidden flex flex-col gap-1 mb-2 shrink-0">
-      <div className="flex gap-1">
-        {tabs.map(t=>{
-          const active=mobileTab===t.id;
-          const cls='flex-1 min-w-0 truncate px-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#23B981] border-[#23B981]/40':'text-[#EDEDED]/40 border-[#24242E]');
-          const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}:{boxShadow:'0 2px 6px rgba(0,0,0,0.25)'};
-          return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
-        })}
-      </div>
-      <div className="flex gap-1">
-        {[{k:'brain',icon:'🧠',label:'Brain',fn:()=>setShowBrain&&setShowBrain(true)},
-          {k:'stats',icon:'📊',label:'Stats',fn:()=>setShowStats&&setShowStats(true)},
-          {k:'sports',icon:'🏆',label:'Sports',fn:()=>setShowSports&&setShowSports(true)}].map(b=>(
-          <button key={b.k} onClick={b.fn} title={b.label}
-            className={'flex-1 min-w-0 flex items-center justify-center gap-1 px-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all'}
-            style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}}>
-            <span className="text-xs leading-none">{b.icon}</span><span className="truncate">{b.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-})
+// V13.4.305 REMOVED: MobileTabBar. Superseded by the newer Signal/Chart/
+//   Analytics bar (see the removal note at its former call site) -- kept the
+//   component definition around as dead code was pointless once nothing
+//   called it.
 
 
 
@@ -53584,8 +53546,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           </div>
         )}
 
-        {/* ── V111: MOBILE TAB NAV ── */}
-        <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab} setShowBrain={setShowBrain} setShowStats={setShowStats} setShowSports={setShowSports}/>
+        {/* V13.4.305 REMOVED: MobileTabBar. Found while checking the mobile
+            "Analytics" tab -- this was a second, older mobile tab-switcher
+            rendering directly below the newer Signal/Chart/Analytics one
+            (V13.4.224 dashboard rebuild), both driving the SAME mobileTab
+            state. Three of its four tabs (signal/logs/chart) exactly
+            duplicated the newer bar under different labels (its "LOGS" and
+            the newer bar's "Analytics" are the same id). Its fourth,
+            "Targets" (id: projections), pointed at ProjectionsCard, whose
+            only real content -- TaraCallCard -- carries its own independent
+            `hidden lg:block`, so Targets showed nothing but an empty bordered
+            box on any phone, at any width, regardless of this bar's own
+            mobileTab gating. Its second row (Brain/Stats/Sports shortcuts)
+            was justified by an on-mount comment claiming the header hides
+            those at phone width "with no way to reach them otherwise" -- no
+            longer true: Brain and Stats are in the header's ··· overflow
+            menu, and Sports got its own always-visible icon pill in the
+            header back in V13.4.150. Nothing here was reachable ONLY through
+            this bar. See project_tara_dashboard_mockup_rebuild memory. */}
 
         {/* V2.1: Grid changed from equal 3-col to 1.25fr/1fr/1fr at lg+ — prediction card promoted as hero.
                   V2.2.1: tightened from 1.5fr → 1.25fr (1.5 was overshooting visually). auto-rows-fr restored
