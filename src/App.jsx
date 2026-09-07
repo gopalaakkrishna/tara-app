@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.300-mono-numbers-complete';
-const TARA_VERSION_DISPLAY='Tara 13.4.300';
+const BASELINE_VERSION='2026.09.07-v13.4.301-hairline-panels-single-chart';
+const TARA_VERSION_DISPLAY='Tara 13.4.301';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7913,7 +7913,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_PREMARKET:{   // 12:00-13:30 UTC
-    label:'NY Pre-Market',flag:'⏳',color:'rgba(35,185,129,0.85)',
+    label:'NY Pre-Market',flag:'⏳',color:'#23B981',
     liquidity:'MED',vol:'COMPRESSING',
     character:'Calm before the storm. Coiling action ahead of NY open.',
     cautions:['Wait for NY open before sizing up','Pre-market moves often reverse at the open'],
@@ -7925,7 +7925,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'MEDIUM',
   },
   NY_OPEN:{        // 13:30-14:30 UTC
-    label:'NY Open',flag:'🚀',color:'rgba(35,185,129,0.95)',
+    label:'NY Open',flag:'🚀',color:'#23B981',
     liquidity:'EXTREME',vol:'EXPANDING',
     character:'Highest volatility window of the day. Major directional moves common.',
     cautions:['WIDER stops needed — normal stops will get hit','False breakouts then reversals frequent in first 15-20 min','Don\'t overcommit on first move'],
@@ -7937,7 +7937,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_MORNING:{     // 14:30-16:00 UTC
-    label:'NY Morning',flag:'☀️',color:'rgba(35,185,129,0.85)',
+    label:'NY Morning',flag:'☀️',color:'#23B981',
     liquidity:'HIGH',vol:'STEADY',
     character:'Strong directional follow-through after open establishes.',
     cautions:['Watch for ~15:30 UTC extension fading','Trend exhaustion signs appear here'],
@@ -7949,7 +7949,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_LUNCH:{       // 16:00-17:00 UTC
-    label:'NY Lunch',flag:'🍽️',color:'rgba(35,185,129,0.85)',
+    label:'NY Lunch',flag:'🍽️',color:'#23B981',
     liquidity:'MED',vol:'COMPRESSING',
     character:'Lunch lull. Chop period with mean reversion to VWAP.',
     cautions:['Avoid breakout chasing — they fail here','Range-bound — fade extremes instead'],
@@ -7961,7 +7961,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'MEDIUM',
   },
   NY_AFTERNOON:{   // 17:00-20:00 UTC
-    label:'NY Afternoon',flag:'🌤️',color:'rgba(35,185,129,0.85)',
+    label:'NY Afternoon',flag:'🌤️',color:'#23B981',
     liquidity:'HIGH',vol:'STEADY',
     character:'Second wind. Often establishes the daily close direction.',
     cautions:['Watch for 19:30 UTC position-squaring','3pm ET reversals are a known pattern'],
@@ -7973,7 +7973,7 @@ const PHASE_PROFILES={
     coinFlipRisk:'LOW',
   },
   NY_CLOSE:{       // 20:00-21:00 UTC
-    label:'NY Close',flag:'🌆',color:'rgba(35,185,129,0.85)',
+    label:'NY Close',flag:'🌆',color:'#23B981',
     liquidity:'HIGH',vol:'STEADY',
     character:'Position-squaring distorts signals. Algo-heavy.',
     cautions:['Late-day reversals common','Avoid initiating new positions','Funds rebalancing creates artificial flow'],
@@ -8618,16 +8618,16 @@ const classifyLossPattern=(trade)=>{
   return'WRONG_FROM_START'; // catchall fallback
 };
 const LOSS_PATTERN_LABELS={
-  WRONG_FROM_START:{label:'Wrong from start',color:'rgba(232,69,94,0.95)',icon:'✗',hint:'Signal read was off entry. Tighten entry filter.'},
-  EARLY_PEAK:     {label:'Early peak fade',  color:'rgba(35,185,129,0.85)',icon:'⤴',hint:'Peaked in first third then faded. Consider quicker take-profit.'},
-  MID_REVERSAL:   {label:'Mid-window reversal',color:'rgba(35,185,129,0.85)',icon:'⤵',hint:'Was winning at midpoint. Watch for vol shifts.'},
-  LATE_REVERSAL:  {label:'Late reversal',    color:'rgba(232,69,94,0.85)',icon:'⚡',hint:'Winning until last minute. Tighter trailing stop in final 90s.'},
+  WRONG_FROM_START:{label:'Wrong from start',color:'#E8455E',icon:'✗',hint:'Signal read was off entry. Tighten entry filter.'},
+  EARLY_PEAK:     {label:'Early peak fade',  color:'#23B981',icon:'⤴',hint:'Peaked in first third then faded. Consider quicker take-profit.'},
+  MID_REVERSAL:   {label:'Mid-window reversal',color:'#23B981',icon:'⤵',hint:'Was winning at midpoint. Watch for vol shifts.'},
+  LATE_REVERSAL:  {label:'Late reversal',    color:'#E8455E',icon:'⚡',hint:'Winning until last minute. Tighter trailing stop in final 90s.'},
   WHALE_SPIKE:    {label:'Whale spike',      color:'rgba(168,85,247,0.85)',icon:'🐋',hint:'Large contrary print near close. Not your read — circumstance.'},
   MACRO_SHOCK:    {label:'Macro shock',      color:'rgba(168,85,247,0.85)',icon:'⚠',hint:'External event spike during window. Not your read — circumstance.'},
   // V10.4.2c — new data-driven categories
   EXPENSIVE_ENTRY_LOSS:{label:'Expensive entry',color:'rgba(212,162,76,0.85)',icon:'💸',hint:'k$60+ entry that didn\'t justify cost. V10.4.1 delay gate target.'},
   NARROW_SETTLEMENT_LOSS:{label:'Narrow settlement',color:'rgba(96,165,250,0.85)',icon:'📏',hint:'Lost by <3bps. BRTI averaging hit us. V10.5.1 target.'},
-  WRONG_DIRECTION:{label:'Wrong direction',color:'rgba(232,69,94,0.95)',icon:'❌',hint:'Lost by >15bps. Genuine signal miss — ML retrain target.'},
+  WRONG_DIRECTION:{label:'Wrong direction',color:'#E8455E',icon:'❌',hint:'Lost by >15bps. Genuine signal miss — ML retrain target.'},
 };
 // Patterns where signals were correct but external shock caused the loss.
 //   Used by applyTradeLearning to skip/dampen gradient descent — don't punish
@@ -15093,7 +15093,7 @@ function PositionReconciliationBanner({positionReconciliation}){
   if(!_rec||_rec.status!=='drift'||!Array.isArray(_rec.driftDetails)||_rec.driftDetails.length===0)return null;
   // If user dismissed this poll's banner, suppress until next poll arrives
   if(dismissedAt>0&&dismissedAt>=(_rec.lastCheckAt||0))return null;
-  const _kindColor=(k)=>k==='unknown-to-tara'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'rgba(232,69,94,0.95)';
+  const _kindColor=(k)=>k==='unknown-to-tara'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
   const _kindLabel=(k)=>{
     if(k==='phantom-auto')return 'phantom (auto)';
     if(k==='phantom-manual')return 'phantom (manual)';
@@ -15105,7 +15105,7 @@ function PositionReconciliationBanner({positionReconciliation}){
   return (
     <div className="mb-2 p-2.5 rounded-lg" style={{background:'rgba(232,69,94,0.08)',border:'1px solid rgba(232,69,94,0.35)'}}>
       <div className="flex items-baseline justify-between mb-1.5">
-        <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:'rgba(232,69,94,0.95)'}}>
+        <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:'#E8455E'}}>
           ⚠ Position drift detected
         </span>
         <button
@@ -15922,7 +15922,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
   };
   const _clear=()=>setManualKalshiEntry(null);
   // Color matches direction
-  const _dirColor=userPosition==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.92)';
+  const _dirColor=userPosition==='UP'?'rgb(35,185,129)':'#E8455E';
   return (
     <div className="mt-2 p-2 rounded-lg border" style={{borderColor:'rgba(237,237,237,0.10)',background:'#0B0B0F'}}>
       <div className="flex items-baseline justify-between mb-1.5">
@@ -16689,7 +16689,7 @@ function HourlyMemoryModal({onClose}){
     h=>h.side==='YES'?'YES (UP-equiv)':h.side==='NO'?'NO (DOWN-equiv)':'unknown',
     ['YES (UP-equiv)','NO (DOWN-equiv)','unknown'],
   ),[history]);
-  const resultColor=(h)=>isWin(h)?'rgba(35,185,129,0.95)':isLoss(h)?'rgba(232,69,94,0.95)':'rgba(237,237,237,0.4)';
+  const resultColor=(h)=>isWin(h)?'#23B981':isLoss(h)?'#E8455E':'rgba(237,237,237,0.4)';
   const resultLabel=(h)=>isWin(h)?'WIN':isLoss(h)?'LOSS':'--';
   // V13.4.168: lock times were stored with toLocaleTimeString([],...), i.e. whatever
   //   the machine's locale produced -- so the same list mixed "06:15 a.m." and
@@ -16821,7 +16821,7 @@ function HourlyMemoryModal({onClose}){
               const l=settled.filter(isLoss).length;
               const resolved=w+l;
               const hourWr=resolved>0?Math.round(100*w/resolved):null;
-              const wrColor=hourWr==null?'rgba(237,237,237,0.4)':hourWr>=70?'rgb(35,185,129)':hourWr>=55?'rgba(237,237,237,0.85)':hourWr>=45?'rgba(35,185,129,0.85)':'rgb(232,69,94)';
+              const wrColor=hourWr==null?'rgba(237,237,237,0.4)':hourWr>=70?'rgb(35,185,129)':hourWr>=55?'rgba(237,237,237,0.85)':hourWr>=45?'#23B981':'rgb(232,69,94)';
               return(
                 <div key={hourKey}>
                   <div className="sticky top-0 z-10 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md" style={{background:'#050508',borderBottom:'1px solid rgba(237,237,237,0.10)'}}>
@@ -17524,7 +17524,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
     const _taraDirConf=_dir==='UP'?_post:(100-_post);
     const _kalshiDirConf=_dir==='UP'?Number(kalshiYesPrice):(100-Number(kalshiYesPrice));
     _edge=Math.round(_taraDirConf-_kalshiDirConf);
-    _edgeColor=_edge>=15?'rgb(35,185,129)':_edge>=5?'rgba(35,185,129,0.85)':_edge>=-5?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.95)';
+    _edgeColor=_edge>=15?'rgb(35,185,129)':_edge>=5?'#23B981':_edge>=-5?'#23B981':'#E8455E';
     _edgeLabel=_edge>=15?'BIG EDGE':_edge>=5?'GOOD EDGE':_edge>=-5?'TIGHT':'LATE';
   }
   // ── Position size hint ── Combine regime vol + tilt status + edge + time-of-day into recommendation
@@ -17555,9 +17555,9 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   if(todayData?.strongTilt){
     _sizeHint='SKIP';_sizeColor='rgb(232,69,94)';_sizeReason='5+ losses in a row';
   } else if(todayData?.tilt){
-    _sizeHint='HALF';_sizeColor='rgba(232,69,94,0.85)';_sizeReason='3+ loss streak — cut size';
+    _sizeHint='HALF';_sizeColor='#E8455E';_sizeReason='3+ loss streak — cut size';
   } else if(_edge!=null&&_edge<-5&&!_isPrime){
-    _sizeHint='SKIP';_sizeColor='rgba(232,69,94,0.85)';_sizeReason='negative edge vs Kalshi';
+    _sizeHint='SKIP';_sizeColor='#E8455E';_sizeReason='negative edge vs Kalshi';
   } else if(_isPrimePlus&&_isLocked){
     _sizeHint='MAX';_sizeColor='rgb(35,185,129)';_sizeReason='all signals aligned strong (82% WR zone)';
   } else if(_isPrime&&_isLocked){
@@ -17565,11 +17565,11 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   } else if(_isStrongConfluence&&_isLocked){
     _sizeHint='FULL';_sizeColor='rgba(35,185,129,0.9)';_sizeReason='gap+flow aligned (73% WR zone)';
   } else if(_isStrong&&_isLocked){
-    _sizeHint='FULL';_sizeColor='rgba(35,185,129,0.85)';_sizeReason='strong gap (71% WR zone)';
+    _sizeHint='FULL';_sizeColor='#23B981';_sizeReason='strong gap (71% WR zone)';
   } else if(_edge!=null&&_edge>=15&&_isInBestHour&&_isLocked){
     _sizeHint='LARGE';_sizeColor='rgb(35,185,129)';_sizeReason=`big edge + ${_curHourEntry.wr}% historical hour`;
   } else if(analysis?.regime==='HIGH_VOL'||analysis?.regime==='EXTREME_VOL'){
-    _sizeHint='HALF';_sizeColor='rgba(35,185,129,0.85)';_sizeReason='vol regime — cut size';
+    _sizeHint='HALF';_sizeColor='#23B981';_sizeReason='vol regime — cut size';
   } else if(_isLocked&&(((_gapAl>3?1:0)+(_flowAl>3?1:0)+(_momAl>3?1:0))<=1)){
     // V10.9.4: WEAK-AGREEMENT DOWNSIZE.
     //   Same n_aligned definition as the V10.9.0 signal-agreement gate (each of
@@ -17587,7 +17587,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   const _showCooldown=todayData?.inCooldown&&todayData?.cooldownMinSinceLoss!=null&&!_isLocked;
   // ── Conviction trajectory ──
   const _showTrajectory=_isLocked&&convictionTrajectory&&convictionTrajectory.state!=='UNKNOWN';
-  const _trajColor=convictionTrajectory?.state==='BUILDING'?'rgba(35,185,129,0.85)':convictionTrajectory?.state==='FADING'?'rgba(232,69,94,0.85)':'rgba(237,237,237,0.55)';
+  const _trajColor=convictionTrajectory?.state==='BUILDING'?'#23B981':convictionTrajectory?.state==='FADING'?'#E8455E':'rgba(237,237,237,0.55)';
   const _trajIcon=convictionTrajectory?.state==='BUILDING'?'↗':convictionTrajectory?.state==='FADING'?'↘':'→';
   // V8.1: Movement risk chip activates this overlay too (only at ELEVATED+)
   const _showRiskChip=movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME');
@@ -17643,8 +17643,8 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
           ].filter(Boolean).join('\n'),
         },
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold text-[#EDEDED]/40'},'Risk'),
-          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider',style:{color:movementRisk.level==='EXTREME'?'rgb(232,69,94)':'rgba(35,185,129,0.95)'}},movementRisk.level),
-          movementRisk.dirBias&&React.createElement('span',{className:'text-[10px] font-bold leading-none',style:{color:movementRisk.level==='EXTREME'?'rgb(232,69,94)':'rgba(35,185,129,0.95)'}},movementRisk.dirBias==='UP'?'↑':'↓'),
+          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider',style:{color:movementRisk.level==='EXTREME'?'rgb(232,69,94)':'#23B981'}},movementRisk.level),
+          movementRisk.dirBias&&React.createElement('span',{className:'text-[10px] font-bold leading-none',style:{color:movementRisk.level==='EXTREME'?'rgb(232,69,94)':'#23B981'}},movementRisk.dirBias==='UP'?'↑':'↓'),
         ),
       ),
       // V8.1: Predictive readout strip (only when notable signal)
@@ -17653,14 +17653,14 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
       //   column 3. Mobile keeps showing it here, its only Risk surface.
       !desktopSplit&&movementRisk&&movementRisk.predictive&&movementRisk.score>=45&&React.createElement('div',{
         className:'mt-2 text-[10px] italic',
-        style:{color:movementRisk.level==='EXTREME'?'rgba(232,69,94,0.85)':'rgba(35,185,129,0.85)'},
+        style:{color:movementRisk.level==='EXTREME'?'#E8455E':'#23B981'},
       },
         React.createElement('span',null,'→ ',movementRisk.predictive),
       ),
       // Cooldown indicator
       _showCooldown&&React.createElement('div',{
         className:'text-[10px] flex items-baseline gap-1.5 px-1.5 py-0.5 rounded-lg mt-1.5',
-        style:{background:'rgba(35,185,129,0.05)',border:'1px solid rgba(35,185,129,0.18)',color:'rgba(35,185,129,0.85)'},
+        style:{background:'rgba(35,185,129,0.05)',border:'1px solid rgba(35,185,129,0.18)',color:'#23B981'},
       },
         React.createElement('span',null,'⧗'),
         React.createElement('span',{className:'tabular-nums'},`${todayData.cooldownMinSinceLoss}m since loss · slow down`),
@@ -17930,15 +17930,30 @@ function EntryPricingCard({taraCall}){
     if(!Number.isFinite(_take)||!Number.isFinite(_rest))return null;
     const _fee=0.07*(_take/100)*(1-_take/100)*100;
     const _save=(_take-_rest)+_fee;
+    // V13.4.301: rebuilt to the mockup's Entry Pricing panel -- a header rule,
+    //   then three hairline-divided cells (Take / Or rest at / Saves), each a
+    //   tiny-caps label over an 18px mono figure. It was previously one cramped
+    //   inner box-inside-a-box with the three figures run together on a single
+    //   line, which is the "box in a box" texture the brief set out to remove.
+    //   Saves keeps green: money kept is an outcome.
     return(
-      <div className="bg-[#0A0A0E] p-3 rounded-[10px] border border-[#1B1B22] shrink-0">
-        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[#050508] border border-[#2A2A34]">
-          <span className="text-[10px] uppercase tracking-[0.18em] font-bold shrink-0" style={{color:'rgba(255,255,255,0.55)'}}>Entry Pricing</span>
-          <div className="flex items-baseline gap-2 tabular-nums">
-            <span className="text-[11px]" style={{color:'rgba(255,255,255,0.55)'}}>take {_take.toFixed(0)}c</span>
-            <span style={{color:'rgba(255,255,255,0.25)'}}>·</span>
-            <span className="text-[12px] font-bold" style={{color:'rgba(255,255,255,0.92)'}}>rest {_rest.toFixed(0)}c</span>
-            <span className="text-[9px]" style={{color:'rgba(255,255,255,0.45)'}}>saves {_save.toFixed(1)}c</span>
+      <div className="rounded-[10px] border border-[#1B1B22] bg-[#0A0A0E] overflow-hidden shrink-0">
+        <div className="px-3.5 py-2 border-b border-[#16161c] flex items-baseline justify-between">
+          <span className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30">Entry pricing</span>
+          <span className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30">Kalshi {_dir.toLowerCase()}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-px" style={{background:'#16161c'}}>
+          <div className="px-4 py-3" style={{background:'#0A0A0E'}}>
+            <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30 mb-1.5">Take</div>
+            <div className="tabular-nums" style={{fontSize:'18px'}}>{_take.toFixed(0)}&cent;</div>
+          </div>
+          <div className="px-4 py-3" style={{background:'#0A0A0E'}}>
+            <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30 mb-1.5">Or rest at</div>
+            <div className="tabular-nums" style={{fontSize:'18px'}}>{_rest.toFixed(0)}&cent;</div>
+          </div>
+          <div className="px-4 py-3" style={{background:'#0A0A0E'}}>
+            <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30 mb-1.5">Saves</div>
+            <div className="tabular-nums" style={{fontSize:'18px',color:'#23B981'}}>{_save.toFixed(1)}&cent;</div>
           </div>
         </div>
       </div>
@@ -18062,7 +18077,7 @@ function ScheduleBySessionCard({taraCallLog}){
             <div className="flex-1 h-[5px] rounded-full bg-[#16161c] overflow-hidden">
               <div className="h-full rounded-full" style={{width:(r.n>0?r.wr:0)+'%',background:r.n<2?'rgba(237,237,237,0.15)':r.wr>=65?'#23B981':r.wr>=50?'rgba(35,185,129,0.6)':'rgba(232,69,94,0.6)'}}/>
             </div>
-            <span className="text-[10px] tabular-nums font-bold min-w-[30px] text-right" style={{color:r.n<2?'rgba(237,237,237,0.3)':r.wr>=65?'#23B981':r.wr>=50?'rgba(237,237,237,0.75)':'rgba(232,69,94,0.85)'}}>{r.n>0?r.wr.toFixed(0)+'%':'—'}</span>
+            <span className="text-[10px] tabular-nums font-bold min-w-[30px] text-right" style={{color:r.n<2?'rgba(237,237,237,0.3)':r.wr>=65?'#23B981':r.wr>=50?'rgba(237,237,237,0.75)':'#E8455E'}}>{r.n>0?r.wr.toFixed(0)+'%':'—'}</span>
             <span className="text-[9px] uppercase tracking-wider text-[#EDEDED]/30 min-w-[46px] text-right">n={r.n}</span>
           </div>
         ))}
@@ -18362,7 +18377,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               if(_n===0)return null;
               const _wins=_last30.filter(e=>e.result==='WIN').length;
               const _wr=Math.round((_wins/_n)*100);
-              const _color=_wr>=70?'rgb(35,185,129)':_wr>=60?'#23B981':'rgba(232,69,94,0.85)';
+              const _color=_wr>=70?'rgb(35,185,129)':_wr>=60?'#23B981':'#E8455E';
               const _bg=_wr>=70?'rgba(35,185,129,0.08)':_wr>=60?'rgba(35,185,129,0.08)':'rgba(232,69,94,0.06)';
               const _border=_wr>=70?'rgba(35,185,129,0.30)':_wr>=60?'rgba(35,185,129,0.30)':'rgba(232,69,94,0.22)';
               return <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-lg self-baseline tabular-nums" style={{color:_color,background:_bg,border:`1px solid ${_border}`}} title={`Tara's directional accuracy on last ${_n} resolved windows. Target: ≥70%. Excludes sit-outs.`}>WR · {_wr}% <span className="opacity-60 normal-case">(last {_n})</span></span>;
@@ -18394,7 +18409,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               const _arrow=_dominantDir==='UP'?'▲':'▼';
               // Only show when skewed (>55%) so we don't add noise when balanced
               if(_domPct<0.55)return null;
-              const _color=_warn?'rgba(232,69,94,0.95)':_domPct>0.65?'#23B981':'rgba(237,237,237,0.55)';
+              const _color=_warn?'#E8455E':_domPct>0.65?'#23B981':'rgba(237,237,237,0.55)';
               const _bg=_warn?'rgba(232,69,94,0.12)':_domPct>0.65?'rgba(35,185,129,0.08)':'rgba(237,237,237,0.04)';
               const _border=_warn?'rgba(232,69,94,0.40)':_domPct>0.65?'rgba(35,185,129,0.30)':'rgba(237,237,237,0.15)';
               return(
@@ -18444,7 +18459,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 style:{
                   background:snap.call==='UP'?'rgba(35,185,129,0.10)':'rgba(232,69,94,0.10)',
                   border:`1px solid ${snap.call==='UP'?'rgba(35,185,129,0.40)':'rgba(232,69,94,0.40)'}`,
-                  color:snap.call==='UP'?'rgba(35,185,129,0.95)':'rgba(232,69,94,0.95)',
+                  color:snap.call==='UP'?'#23B981':'#E8455E',
                   boxShadow:`0 0 12px ${snap.call==='UP'?'rgba(35,185,129,0.20)':'rgba(232,69,94,0.20)'}`,
                 },
               },`Got in on Tara's ${snap.call} call`)
@@ -18455,7 +18470,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                   style:{
                     background:'rgba(35,185,129,0.06)',
                     border:'1px solid rgba(35,185,129,0.25)',
-                    color:'rgba(35,185,129,0.85)',
+                    color:'#23B981',
                   },
                   title:'Tap to mark as exited',
                 },
@@ -18569,7 +18584,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           //   no-go-data (data failure) keeps the rose No-Trade Override styling.
           const _isEdgeWatch=snap.noGoCategory==='no-go-edge'||snap.tier==='no-go-edge'||snap.noGoCategory==='no-go-coinflip-late'||snap.tier==='no-go-coinflip-late';
           const _isHardOverride=(snap.wasOverriddenNoTrade||snap.wasOverriddenSitOut)&&!_isEdgeWatch;
-          const _color=_isHardOverride?'rgba(232,69,94,0.95)':T2_GOLD;
+          const _color=_isHardOverride?'#E8455E':T2_GOLD;
           const _bg=_isHardOverride?'rgba(232,69,94,0.10)':'rgba(35,185,129,0.10)';
           const _border=_isHardOverride?'rgba(232,69,94,0.35)':'rgba(35,185,129,0.28)';
           const _label=_isEdgeWatch?'Edge Watch'
@@ -19014,7 +19029,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           let _dcState,_dcMain,_dcSub,_dcCol;
           if(_hasCall){
             _dcState='LOCKED';
-            _dcCol=_dcLock.dir==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.95)';
+            _dcCol=_dcLock.dir==='UP'?'rgb(35,185,129)':'#E8455E';
             _dcMain=`LOCKED ${_dcLock.dir}`;
             _dcSub='call is in — do not trade against it';
           }else if(_dcLeft>_dcOpen){
@@ -19265,9 +19280,9 @@ function BestPracticesModal({open,onClose}){
           `4+ losses in a row triggers a 15min forced cooldown. The override exists but is psychologically expensive — tilt entries are statistically the worst trades you'll ever make. Take the break.`),
         _row('✗','rgb(232,69,94)','TIGHT-edge bucket with sub-50% WR',
           `Check the edge-bucket WR in the Performance card. If your TIGHT bucket is below 50%, every TIGHT trade is destroying capital. This filter alone often saves more than any other improvement.`),
-        _row('⚠','rgba(35,185,129,0.85)','Macro event imminent',
+        _row('⚠','#23B981','Macro event imminent',
           `When CPI/NFP/FOMC is within ~30 minutes, posterior models break down. The market is repricing on news, not orderflow. Sit out unless you have specific edge on the event.`),
-        _row('⚠','rgba(35,185,129,0.85)','Phase transition in progress',
+        _row('⚠','#23B981','Phase transition in progress',
           `Asia → EU open, EU → NY open are 15-30min windows where regime can flip violently. The phase pill above shows next transition — give those windows extra caution.`),
       ]),
 
@@ -19279,7 +19294,7 @@ function BestPracticesModal({open,onClose}){
           `Score 70+ means vol acceleration + volume spike + tape imbalance are all firing. Even when you're winning, this is when reversals happen. Be ready to exit.`),
         _row('🐋','rgba(168,85,247,0.85)','Whale prints opposing your position',
           `A $200K+ whale on the wrong side, especially in the last 60s, is the leading indicator of a late-window reversal. Watch the whale strip — if you see contrary prints stacking, exit.`),
-        _row('⤵','rgba(35,185,129,0.85)','Conviction FADING',
+        _row('⤵','#23B981','Conviction FADING',
           `In the DecisionalOverlay, the Conv chip shows BUILDING / STABLE / FADING. If it goes FADING (Tara's confidence dropped 5+ points since lock), her own model is losing confidence. That's your cue.`),
       ]),
 
@@ -19301,9 +19316,9 @@ function BestPracticesModal({open,onClose}){
           `Hard rule. Don't argue with it. The math says positions that hit -30% statistically continue down — the recovery rate is below your fee + slippage cost.`),
         _row('🛑','rgb(232,69,94)','Advisor: "Tara LOCKED — STALE"',
           `The conditions justifying the lock have inverted. Tara herself is telling you to exit. The exit-warning logic only fires after 30+ point posterior flip — by the time it fires, the trade is statistically lost.`),
-        _row('⚠','rgba(35,185,129,0.85)','In-loss for 3+ minutes',
+        _row('⚠','#23B981','In-loss for 3+ minutes',
           `Configure auto-suggest in Trading Settings. If you've been underwater for 3 minutes and price isn't recovering, the trade was likely wrong from start. Cut and re-evaluate.`),
-        _row('⚠','rgba(35,185,129,0.85)','Whale print opposing in last 60s',
+        _row('⚠','#23B981','Whale print opposing in last 60s',
           `Late-window whale spike against you is THE most common reversal cause. Even if Tara still says you should be winning, the path to expiry just got dangerous.`),
       ]),
 
@@ -19321,7 +19336,7 @@ function BestPracticesModal({open,onClose}){
       _section('Anti-tilt psychology',[
         _row('🛑','rgb(232,69,94)','Respect the cooldown',
           `4 losses in a row → 15min forced cooldown. Built-in for a reason: empirically, the trade right after a 4-loss streak has the worst WR you'll ever produce. The override exists only for genuine setups; never override out of frustration.`),
-        _row('⚠','rgba(35,185,129,0.85)','Recognize chase patterns',
+        _row('⚠','#23B981','Recognize chase patterns',
           `Common tilt: lose 2 in a row → take a tight-edge call you'd normally skip → lose → repeat. The edge-bucket filter blocks this; trust it.`),
         _row('—','rgba(237,237,237,0.65)','Wins also need management',
           `4+ win streak → don't size up. Mean reversion is real. The heater pill warns you not to give back gains by suddenly trading bigger.`),
@@ -19353,11 +19368,11 @@ function BestPracticesModal({open,onClose}){
 
       // 10. Auto-execution (V9.3.0+)
       _section('Auto-execution — when to use it',[
-        _row('⚡','rgba(35,185,129,0.95)','Default OFF, dry-run ON',
+        _row('⚡','#23B981','Default OFF, dry-run ON',
           `Auto-exec is opt-in. When you flip it on, dry-run is on by default — orders are simulated, never sent. Verify a full window in dry-run before flipping the live switch. Settings live in the Trading Settings modal under Kalshi Auto-Execution.`),
-        _row('⚡','rgba(35,185,129,0.95)','Conservative-but-aggressive config',
+        _row('⚡','#23B981','Conservative-but-aggressive config',
           `Highest-leverage setup: minTier=super-confluence, skipMarginalCaution=ON, lockStabilitySec=5, stopLossDeltaCents=30. Fires 1-3× per day on highest-conviction setups only. Lower volume, much higher WR per fire.`),
-        _row('⚡','rgba(35,185,129,0.95)','High-volume config',
+        _row('⚡','#23B981','High-volume config',
           `If you want her trading more: minTier=any, all assets/windows on, sizingMode=confidence with $5 low / $25 high. Fires on most windows. Higher noise, more loss-streak exposure — set tighter daily-loss caps to compensate.`),
         _row('⛔','#E8455E','Kill switch is in 3 places',
           `Top-bar pill (opens settings), Live Trade Coach status strip (always visible during a trade), and the big red button in settings. Engaging it instantly blocks new orders. Existing positions are NOT auto-closed — you decide whether to manually exit.`),
@@ -19747,12 +19762,15 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
       {/* V13.4.274: the picture of the same trade, between the decision and how it
           is going, because that is the order you actually read it in. Renders null
           without a strike or a price, so it never leaves an empty band. */}
-      <WindowStrikeChart
-        tickHistoryRef={tickHistoryRef}
-        targetMargin={targetMargin}
-        currentPrice={currentPrice}
-        timeState={timeState}
-      />
+      {/* V13.4.301 REMOVED. v296 added a SECOND WindowStrikeChart to the centre
+          price panel and argued the two placements answered different questions.
+          On screen they answer the same one: both charts plot the same series
+          from the same ref, so the page showed "this window vs strike", the same
+          strike, the same tick count and the same "below by 0bps" twice, side by
+          side, a column apart. The mockup has exactly one chart and it lives in
+          the centre panel under price/strike/depth -- the left column's THIS
+          TRADE panel is three text stages with no chart at all. The centre one
+          is now the only one, and it renders at every width. */}
 
       {/* ── 2 ── */}
       <Stage n="2" title="how it's going"
@@ -19839,7 +19857,7 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
         )}
         <div className="text-[12px] text-[#EDEDED]/45 mt-2 leading-snug">
           {_tp>0&&_tp<=TRAIL_ARM_C
-            ? <span style={{color:'rgba(232,69,94,0.85)'}}>Fixed target at {_tp}¢ fires before the trail can arm at {TRAIL_ARM_C}¢.</span>
+            ? <span style={{color:'#E8455E'}}>Fixed target at {_tp}¢ fires before the trail can arm at {TRAIL_ARM_C}¢.</span>
             : (_tp>0||_sl>0)
               ? <>Sells itself {TRAIL_GIVEBACK_C}¢ off the high, plus a fixed rule you set{_tp>0?' (take '+_tp+'¢)':''}{_sl>0?' (cut '+_sl+'¢)':''}.</>
               : <>Sells itself {TRAIL_GIVEBACK_C}¢ off the high. No fixed target.</>}
@@ -20270,7 +20288,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     const _toneStyles={
       urgent:{border:'rgba(232,69,94,0.50)',bg:'rgba(232,69,94,0.07)',accent:'rgb(232,69,94)',pulse:true},
       good:  {border:'rgba(35,185,129,0.40)',bg:'rgba(35,185,129,0.05)',accent:'rgb(35,185,129)',pulse:false},
-      watch: {border:'rgba(35,185,129,0.40)',bg:'rgba(35,185,129,0.05)',accent:'rgba(35,185,129,0.95)',pulse:false},
+      watch: {border:'rgba(35,185,129,0.40)',bg:'rgba(35,185,129,0.05)',accent:'#23B981',pulse:false},
       info:  {border:'rgba(147,197,253,0.30)',bg:'rgba(147,197,253,0.04)',accent:'rgba(147,197,253,0.85)',pulse:false},
     };
     // V13.4.263: panel shape shared with the rest of the interface, and the
@@ -20307,10 +20325,10 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             // Plain-language map for trade-coach context. Some are positive, some warn.
             const _waMap={
               TRENDING:{plain:'going one way',color:'rgb(35,185,129)',hint:'Direction is set — ride the trend'},
-              GRIND:{plain:'slow grind',color:'rgba(35,185,129,0.85)',hint:'Tight upward/downward drift, takes patience'},
+              GRIND:{plain:'slow grind',color:'#23B981',hint:'Tight upward/downward drift, takes patience'},
               'LATE-BREAK':{plain:'late breakout',color:'rgb(35,185,129)',hint:'Direction picked up late in window'},
-              WHIPSAW:{plain:'wild swings',color:'rgba(232,69,94,0.95)',hint:'Multiple reversals — no clean side'},
-              'SPIKE-FADE':{plain:'spike & fade',color:'rgba(232,69,94,0.85)',hint:'Big early move, then drifted back'},
+              WHIPSAW:{plain:'wild swings',color:'#E8455E',hint:'Multiple reversals — no clean side'},
+              'SPIKE-FADE':{plain:'spike & fade',color:'#E8455E',hint:'Big early move, then drifted back'},
               RANGE:{plain:'sideways range',color:'rgba(147,197,253,0.85)',hint:'Bounces between high and low'},
               DEAD:{plain:'dead/quiet',color:'rgba(237,237,237,0.55)',hint:'Barely moving — small ranges only'},
               NORMAL:{plain:'normal',color:'rgba(237,237,237,0.7)',hint:'Mid-range activity'},
@@ -20327,8 +20345,8 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded-lg',
             style:{
               color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(35,185,129)':
-                analysis.regime==='TRENDING DOWN'?'rgba(232,69,94,0.95)':
-                analysis.regime==='HIGH VOL CHOP'?'rgba(35,185,129,0.95)':
+                analysis.regime==='TRENDING DOWN'?'#E8455E':
+                analysis.regime==='HIGH VOL CHOP'?'#23B981':
                 'rgba(147,197,253,0.85)',
               background:'#0E0E12',
               border:'1px solid #24242E',
@@ -20347,10 +20365,10 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
         React.createElement('div',{className:'flex items-center gap-2 text-[10px] tabular-nums'},
           // V9.1.7: trajectory indicator in header — shows momentum direction with color
           _recentDir&&React.createElement('span',{
-            style:{color:_trajFor?'rgb(35,185,129)':_trajAgainst?'rgba(232,69,94,0.85)':'rgba(237,237,237,0.4)'},
+            style:{color:_trajFor?'rgb(35,185,129)':_trajAgainst?'#E8455E':'rgba(237,237,237,0.4)'},
             title:`Last 10s: ${_recent10sBps?Math.round(_recent10sBps):0}bps · ${_trajFor?'in your favor':_trajAgainst?'against you':'flat'}`,
           },_recentDir==='UP'?'▲':_recentDir==='DOWN'?'▼':'▬',_recent10sBps?Math.round(_recent10sBps):0,'bps/10s'),
-          React.createElement('span',{style:{color:_winning?'rgb(35,185,129)':_losing?'rgba(232,69,94,0.85)':'rgba(237,237,237,0.6)'}},
+          React.createElement('span',{style:{color:_winning?'rgb(35,185,129)':_losing?'#E8455E':'rgba(237,237,237,0.6)'}},
             userPosition,' · ',_winning?'+':'',Math.round(_favoredGap),'bps · ',Math.floor(_secLeft/60),'m ',String(_secLeft%60).padStart(2,'0'),'s',
           ),
         ),
@@ -20470,13 +20488,13 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
         autoOrderState.status==='error'&&typeof onClearAutoOrder==='function'&&React.createElement('button',{
           onClick:onClearAutoOrder,
           className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider mr-1',
-          style:{color:'rgba(35,185,129,0.95)',border:'1px solid rgba(35,185,129,0.40)',background:'rgba(35,185,129,0.06)'},
+          style:{color:'#23B981',border:'1px solid rgba(35,185,129,0.40)',background:'rgba(35,185,129,0.06)'},
           title:'Dismiss the error state. Auto-exec will be eligible to fire on the next window.',
         },'✕ Clear'),
         onKillSwitch&&React.createElement('button',{
           onClick:onKillSwitch,
           className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider',
-          style:killSwitchEngaged?{color:'#E8455E',background:'rgba(232,69,94,0.20)',border:'1px solid rgba(232,69,94,0.50)'}:{color:'rgba(232,69,94,0.85)',border:'1px solid rgba(232,69,94,0.30)'},
+          style:killSwitchEngaged?{color:'#E8455E',background:'rgba(232,69,94,0.20)',border:'1px solid rgba(232,69,94,0.50)'}:{color:'#E8455E',border:'1px solid rgba(232,69,94,0.30)'},
         },killSwitchEngaged?'KILLED':'⛔ Kill'),
       ),
       React.createElement('div',{className:'p-2 sm:p-3 space-y-1.5'},
@@ -21323,7 +21341,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 style:{
                   background:'rgba(35,185,129,0.06)',
                   border:'1px solid rgba(35,185,129,0.20)',
-                  color:'rgba(35,185,129,0.85)',
+                  color:'#23B981',
                 },
                 title:'Highest WR, lowest volume. Confluence+ trades only. ~72-75% WR target. PRE-V10.2.x calibration.',
               },
@@ -21488,8 +21506,8 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               }),
               React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
                 const _c=Number(autoExecSettings?.autoExitOffer)||0;
-                if(_c===0)return 'rgba(35,185,129,0.85)';
-                if(_c<=TRAIL_ARM_C)return 'rgba(232,69,94,0.95)';
+                if(_c===0)return '#23B981';
+                if(_c<=TRAIL_ARM_C)return '#E8455E';
                 return 'rgba(237,237,237,0.40)';
               })()}},(()=>{
                 const _c=Number(autoExecSettings?.autoExitOffer)||0;
@@ -21511,8 +21529,8 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               }),
               React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
                 const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
-                if(_c===0)return 'rgba(35,185,129,0.85)';
-                if(_c>=30)return 'rgba(232,69,94,0.95)';
+                if(_c===0)return '#23B981';
+                if(_c>=30)return '#E8455E';
                 return 'rgba(237,237,237,0.40)';
               })()}},(()=>{
                 const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
@@ -21886,7 +21904,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         ),
         // ── V9.6.0: ADVANCED EXIT LOGIC ───────────────────────────────────
         React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(232,69,94,0.04)',border:'1px solid rgba(232,69,94,0.16)'}},
-          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'rgba(232,69,94,0.95)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#E8455E'}},
             React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Advanced exit logic'),
             React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'when to close'),
           ),
@@ -22755,7 +22773,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
         React.createElement('button',{
           onClick:()=>_stopMission('expired'),
           className:'flex-1 px-2 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider',
-          style:{background:'rgba(232,69,94,0.08)',color:'rgba(232,69,94,0.85)',border:'1px solid rgba(232,69,94,0.30)'},
+          style:{background:'rgba(232,69,94,0.08)',color:'#E8455E',border:'1px solid rgba(232,69,94,0.30)'},
         },'End mission'),
       ),
     ),
@@ -22963,7 +22981,7 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
   const _activeCfg=ASSET_CONFIG[currentAsset]||{};
   const _renderCard=({asset,cfg,dir,conf,phase,regime,kalshiForDir,kalshiYes,price,strike,isActive,committed,onClick,sampleCount,stale})=>{
     const _color=cfg.color||'#23B981';
-    const _dirColor=dir==='UP'?'rgb(35,185,129)':dir==='DOWN'?'rgba(232,69,94,0.95)':'rgba(237,237,237,0.55)';
+    const _dirColor=dir==='UP'?'rgb(35,185,129)':dir==='DOWN'?'#E8455E':'rgba(237,237,237,0.55)';
     return React.createElement('div',{
       onClick:onClick,
       className:`flex-1 min-w-0 rounded-lg overflow-hidden ${onClick?'cursor-pointer hover:bg-white/5':''} transition-colors`,
@@ -23017,7 +23035,7 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
         ),
         kalshiForDir!=null&&React.createElement('div',{className:'text-right shrink-0'},
           React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/45'},'kalshi ',dir||''),
-          React.createElement('div',{className:'text-[12px] tabular-nums font-bold',style:{color:kalshiForDir>=70?'rgb(35,185,129)':kalshiForDir>=55?'rgba(35,185,129,0.95)':kalshiForDir<=30?'rgba(232,69,94,0.95)':'rgba(237,237,237,0.65)'}},Math.round(kalshiForDir),'%'),
+          React.createElement('div',{className:'text-[12px] tabular-nums font-bold',style:{color:kalshiForDir>=70?'rgb(35,185,129)':kalshiForDir>=55?'#23B981':kalshiForDir<=30?'#E8455E':'rgba(237,237,237,0.65)'}},Math.round(kalshiForDir),'%'),
         ),
       ),
     );
@@ -23084,10 +23102,10 @@ function PreWindowPrepCard({timeState,bestWindowsToday,todayData,marketCtx}){
         React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:T2_GOLD}},'Next window in'),
         React.createElement('span',{className:'text-[11px] tabular-nums font-bold text-white'},_secLeft,'s'),
         _bestEntry&&React.createElement('span',{className:'text-[10px] text-[#EDEDED]/65'},'· this hour historical: ',_bestEntry.wr,'% (',_bestEntry.total,' trades)'),
-        todayData?.streak>=2&&React.createElement('span',{className:'text-[10px]',style:{color:todayData.streakType==='hot'?'rgba(35,185,129,0.85)':'rgba(35,185,129,0.85)'}},
+        todayData?.streak>=2&&React.createElement('span',{className:'text-[10px]',style:{color:todayData.streakType==='hot'?'#23B981':'#23B981'}},
           '· today: ',todayData.streak,todayData.streakType==='hot'?'W':'L',' streak',
         ),
-        _isMacroSoon&&React.createElement('span',{className:'text-[10px] font-bold',style:{color:'rgba(232,69,94,0.85)'}},'· ⚠ macro event imminent'),
+        _isMacroSoon&&React.createElement('span',{className:'text-[10px] font-bold',style:{color:'#E8455E'}},'· ⚠ macro event imminent'),
       ),
     ),
   );
@@ -23123,7 +23141,7 @@ function LastLossPostmortem({todayData,taraCallLog,currentAsset}){
   // Color shifts for shock losses (purple — circumstantial, not signal failure)
   const _border=_isShock?'rgba(168,85,247,0.30)':'rgba(232,69,94,0.25)';
   const _bg=_isShock?'rgba(168,85,247,0.05)':'rgba(232,69,94,0.04)';
-  const _accent=_isShock?'rgba(168,85,247,0.95)':'rgba(232,69,94,0.95)';
+  const _accent=_isShock?'rgba(168,85,247,0.95)':'#E8455E';
   // Path summary line if metrics exist
   const _hasPath=_lastLoss.maxFavorableExcursionBps!=null||_lastLoss.last60sDriftBps!=null;
   return React.createElement('div',{
@@ -23196,7 +23214,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   const _deltaColor=_delta7d==null?'rgba(237,237,237,0.5)':
     _delta7d>=10?'rgb(35,185,129)':
     _delta7d>=-5?'rgba(237,237,237,0.7)':
-    _delta7d>=-12?'rgba(35,185,129,0.85)':
+    _delta7d>=-12?'#23B981':
     'rgb(232,69,94)';
   const _deltaLabel=_delta7d==null?null:
     _delta7d>=10?'hot':
@@ -23207,7 +23225,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   // WR color helper (shared)
   const _wrColor=(w,total)=>{
     if(w==null||total<5)return'rgba(237,237,237,0.4)';
-    return w>=70?'rgb(35,185,129)':w>=55?'rgba(237,237,237,0.85)':w>=45?'rgba(35,185,129,0.85)':'rgb(232,69,94)';
+    return w>=70?'rgb(35,185,129)':w>=55?'rgba(237,237,237,0.85)':w>=45?'#23B981':'rgb(232,69,94)';
   };
 
   // ZONE 2 insight — single line, no dismiss button (just doesn't render when nothing applies)
@@ -23220,15 +23238,15 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
   if(strongTilt){insight=`Tilt: ${streak} losses in a row — step away for 15-30m`;insightColor='rgb(232,69,94)';}
   else if(heater){insight=`Heater: ${streak}-win streak — trust read, don't oversize`;insightColor='rgb(35,185,129)';}
   else if(_tightTotal>=8&&_tightWR<0.5&&_bigTotal>=5&&_bigWR>0.65){insight=`TIGHT edges ${Math.round(_tightWR*100)}% · BIG edges ${Math.round(_bigWR*100)}% — wait for clear edge`;insightColor='rgba(35,185,129,0.9)';}
-  else if(bestWindowsToday?.nextBest&&bestWindowsToday.nextBest.minsUntil<120){insight=`Best ${bestWindowsToday.dayName} hour (${String(bestWindowsToday.nextBest.hour).padStart(2,'0')}:00) in ${bestWindowsToday.nextBest.minsUntil}m · ${bestWindowsToday.nextBest.wr}% WR`;insightColor='rgba(35,185,129,0.85)';}
-  else if(_delta7d!=null&&_delta7d<=-12){insight=`Today running ${Math.abs(_delta7d).toFixed(0)}pp under 7d — regime may not fit current weights`;insightColor='rgba(35,185,129,0.85)';}
+  else if(bestWindowsToday?.nextBest&&bestWindowsToday.nextBest.minsUntil<120){insight=`Best ${bestWindowsToday.dayName} hour (${String(bestWindowsToday.nextBest.hour).padStart(2,'0')}:00) in ${bestWindowsToday.nextBest.minsUntil}m · ${bestWindowsToday.nextBest.wr}% WR`;insightColor='#23B981';}
+  else if(_delta7d!=null&&_delta7d<=-12){insight=`Today running ${Math.abs(_delta7d).toFixed(0)}pp under 7d — regime may not fit current weights`;insightColor='#23B981';}
 
   // Edge bucket micro-bars for Zone 2
   const _edgeBars=edgeBuckets?[
     {key:'big-edge',label:'BIG',color:'rgb(35,185,129)'},
     {key:'good-edge',label:'GOOD',color:'rgba(35,185,129,0.7)'},
-    {key:'tight',label:'TIGHT',color:'rgba(35,185,129,0.85)'},
-    {key:'late',label:'LATE',color:'rgba(232,69,94,0.85)'},
+    {key:'tight',label:'TIGHT',color:'#23B981'},
+    {key:'late',label:'LATE',color:'#E8455E'},
   ]:[];
 
   return React.createElement('div',{
@@ -23251,7 +23269,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
           style:{color:_deltaColor,background:`${_deltaColor.replace('rgb','rgba').replace(')',',0.10)')}`,border:`1px solid ${_deltaColor}33`},
           title:`Today ${wr}% vs 7-day ${wr7d.wr}% (${_delta7d>0?'+':''}${_delta7d.toFixed(0)}pp)`,
         },_deltaLabel),
-        bestWindowsToday&&bestWindowsToday.inBestWindow&&React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-lg font-bold shrink-0',style:{background:'rgba(35,185,129,0.10)',color:'rgba(35,185,129,0.95)',border:'1px solid rgba(35,185,129,0.25)'}},'★ best hour'),
+        bestWindowsToday&&bestWindowsToday.inBestWindow&&React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-lg font-bold shrink-0',style:{background:'rgba(35,185,129,0.10)',color:'#23B981',border:'1px solid rgba(35,185,129,0.25)'}},'★ best hour'),
       ),
       React.createElement('span',{className:'text-[#EDEDED]/30 text-xs shrink-0',style:{transition:'transform 0.2s',transform:expanded?'rotate(180deg)':'rotate(0deg)'}},'▾'),
     ),
@@ -23304,8 +23322,8 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
           [
             {key:'big-edge',label:'BIG',sub:'+15+',color:'rgb(35,185,129)'},
             {key:'good-edge',label:'GOOD',sub:'+5/15',color:'rgba(35,185,129,0.75)'},
-            {key:'tight',label:'TIGHT',sub:'±5',color:'rgba(35,185,129,0.85)'},
-            {key:'late',label:'LATE',sub:'<-5',color:'rgba(232,69,94,0.85)'},
+            {key:'tight',label:'TIGHT',sub:'±5',color:'#23B981'},
+            {key:'late',label:'LATE',sub:'<-5',color:'#E8455E'},
           ].map(({key,label,sub,color})=>{
             const b=edgeBuckets[key]||{wins:0,losses:0};
             const total=b.wins+b.losses;
@@ -23350,7 +23368,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
           bestWindowsToday.best.map(h=>React.createElement('span',{
             key:h.hour,
             className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-lg tabular-nums',
-            style:{background:'rgba(35,185,129,0.06)',color:'rgba(35,185,129,0.85)',border:'1px solid rgba(35,185,129,0.20)'},
+            style:{background:'rgba(35,185,129,0.06)',color:'#23B981',border:'1px solid rgba(35,185,129,0.20)'},
           },`${String(h.hour).padStart(2,'0')}:00 ${h.wr}%`)),
         ),
       ),
@@ -23435,11 +23453,11 @@ const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
   } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000&&displayError){
     _health='error';_color='rgb(232,69,94)';_bg='rgba(232,69,94,0.06)';_border='rgba(232,69,94,0.30)';_label='SYNC ERR';_dotPulse=true;
   } else if(status.state==='writing'&&displayWriting){
-    _health='writing';_color='rgba(35,185,129,0.95)';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.25)';_label='SYNCING';_dotPulse=true;
+    _health='writing';_color='#23B981';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.25)';_label='SYNCING';_dotPulse=true;
   } else if(status.listeners>0&&_lastOkAgo!=null&&_lastOkAgo<60000){
-    _health='healthy';_color='rgba(35,185,129,0.95)';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.20)';_label='SYNCED';
+    _health='healthy';_color='#23B981';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.20)';_label='SYNCED';
   } else {
-    _health='stale';_color='rgba(35,185,129,0.85)';_bg='rgba(35,185,129,0.04)';_border='rgba(35,185,129,0.20)';_label='SYNC IDLE';
+    _health='stale';_color='#23B981';_bg='rgba(35,185,129,0.04)';_border='rgba(35,185,129,0.20)';_label='SYNC IDLE';
   }
   const _title=[
     `Cloud sync: ${_health}`,
@@ -23471,13 +23489,13 @@ function MovementRiskPill({movementRisk}){
     _color='rgb(232,69,94)';_bg='rgba(232,69,94,0.12)';_border='rgba(232,69,94,0.45)';
     _label='RISK · EXTREME';_pulse=true;
   } else if(level==='ELEVATED'){
-    _color='rgba(35,185,129,0.95)';_bg='rgba(35,185,129,0.08)';_border='rgba(35,185,129,0.32)';
+    _color='#23B981';_bg='rgba(35,185,129,0.08)';_border='rgba(35,185,129,0.32)';
     _label='RISK · ELEVATED';
   } else if(level==='NORMAL'){
     _color='rgba(237,237,237,0.7)';_bg='rgba(237,237,237,0.04)';_border='rgba(237,237,237,0.10)';
     _label='RISK · NORMAL';
   } else {
-    _color='rgba(35,185,129,0.85)';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.20)';
+    _color='#23B981';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.20)';
     _label='CALM';
   }
   const _arrow=dirBias==='UP'?'↑':dirBias==='DOWN'?'↓':'';
@@ -23506,7 +23524,7 @@ const TodayPnLPill=React.memo(function TodayPnLPill({todayData,onClick}){
   if(!todayData||(todayData.wins+todayData.losses)===0)return null;
   const{wins,losses,wr,resolved,dollarPnL}=todayData;
   const _net=wins-losses;
-  const _color=_net>=2?'rgba(35,185,129,0.95)':_net>=0?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.85)';
+  const _color=_net>=2?'#23B981':_net>=0?'#23B981':'#E8455E';
   // V13.4.299: the tinted fill, border and drop shadow are gone. Today's W-L is
   //   a real outcome, so it keeps green/red on the NUMBERS -- the mockup does
   //   exactly that -- but the mockup carries it as bare text in the header rather
@@ -23540,7 +23558,7 @@ const StreakTiltPill=React.memo(function StreakTiltPill({todayData}){
     _bg='rgba(35,185,129,0.08)';_border='rgba(35,185,129,0.30)';
   } else if(streak>=2){
     _label=`${streak}${streakType==='hot'?'W':'L'}`;_icon=streakType==='hot'?'↗':'↘';
-    _color=streakType==='hot'?'rgba(35,185,129,0.85)':'rgba(35,185,129,0.85)';
+    _color=streakType==='hot'?'#23B981':'#23B981';
     _bg='rgba(237,237,237,0.04)';_border='rgba(237,237,237,0.10)';
   } else return null;
   // Tooltip explains the cooldown on tilt states
@@ -23570,7 +23588,7 @@ function RecentCallsHeatmap({recent,size=14,timeFormat}){
   return React.createElement('div',{className:'flex items-center gap-1 flex-wrap'},
     recent.map((e,i)=>{
       const _w=e.result==='WIN';
-      const _bg=_w?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.85)';
+      const _bg=_w?'#23B981':'#E8455E';
       const _t=(e.time||e.id)?_fmtTimeTz(new Date(e.time||e.id),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false}):''; // V10.9.28
       return React.createElement('div',{
         key:e.id||i,
@@ -23602,7 +23620,7 @@ function DailyPnLCurve({todayCalls,height=40}){
   const _y=(c)=>h-((c-minC)/range)*h;
   const _pathD='M '+points.map((p,i)=>`${_x(i).toFixed(1)} ${_y(p.cum).toFixed(1)}`).join(' L ');
   const _last=points[points.length-1].cum;
-  const _color=_last>0?'rgb(35,185,129)':_last<0?'rgb(232,69,94)':'rgba(35,185,129,0.85)';
+  const _color=_last>0?'rgb(35,185,129)':_last<0?'rgb(232,69,94)':'#23B981';
   // Zero baseline if range crosses zero
   const _zeroY=minC<=0&&maxC>=0?_y(0):null;
   return React.createElement('div',{className:'relative',style:{height:h}},
@@ -23656,7 +23674,7 @@ function VolatilitySparkline({tickHistoryRef,height=30}){
   const _avgVol=points.reduce((s,p)=>s+p.vol,0)/points.length;
   const _spike=_curVol>_avgVol*1.5;
   const _calm=_curVol<_avgVol*0.6;
-  const _color=_spike?'rgba(232,69,94,0.9)':_calm?'rgba(147,197,253,0.85)':'rgba(35,185,129,0.85)';
+  const _color=_spike?'rgba(232,69,94,0.9)':_calm?'rgba(147,197,253,0.85)':'#23B981';
   const _label=_spike?'EXPANDING':_calm?'COMPRESSING':'STEADY';
   return React.createElement('div',{className:'relative',style:{height:h}},
     React.createElement('svg',{viewBox:`0 0 ${w} ${h}`,preserveAspectRatio:'none',style:{width:'100%',height:h,display:'block'}},
@@ -23737,7 +23755,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
       const stats=_phaseStats[phaseKey];
       const N=stats?(stats.W+stats.L):0;
       const wr=N>=5?stats.W/N:null;
-      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(35,185,129,0.85)',tierBg='rgba(35,185,129,0.05)',tierBorder='rgba(35,185,129,0.20)';
+      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='#23B981',tierBg='rgba(35,185,129,0.05)',tierBorder='rgba(35,185,129,0.20)';
       let reasonBits=[];
       const _isDeadzone=prof?.deadzoneWarning===true;
       const _liqLow=prof?.liquidity==='LOW';
@@ -23753,7 +23771,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
         if(_liqLow&&_volComp)reasonBits.push('quiet & illiquid');
       }else if(_liqHigh&&!_volComp&&(wr==null||wr>=0.60)){
         tier='TRADE';tierLabel='TRADE';
-        tierColor='rgba(35,185,129,0.95)';tierBg='rgba(35,185,129,0.06)';tierBorder='rgba(35,185,129,0.30)';
+        tierColor='#23B981';tierBg='rgba(35,185,129,0.06)';tierBorder='rgba(35,185,129,0.30)';
         if(wr!=null)reasonBits.push(`you win ${Math.round(wr*100)}% here · ${N} trades`);
         else reasonBits.push('busy market, no priors yet');
       }else{
@@ -23822,14 +23840,14 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
   return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#050508',border:'1px solid #24242E'}},
     // Header
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},'Today\'s Schedule'),
+      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'#23B981'}},'Today\'s Schedule'),
       React.createElement('div',{className:'flex items-center gap-2'},
         React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/35'},_resolvedFmt.toUpperCase()),
         onOpenFullSchedule&&React.createElement('button',{
           onClick:onOpenFullSchedule,
           title:'Open full schedule',
           className:'text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5',
-          style:{color:'rgba(35,185,129,0.85)',borderColor:'rgba(35,185,129,0.30)'},
+          style:{color:'#23B981',borderColor:'rgba(35,185,129,0.30)'},
         },'⊕')
       )
     ),
@@ -23913,7 +23931,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
       const stats=_phaseStats[phaseKey];
       const N=stats?(stats.W+stats.L):0;
       const wr=N>=5?stats.W/N:null;
-      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(35,185,129,0.85)',tierBg='rgba(35,185,129,0.05)',tierBorder='rgba(35,185,129,0.20)';
+      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='#23B981',tierBg='rgba(35,185,129,0.05)',tierBorder='rgba(35,185,129,0.20)';
       const _isDeadzone=prof?.deadzoneWarning===true;
       const _liqLow=prof?.liquidity==='LOW';
       const _volComp=prof?.vol==='COMPRESSING';
@@ -23923,7 +23941,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
         tierColor='rgba(237,237,237,0.45)';tierBg='rgba(237,237,237,0.03)';tierBorder='rgba(237,237,237,0.10)';
       }else if(_liqHigh&&!_volComp&&(wr==null||wr>=0.60)){
         tier='TRADE';tierLabel='TRADE';
-        tierColor='rgba(35,185,129,0.95)';tierBg='rgba(35,185,129,0.06)';tierBorder='rgba(35,185,129,0.30)';
+        tierColor='#23B981';tierBg='rgba(35,185,129,0.06)';tierBorder='rgba(35,185,129,0.30)';
       }
       out.push({
         phaseKey,profile:prof,
@@ -23981,7 +23999,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
       React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid #24242E'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Trading Schedule'),
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},`${currentAsset} · Next 24h · ${_resolvedFmt.toUpperCase()}`)
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'#23B981'}},`${currentAsset} · Next 24h · ${_resolvedFmt.toUpperCase()}`)
         ),
         React.createElement('button',{
           onClick:onClose,
@@ -23994,17 +24012,17 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
         // Best/worst summary
         ranked.length>0&&React.createElement('div',{className:'mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3'},
           React.createElement('div',{className:'p-3 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.15)'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.16em] font-bold mb-2',style:{color:'rgba(35,185,129,0.85)'}},'Best phases (you)'),
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.16em] font-bold mb-2',style:{color:'#23B981'}},'Best phases (you)'),
             ranked.slice(0,3).map((r,i)=>React.createElement('div',{key:i,className:'flex items-baseline justify-between text-[11px] mb-1'},
               React.createElement('span',{className:'text-[#EDEDED]/75'},(PHASE_PROFILES[r.phase]?.label||r.phase)),
-              React.createElement('span',{className:'tabular-nums',style:{color:'rgba(35,185,129,0.85)'}},`${Math.round(r.wr*100)}% · ${r.N} trades`)
+              React.createElement('span',{className:'tabular-nums',style:{color:'#23B981'}},`${Math.round(r.wr*100)}% · ${r.N} trades`)
             ))
           ),
           React.createElement('div',{className:'p-3 rounded-lg',style:{background:'rgba(232,69,94,0.04)',border:'1px solid rgba(232,69,94,0.15)'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.16em] font-bold mb-2',style:{color:'rgba(232,69,94,0.85)'}},'Worst phases (you)'),
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.16em] font-bold mb-2',style:{color:'#E8455E'}},'Worst phases (you)'),
             ranked.slice(-3).reverse().map((r,i)=>React.createElement('div',{key:i,className:'flex items-baseline justify-between text-[11px] mb-1'},
               React.createElement('span',{className:'text-[#EDEDED]/75'},(PHASE_PROFILES[r.phase]?.label||r.phase)),
-              React.createElement('span',{className:'tabular-nums',style:{color:'rgba(232,69,94,0.85)'}},`${Math.round(r.wr*100)}% · ${r.N} trades`)
+              React.createElement('span',{className:'tabular-nums',style:{color:'#E8455E'}},`${Math.round(r.wr*100)}% · ${r.N} trades`)
             ))
           )
         ),
@@ -24024,7 +24042,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
               ),
               React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 leading-snug mb-1'},s.profile?.character||''),
               React.createElement('div',{className:'flex items-baseline gap-3 text-[10px] flex-wrap'},
-                s.wr!=null?React.createElement('span',{className:'tabular-nums',style:{color:s.wr>=0.60?'rgba(35,185,129,0.85)':s.wr<0.50?'rgba(232,69,94,0.85)':'rgba(35,185,129,0.85)'}},`Your WR: ${Math.round(s.wr*100)}% (${s.W}W/${s.L}L)`):React.createElement('span',{className:'text-[#EDEDED]/35'},`No prior data yet`),
+                s.wr!=null?React.createElement('span',{className:'tabular-nums',style:{color:s.wr>=0.60?'#23B981':s.wr<0.50?'#E8455E':'#23B981'}},`Your WR: ${Math.round(s.wr*100)}% (${s.W}W/${s.L}L)`):React.createElement('span',{className:'text-[#EDEDED]/35'},`No prior data yet`),
                 s.profile?.liquidity&&React.createElement('span',{className:'text-[#EDEDED]/45'},`liq: ${s.profile.liquidity}`),
                 s.profile?.vol&&React.createElement('span',{className:'text-[#EDEDED]/45'},`vol: ${s.profile.vol}`),
                 s.profile?.coinFlipRisk&&React.createElement('span',{className:'text-[#EDEDED]/45'},`coin-flip: ${s.profile.coinFlipRisk}`)
@@ -24129,19 +24147,19 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         // Tone tiers based on actual win rate — confident vs proceed-with-caution
         let _tone,_label,_text,_color;
         if(_wr>=70){
-          _tone='positive';_label=`★ ${_curSession} is your zone`;_color='rgba(35,185,129,0.95)';
+          _tone='positive';_label=`★ ${_curSession} is your zone`;_color='#23B981';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). This is your strongest session — trade with confidence, can size up on strong setups.`;
         } else if(_wr>=60){
-          _tone='good';_label=`✓ ${_curSession} is profitable`;_color='rgba(35,185,129,0.85)';
+          _tone='good';_label=`✓ ${_curSession} is profitable`;_color='#23B981';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You're making money — trade normal size, normal selectivity.`;
         } else if(_wr>=50){
-          _tone='neutral';_label=`◇ ${_curSession} is breakeven`;_color='rgba(35,185,129,0.85)';
+          _tone='neutral';_label=`◇ ${_curSession} is breakeven`;_color='#23B981';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). Just barely breakeven — go smaller, only take strong setups.`;
         } else if(_wr>=40){
-          _tone='warning';_label=`⚠ ${_curSession} is unprofitable`;_color='rgba(35,185,129,0.95)';
+          _tone='warning';_label=`⚠ ${_curSession} is unprofitable`;_color='#23B981';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You're losing money in this session — half size or skip unless the setup is great.`;
         } else {
-          _tone='bad';_label=`✗ ${_curSession} is your weakness`;_color='rgba(232,69,94,0.95)';
+          _tone='bad';_label=`✗ ${_curSession} is your weakness`;_color='#E8455E';
           _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You usually lose in this session — better to skip until your numbers improve.`;
         }
         _sessionAdvice={tone:_tone,label:_label,text:_text,color:_color,wr:_wr,n:_n,session:_curSession};
@@ -24190,7 +24208,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           const _liqMap={EXTREME:'PEAK ACTIVITY',HIGH:'BUSY',MED:'MODERATE',LOW:'QUIET'};
           const _liqLabel=_liqMap[ctx.phase.liquidity]||ctx.phase.liquidity;
           return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',style:{
-            color:ctx.phase.liquidity==='EXTREME'?'rgb(35,185,129)':ctx.phase.liquidity==='HIGH'?'rgb(35,185,129)':ctx.phase.liquidity==='MED'?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.7)',
+            color:ctx.phase.liquidity==='EXTREME'?'rgb(35,185,129)':ctx.phase.liquidity==='HIGH'?'rgb(35,185,129)':ctx.phase.liquidity==='MED'?'#23B981':'rgba(232,69,94,0.7)',
             background:'#0E0E12',
           },title:`Liquidity: ${ctx.phase.liquidity}`},_liqLabel);
         })(),
@@ -24198,7 +24216,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           const _volMap={EXPANDING:'MOVES GROWING',STEADY:'CALM',COMPRESSING:'MOVES SHRINKING'};
           const _volLabel=_volMap[ctx.phase.vol]||ctx.phase.vol.toLowerCase();
           return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg hidden sm:inline-block',style:{
-            color:ctx.phase.vol==='EXPANDING'?'rgba(232,69,94,0.85)':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(237,237,237,0.55)',
+            color:ctx.phase.vol==='EXPANDING'?'#E8455E':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(237,237,237,0.55)',
             background:'#0E0E12',
           },title:`Volatility: ${ctx.phase.vol}`},_volLabel);
         })(),
@@ -24208,7 +24226,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',
           style:{
             color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(35,185,129)'
-              :analysis.regime==='TRENDING DOWN'?'rgba(232,69,94,0.95)'
+              :analysis.regime==='TRENDING DOWN'?'#E8455E'
               :'rgba(237,237,237,0.65)',
             background:'#0E0E12',
             border:'1px solid #24242E',
@@ -24220,7 +24238,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         currentStreak&&currentStreak.count>=3&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',
           style:{
-            color:currentStreak.type==='WIN'?'rgb(35,185,129)':'rgba(232,69,94,0.95)',
+            color:currentStreak.type==='WIN'?'rgb(35,185,129)':'#E8455E',
             background:currentStreak.type==='WIN'?'rgba(35,185,129,0.08)':'rgba(232,69,94,0.08)',
             border:`1px solid ${currentStreak.type==='WIN'?'rgba(35,185,129,0.25)':'rgba(232,69,94,0.25)'}`,
           },
@@ -24231,7 +24249,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         // V8.7: Deadzone pill — pinned visible if coin-flip phase
         ctx.phase.deadzoneWarning&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded-lg',
-          style:{color:'rgba(232,69,94,0.95)',background:'rgba(232,69,94,0.10)',border:'1px solid rgba(232,69,94,0.25)'},
+          style:{color:'#E8455E',background:'rgba(232,69,94,0.10)',border:'1px solid rgba(232,69,94,0.25)'},
           title:'This phase has poor edge. Skip or half-size.',
         },'⚠ deadzone'),
         // V10.9.7: speed-dial recommendation pill + auto/manual toggle REMOVED.
@@ -24256,7 +24274,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         },`you · ${_sessionAdvice.wr}%`),
         // Top caution if present (collapsed view)
         !expanded&&_topCaution&&React.createElement('span',{className:'text-[10px] truncate min-w-0',style:{
-          color:_topCaution.severity==='critical'?'rgba(232,69,94,0.95)':_topCaution.severity==='warning'?'rgba(35,185,129,0.85)':'rgba(237,237,237,0.55)',
+          color:_topCaution.severity==='critical'?'#E8455E':_topCaution.severity==='warning'?'#23B981':'rgba(237,237,237,0.55)',
         }},_topCaution.severity==='critical'?'⚠ ':_topCaution.severity==='warning'?'⚠ ':'· ',_topCaution.text),
       ),
       // Right: next transition countdown + expand chevron
@@ -24283,9 +24301,9 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           todaySessionWR:(typeof _todaySessionWR==='object'&&_todaySessionWR)?_todaySessionWR.wr:null,
           todaySessionN:(typeof _todaySessionWR==='object'&&_todaySessionWR)?_todaySessionWR.n:null,
         });
-        const _statusColor=_adaptive.status==='TRADE'?'rgba(35,185,129,0.95)'
-          :_adaptive.status==='OBSERVE'?'rgba(35,185,129,0.95)'
-          :'rgba(232,69,94,0.95)';
+        const _statusColor=_adaptive.status==='TRADE'?'#23B981'
+          :_adaptive.status==='OBSERVE'?'#23B981'
+          :'#E8455E';
         const _statusBg=_adaptive.status==='TRADE'?'rgba(35,185,129,0.08)'
           :_adaptive.status==='OBSERVE'?'rgba(35,185,129,0.08)'
           :'rgba(232,69,94,0.08)';
@@ -24352,9 +24370,9 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         className:'flex items-baseline gap-2 px-2.5 py-2 rounded-lg',
         style:{background:'rgba(232,69,94,0.08)',border:'1px solid rgba(232,69,94,0.30)'},
       },
-        React.createElement('span',{className:'shrink-0 text-base leading-tight',style:{color:'rgba(232,69,94,0.95)'}},'⚠'),
+        React.createElement('span',{className:'shrink-0 text-base leading-tight',style:{color:'#E8455E'}},'⚠'),
         React.createElement('div',{className:'flex-1 min-w-0'},
-          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-0.5',style:{color:'rgba(232,69,94,0.95)'}},'Coin-flip deadzone'),
+          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-0.5',style:{color:'#E8455E'}},'Coin-flip deadzone'),
           React.createElement('div',{className:'text-[#EDEDED]/75 leading-snug'},
             'This phase has historically poor edge. Skip or half-size unless you have a specific high-conviction setup.',
           ),
@@ -24385,7 +24403,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
       React.createElement('div',{className:'flex items-baseline justify-between gap-2 pb-1 border-b border-[#24242E]'},
         React.createElement('span',{className:'text-[8px] uppercase tracking-[0.14em] font-bold text-[#EDEDED]/30'},'Coin-flip risk'),
         React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider',style:{
-          color:ctx.phase.coinFlipRisk==='LOW'?'rgb(35,185,129)':ctx.phase.coinFlipRisk==='MEDIUM'?'rgba(35,185,129,0.95)':'rgba(232,69,94,0.95)',
+          color:ctx.phase.coinFlipRisk==='LOW'?'rgb(35,185,129)':ctx.phase.coinFlipRisk==='MEDIUM'?'#23B981':'#E8455E',
         }},ctx.phase.coinFlipRisk||'?'),
       ),
       // V8.7: Expected movement
@@ -24419,18 +24437,18 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         React.createElement('div',{className:'flex-1 space-y-1'},
           ctx.cautions.map((c,i)=>React.createElement('div',{key:i,className:'flex items-baseline gap-1.5'},
             React.createElement('span',{className:'shrink-0',style:{
-              color:c.severity==='critical'?'rgba(232,69,94,0.95)':c.severity==='warning'?'rgba(35,185,129,0.85)':'rgba(237,237,237,0.4)',
+              color:c.severity==='critical'?'#E8455E':c.severity==='warning'?'#23B981':'rgba(237,237,237,0.4)',
             }},c.severity==='critical'?'⚠':c.severity==='warning'?'!':'·'),
             React.createElement('span',{style:{
-              color:c.severity==='critical'?'rgba(232,69,94,0.85)':c.severity==='warning'?'rgba(35,185,129,0.75)':'rgba(237,237,237,0.6)',
+              color:c.severity==='critical'?'#E8455E':c.severity==='warning'?'rgba(35,185,129,0.75)':'rgba(237,237,237,0.6)',
             }},c.text),
           )),
         ),
       ),
       // Macro event detail if active
       ctx.macro.state!=='CLEAR'&&ctx.macro.event&&React.createElement('div',{className:'flex items-baseline gap-2 pt-1 border-t border-[#24242E]'},
-        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgba(232,69,94,0.85)'}},'Macro'),
-        React.createElement('span',{style:{color:'rgba(232,69,94,0.85)'}},
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'#E8455E'}},'Macro'),
+        React.createElement('span',{style:{color:'#E8455E'}},
           ctx.macro.event.name,' · ',ctx.macro.event.impact,' impact · state: ',ctx.macro.state,
           ctx.macro.minutesUntil!=null&&React.createElement('span',{className:'text-[#EDEDED]/55 ml-2'},
             ctx.macro.minutesUntil>0?`in ${ctx.macro.minutesUntil}m`:`${Math.abs(ctx.macro.minutesUntil)}m ago`,
@@ -24498,7 +24516,7 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
   },[taraCallLog,windowType]);
   const totalAcrossWindows=Array.isArray(taraCallLog)?taraCallLog.length:0;
   const _learnTotal=taraLearnings?.totalResolved||0;
-  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(35,185,129,0.95)'},LOSS:{bg:'rgba(232,69,94,0.18)',fg:'rgba(232,69,94,0.95)'},/*V13.4.203: sit-outs were GREEN, the same family as WIN, so a window Tara declined read as a window she won. Neutral now -- a sit-out is an absence of a trade, not an outcome, and only real outcomes get a signal colour.*/SITOUT:{bg:T2_SITOUT_BG,fg:T2_SITOUT_FG},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
+  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'#23B981'},LOSS:{bg:'rgba(232,69,94,0.18)',fg:'#E8455E'},/*V13.4.203: sit-outs were GREEN, the same family as WIN, so a window Tara declined read as a window she won. Neutral now -- a sit-out is an absence of a trade, not an outcome, and only real outcomes get a signal colour.*/SITOUT:{bg:T2_SITOUT_BG,fg:T2_SITOUT_FG},pending:{bg:'rgba(237,237,237,0.06)',fg:'rgba(237,237,237,0.5)'}};
   const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
   const _fmtTime=(ms)=>_fmtTimeTz(ms,timeFormat,{hour:'2-digit',minute:'2-digit'});
   return React.createElement(React.Fragment,null,
@@ -24802,9 +24820,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   },[taraCallLog,filter,assetFilter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
   /* V13.4.206: SITOUT was WIN-green here, so 'SIT OUT' rows in the record read as wins at a glance -- the single most confusing thing in the modal. Neutral: a sit-out is not an outcome. */
-  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(35,185,129,0.95)'}:r==='LOSS'?{color:'rgba(232,69,94,0.95)'}:r==='SITOUT'?{color:T2_SITOUT_FG}:{color:'rgba(237,237,237,0.4)'};
+  const _resultStyle=(r)=>r==='WIN'?{color:'#23B981'}:r==='LOSS'?{color:'#E8455E'}:r==='SITOUT'?{color:T2_SITOUT_FG}:{color:'rgba(237,237,237,0.4)'};
   /* V13.4.206: the fallback (SIT_OUT / unknown) was green as well. */
-  const _dirStyle=(d)=>d==='UP'?{color:'rgba(35,185,129,0.85)'}:d==='DOWN'?{color:'rgba(232,69,94,0.85)'}:{color:T2_SITOUT_FG};
+  const _dirStyle=(d)=>d==='UP'?{color:'#23B981'}:d==='DOWN'?{color:'#E8455E'}:{color:T2_SITOUT_FG};
   // V5.7.5: derive window period (e.g. "09:00–09:15") from windowId. windowId encodes the
   //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
   // V6.5.3: All time displays in this modal honor the parent's useLocalTime toggle.
@@ -25722,7 +25740,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
               background:'rgba(35,185,129,0.08)',
-              color:'rgba(35,185,129,0.85)',
+              color:'#23B981',
               border:'1px solid rgba(35,185,129,0.25)',
             },
             title:'Download call log as CSV for spreadsheet analysis',
@@ -25765,7 +25783,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
           React.createElement('span',{className:'text-base shrink-0'},'💾'),
           React.createElement('div',{className:'min-w-0'},
-            React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-[0.14em]',style:{color:'rgba(35,185,129,0.95)'}},'LOCAL MODE — Cloud sync paused until ~Jun 18'),
+            React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-[0.14em]',style:{color:'#23B981'}},'LOCAL MODE — Cloud sync paused until ~Jun 18'),
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 mt-0.5'},'Data lives in this browser only. Export JSON daily to avoid data loss.'),
           ),
         ),
@@ -25798,7 +25816,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             }catch(e){alert('Backup failed: '+(e.message||String(e)));}
           },
           className:'shrink-0 px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
-          style:{background:'rgba(35,185,129,0.15)',color:'rgba(35,185,129,0.95)',border:'1px solid rgba(35,185,129,0.35)'},
+          style:{background:'rgba(35,185,129,0.15)',color:'#23B981',border:'1px solid rgba(35,185,129,0.35)'},
           title:`Backup all ${taraCallLog.length} entries to JSON file`,
         },'💾 Backup Now'),
       ),
@@ -25834,7 +25852,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         //   grammar: green passed, gold needs attention, red did not verify.
         const _bg=_isError?'rgba(232,69,94,0.06)':_isWarn?'rgba(212,160,58,0.06)':'rgba(35,185,129,0.06)';
         const _border=_isError?'rgba(232,69,94,0.30)':_isWarn?'rgba(212,160,58,0.28)':'rgba(35,185,129,0.20)';
-        const _headerColor=_isError?'rgba(232,69,94,0.90)':_isWarn?'#D4A03A':'rgba(35,185,129,0.85)';
+        const _headerColor=_isError?'#E8455E':_isWarn?'#D4A03A':'#23B981';
         return React.createElement('div',{
         className:'mb-5 p-4 rounded-xl',
         style:{background:_bg,border:`1px solid ${_border}`},
@@ -25995,7 +26013,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             style:{background:_cardBg,border:`1px solid ${_cardBorder}`},
           },[
             React.createElement('div',{key:'detail',className:'flex flex-col gap-0.5 min-w-0 flex-1'},[
-              React.createElement('div',{key:'when',className:'text-[9px] uppercase tracking-wider',style:{color:_isUncertain?'rgba(35,185,129,0.85)':'rgba(237,237,237,0.45)'}},_when+' · '+_iss.kind+(_isUncertain?' · review':'')),
+              React.createElement('div',{key:'when',className:'text-[9px] uppercase tracking-wider',style:{color:_isUncertain?'#23B981':'rgba(237,237,237,0.45)'}},_when+' · '+_iss.kind+(_isUncertain?' · review':'')),
               React.createElement('div',{key:'d',className:'leading-snug',style:{color:'#EDEDED',wordBreak:'break-word'}},_iss.detail),
             ]),
             React.createElement('div',{key:'actions',className:'flex items-center gap-1.5 shrink-0'},[
@@ -26358,7 +26376,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   const _sitouts=_entries.filter(e=>e.result==='SITOUT').length;
                   const _resolved=_wins+_losses;
                   const _wr=_resolved>0?Math.round((_wins/_resolved)*100):null;
-                  const _wrColor=_wr==null?'rgba(237,237,237,0.4)':_wr>=70?'rgb(35,185,129)':_wr>=55?'rgba(237,237,237,0.85)':_wr>=45?'rgba(35,185,129,0.85)':'rgb(232,69,94)';
+                  const _wrColor=_wr==null?'rgba(237,237,237,0.4)':_wr>=70?'rgb(35,185,129)':_wr>=55?'rgba(237,237,237,0.85)':_wr>=45?'#23B981':'rgb(232,69,94)';
                   return React.createElement('div',{key:_dayKey},
                     // Sticky day header
                     React.createElement('div',{
@@ -26482,7 +26500,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                 React.createElement('span',{className:'text-[#EDEDED]/35 mr-1'},'→'),
                                 _closeFmt,
                               ),
-                              e.gapBps!=null&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:e.gapBps>=0?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.85)'}},formatSignedInt(e.gapBps)+' bps'),
+                              e.gapBps!=null&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:e.gapBps>=0?'#23B981':'#E8455E'}},formatSignedInt(e.gapBps)+' bps'),
                             ),
                             React.createElement('div',{className:'flex items-baseline gap-2 text-[#EDEDED]/35 flex-wrap',style:{fontSize:9}},
                               e.regime&&React.createElement('span',null,e.regime),
@@ -26821,10 +26839,10 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
             const _h=analysis.historicalAnalogs;
             const _wr=_h.analogWR;
             // Color: green if analogs strongly winning, amber if mixed, rose if losing
-            const _wrColor=_wr>=70?'rgba(35,185,129,0.95)':_wr>=55?'rgba(35,185,129,0.95)':_wr>=40?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.95)';
+            const _wrColor=_wr>=70?'#23B981':_wr>=55?'#23B981':_wr>=40?'#23B981':'#E8455E';
             const _wrBg=_wr>=70?'rgba(35,185,129,0.06)':_wr>=55?'rgba(35,185,129,0.06)':'rgba(232,69,94,0.06)';
             const _confLabel=_h.analogConfidence==='high'?'HIGH match':_h.analogConfidence==='medium'?'MEDIUM match':'LOW match';
-            const _confColor=_h.analogConfidence==='high'?'rgba(35,185,129,0.85)':_h.analogConfidence==='medium'?'rgba(35,185,129,0.85)':'rgba(237,237,237,0.55)';
+            const _confColor=_h.analogConfidence==='high'?'#23B981':_h.analogConfidence==='medium'?'#23B981':'rgba(237,237,237,0.55)';
             // Compare analog WR vs current posterior — flag disagreement
             const _post=analysis.rawProbAbove||50;
             const _postConfidence=analysis.lockInfo?.dir==='DOWN'?(100-_post):_post;
@@ -26843,7 +26861,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
                       <div className="text-[10px] text-[#EDEDED]/55">historical WR</div>
                     </div>
                     {_disagreement>=15&&(
-                      <div className="ml-auto text-[10px] text-right" style={{color:'rgba(35,185,129,0.85)'}}>
+                      <div className="ml-auto text-[10px] text-right" style={{color:'#23B981'}}>
                         <div className="uppercase tracking-wide font-bold">⚠ disagreement</div>
                         <div className="text-[#EDEDED]/65">posterior {_postConfidence.toFixed(0)}% · analogs {_wr.toFixed(0)}%</div>
                       </div>
@@ -26854,7 +26872,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
                     {_h.topK.slice(0,5).map((t,i)=>(
                       <div key={i} className="grid grid-cols-12 gap-2 text-[10px] tabular-nums items-baseline">
                         <span className="col-span-2 text-[#EDEDED]/45">sim {t.similarity.toFixed(2)}</span>
-                        <span className="col-span-1 font-bold" style={{color:t.result==='WIN'?'rgba(35,185,129,0.95)':'rgba(232,69,94,0.95)'}}>
+                        <span className="col-span-1 font-bold" style={{color:t.result==='WIN'?'#23B981':'#E8455E'}}>
                           {t.result==='WIN'?'W':'L'}
                         </span>
                         <span className="col-span-2 text-[#EDEDED]/65">{t.dir||'—'}</span>
@@ -27316,7 +27334,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
   const cellColor=(wr,n)=>{
     if(wr==null||n===0)return {bg:'rgba(237,237,237,0.04)',border:'rgba(237,237,237,0.08)',color:'rgba(237,237,237,0.3)'};
     if(wr>=70)return {bg:'rgba(35,185,129,0.10)',border:'rgba(35,185,129,0.30)',color:'#6FA98C'};
-    if(wr>=55)return {bg:'rgba(35,185,129,0.06)',border:'rgba(35,185,129,0.18)',color:'rgba(35,185,129,0.85)'};
+    if(wr>=55)return {bg:'rgba(35,185,129,0.06)',border:'rgba(35,185,129,0.18)',color:'#23B981'};
     if(wr>=45)return {bg:'rgba(237,237,237,0.04)',border:'rgba(237,237,237,0.10)',color:'rgba(237,237,237,0.6)'};
     if(wr>=30)return {bg:'rgba(201,125,74,0.10)',border:'rgba(201,125,74,0.30)',color:'#C97D4A'};
     return {bg:'rgba(232,69,94,0.10)',border:'rgba(232,69,94,0.30)',color:'rgba(232,69,94,0.72)'};
@@ -28069,7 +28087,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
           <span className={'text-[9px] text-[#EDEDED]/30 italic'}>{loading?'loading...':err?'macro only':'30s refresh'}</span>
           {/* V9.1.2: Expand to full news view */}
           {news.length>0&&(
-            <button onClick={()=>setExpandOpen(true)} title="Expand news feed" className="text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5" style={{color:'rgba(35,185,129,0.85)',borderColor:'rgba(35,185,129,0.30)'}}>⊕</button>
+            <button onClick={()=>setExpandOpen(true)} title="Expand news feed" className="text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5" style={{color:'#23B981',borderColor:'rgba(35,185,129,0.30)'}}>⊕</button>
           )}
         </div>
       </div>
@@ -28123,15 +28141,19 @@ function NewsFeedCard({timeFormat,pushToast}={}){
               return _fmtTimeTz(_d,timeFormat,{hour:'numeric',minute:'2-digit'});
             }catch(_){return null;}
           })();
-          const cls=hot?'p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20':'p-1.5 rounded-lg hover:bg-[#161616] border border-transparent';
+          // V13.4.301: a "hot" story no longer gets an amber-filled, amber-bordered
+          //   card. The mockup renders every headline the same way -- plain text
+          //   over a source line -- and lets the impact arrow carry the signal.
+          //   Boxing one story in colour made a single headline outshout the win
+          //   rate two panels over. Hot now only brightens the ink.
           return(
-            <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className={'block '+cls}>
-              <div className={'text-[10px] leading-tight flex items-start gap-1.5 '+(hot?'text-amber-300 font-semibold':'text-[#EDEDED]/70')}>
-                <span className={'shrink-0 font-bold text-xs leading-tight '+impactColor} title={impactTitle}>{impactArrow}</span>
-                <span className="min-w-0">{hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}</span>
+            <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className="block px-1.5 py-1 rounded-[6px] hover:bg-[#EDEDED]/[0.035]">
+              <div className={'text-[11px] leading-snug flex items-start gap-1.5 '+(hot?'text-[#EDEDED]/90':'text-[#EDEDED]/70')}>
+                <span className={'shrink-0 font-bold text-[11px] leading-snug '+impactColor} title={impactTitle}>{impactArrow}</span>
+                <span className="min-w-0">{n.title.slice(0,90)}{n.title.length>90?'...':''}</span>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className={'text-[9px] text-[#EDEDED]/40 uppercase tracking-wide'}>{n.source}</span>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={'text-[9px] text-[#EDEDED]/30 uppercase tracking-[0.15em] font-bold'}>{n.source}</span>
                 <span className={'text-[9px] text-[#EDEDED]/30'}>· {formatAge(n.time)}</span>
                 {_absTime&&<span className={'text-[9px] text-[#EDEDED]/30 tabular-nums'}>· {_absTime}</span>}
               </div>
@@ -28232,7 +28254,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
       React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid #24242E',background:'#101014'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Sync'),
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},'cross-device')
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'#23B981'}},'cross-device')
         ),
         React.createElement('button',{
           onClick:onClose,
@@ -28248,7 +28270,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#0E0E12',border:'1px solid rgba(35,185,129,0.30)'}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(237,237,237,0.55)'}},'Trading device'),
-            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.14em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},'ALL DEVICES LIVE'),
+            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.14em] font-bold',style:{color:'#23B981'}},'ALL DEVICES LIVE'),
           ),
           React.createElement('div',{className:'text-[11px] text-[#EDEDED]/70'},
             'Every device runs the same live call. Whichever device commits a lock first wins, and all others adopt that exact lock within about a second, so the direction is identical everywhere.'
@@ -28276,12 +28298,12 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         //   Personal scorecard is LOCAL to this device only — not synced.
         React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#0E0E12',border:`1px solid ${_hasDrift?'rgba(232,69,94,0.30)':'rgba(237,237,237,0.08)'}`}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:_hasDrift?'rgba(232,69,94,0.95)':'rgba(237,237,237,0.55)'}},_hasDrift?'⚠ DRIFT DETECTED':'Sync diagnostic'),
+            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:_hasDrift?'#E8455E':'rgba(237,237,237,0.55)'}},_hasDrift?'⚠ DRIFT DETECTED':'Sync diagnostic'),
             React.createElement('button',{
               onClick:_runDiag,
               disabled:diagLoading,
               className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5 disabled:opacity-50',
-              style:{color:'rgba(35,185,129,0.85)',borderColor:'rgba(35,185,129,0.30)'},
+              style:{color:'#23B981',borderColor:'rgba(35,185,129,0.30)'},
             },diagLoading?'reading…':'↻ refresh')
           ),
           // === SHARED SECTION (cloud-synced) ===
@@ -28339,7 +28361,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
           React.createElement('div',{className:'pt-3',style:{borderTop:'1px solid #24242E'}},
             React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
               React.createElement('span',{className:'text-[10px]'},'⌂'),
-              React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},'Personal scorecard'),
+              React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'#23B981'}},'Personal scorecard'),
               React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40'},'this device only · never synced')
             ),
             React.createElement('div',{className:'text-[11px] tabular-nums text-[#EDEDED]/80'},
@@ -28389,7 +28411,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
           style:{background:'rgba(24,128,96,0.06)',border:'1px solid rgba(24,128,96,0.25)'},
         },
           React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
-            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(35,185,129,0.95)'}},baselineBusy?'Working\u2026':'Save as Baseline'),
+            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'#23B981'}},baselineBusy?'Working\u2026':'Save as Baseline'),
             React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40'},'this device \u2192 canonical')
           ),
           React.createElement('div',{className:'text-[11px] text-[#EDEDED]/65 leading-snug'},
@@ -28810,7 +28832,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
           React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-2'},
             regimeDir.map((r,i)=>{
               const wrPct=Math.round(r.wr*100);
-              const color=wrPct>=65?'rgb(35,185,129)':wrPct>=50?'rgba(35,185,129,0.85)':'rgb(232,69,94)';
+              const color=wrPct>=65?'rgb(35,185,129)':wrPct>=50?'#23B981':'rgb(232,69,94)';
               return React.createElement('div',{key:i,className:'flex items-center justify-between p-2 rounded-lg bg-[#050508] border border-[#24242E]'},
                 React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
                   React.createElement('span',{className:'text-[10px] font-bold',style:{color:r.dir==='UP'?'rgb(35,185,129)':'rgb(232,69,94)'}},r.dir==='UP'?'▲':'▼'),
@@ -28891,7 +28913,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
       React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid #24242E'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'News Feed'),
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},`${news.length} stories`)
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'#23B981'}},`${news.length} stories`)
         ),
         React.createElement('button',{
           onClick:onClose,
@@ -28920,7 +28942,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
           news.map((n,i)=>{
             const impact=inferNewsPriceImpact(n.title);
             const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':'·';
-            const impactColor=impact==='UP'?'rgba(35,185,129,0.95)':impact==='DOWN'?'rgba(232,69,94,0.95)':'rgba(237,237,237,0.30)';
+            const impactColor=impact==='UP'?'#23B981':impact==='DOWN'?'#E8455E':'rgba(237,237,237,0.30)';
             const impactLabel=impact==='UP'?'Likely bullish':impact==='DOWN'?'Likely bearish':'Mixed/unclear';
             // V9.1.4: absolute timestamp for expanded view
             const _absTime=(()=>{
@@ -31726,11 +31748,11 @@ function SpikeAlertOverlay({alert,dismiss,toggleSound,soundEnabled,requestNotify
   // Color: green if locked+favorable, rose if locked+adverse, gold if not locked
   let _color,_bg,_verdict;
   if(locked){
-    _color=favorable?'rgba(35,185,129,0.95)':'rgba(232,69,94,0.95)';
+    _color=favorable?'#23B981':'#E8455E';
     _bg=favorable?'rgba(35,185,129,0.10)':'rgba(232,69,94,0.10)';
     _verdict=favorable?'🚀 YOUR CALL WINNING — RIDE IT':'⚠️ MOVING AGAINST YOU — CONSIDER EXIT';
   }else{
-    _color='rgba(35,185,129,0.95)'; // brand gold — neutral attention
+    _color='#23B981'; // brand gold — neutral attention
     _bg='rgba(35,185,129,0.10)';
     _verdict=dir==='PUMP'?'🚀 SUDDEN PUMP — scan for entry':'🔻 SUDDEN DUMP — scan for entry';
   }
@@ -31995,63 +32017,57 @@ function SmartMoneyStrip({signals,lockDir}){
   const _allUp=_activeSides.length>=2&&_activeSides.every(s=>s==='UP');
   const _allDown=_activeSides.length>=2&&_activeSides.every(s=>s==='DOWN');
   const _consensusSide=_allUp?'UP':(_allDown?'DOWN':null);
+  // V13.4.301: header matched to the mockup -- a neutral tiny-caps title on the
+  //   left, "2 of 4 · consensus down" as plain text on the right. The title was
+  //   green (it is a section name, not an outcome) and the consensus read was a
+  //   bordered, tinted chip; only the direction word keeps a signal colour now.
   return React.createElement('div',{className:'mb-2'},
-    React.createElement('div',{className:'flex items-center gap-1.5 mb-1 px-1'},
-      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(35,185,129,0.85)'}},
-        'Smart Money'
+    React.createElement('div',{className:'flex items-baseline gap-1.5 mb-2 px-1'},
+      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30'},
+        'Smart money'
       ),
-      _activeCount>0&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40'},
-        '· '+_activeCount+'/4 active'
+      _activeCount>0&&React.createElement('span',{className:'text-[9px] uppercase tracking-[0.15em] font-bold text-[#EDEDED]/30'},
+        '· '+_activeCount+' of 4'
       ),
       _consensusSide&&React.createElement('span',{
-        className:'text-[9px] uppercase tracking-wider font-bold ml-auto px-1.5 py-0.5 rounded-lg',
-        style:{
-          color:_consensusSide==='UP'?'rgba(35,185,129,0.95)':'rgba(232,69,94,0.95)',
-          background:_consensusSide==='UP'?'rgba(35,185,129,0.10)':'rgba(232,69,94,0.10)',
-          border:`1px solid ${_consensusSide==='UP'?'rgba(35,185,129,0.35)':'rgba(232,69,94,0.35)'}`,
-        },
-      },`consensus: ${_consensusSide}`),
+        className:'text-[9px] uppercase tracking-[0.15em] font-bold ml-auto text-[#EDEDED]/30',
+      },
+        'consensus ',
+        React.createElement('span',{style:{color:_consensusSide==='UP'?'#23B981':'#E8455E'}},_consensusSide.toLowerCase()),
+      ),
     ),
-    React.createElement('div',{className:'grid grid-cols-4 gap-1.5'},
+    // V13.4.301: four hairline-divided cells over a #16161c ground, so the
+    //   divider IS the gap -- the mockup's treatment, and the same one Live
+    //   Feeds now uses. Replaces four separately-bordered, glowing tiles.
+    React.createElement('div',{className:'grid grid-cols-4 gap-px rounded-[10px] overflow-hidden',style:{background:'#16161c'}},
       _detectors.map(d=>{
         const active=d.signal.detected;
         const side=d.signal.side;
         // Color by alignment with lock direction (if locked) or neutral when scanning
-        let _color,_bg,_border;
+        // V13.4.301: the cell no longer carries its own fill, border or glow --
+        //   the hairline grid separates them. Colour now lives only on the
+        //   READING, which is the signal; the label stays a neutral tiny cap
+        //   like every other label on the page. An inactive detector is a plain
+        //   em-dash at 30% ink, exactly as the mockup shows Divergence and
+        //   Absorption.
+        let _color;
         if(active){
-          if(lockDir&&side){
-            const aligned=side===lockDir;
-            _color=aligned?'rgba(35,185,129,0.95)':'rgba(232,69,94,0.95)';
-            _bg=aligned?'rgba(35,185,129,0.08)':'rgba(232,69,94,0.08)';
-            _border=aligned?'rgba(35,185,129,0.40)':'rgba(232,69,94,0.40)';
-          }else{
-            _color='rgba(35,185,129,0.95)';
-            _bg='rgba(35,185,129,0.08)';
-            _border='rgba(35,185,129,0.35)';
-          }
+          _color=(lockDir&&side)?(side===lockDir?'#23B981':'#E8455E'):'#23B981';
         }else{
           _color='rgba(237,237,237,0.30)';
-          _bg='transparent';
-          _border='rgba(237,237,237,0.10)';
         }
         return React.createElement('button',{
           key:d.key,
           onClick:()=>setExpanded(expanded===d.key?null:d.key),
-          className:'px-2 py-1.5 rounded-lg text-left transition-all',
-          style:{background:_bg,border:`1px solid ${_border}`,boxShadow:active?`0 0 12px ${_border}`:'none'},
+          className:'px-3 py-2.5 text-left transition-colors hover:brightness-125',
+          style:{background:'#0A0A0E'},
           title:active?d.signal.reason:d.full+' — inactive',
         },
-          React.createElement('div',{className:'flex items-baseline justify-between gap-1'},
-            React.createElement('span',{className:'text-[10px] font-bold tracking-wider uppercase',style:{color:_color}},
-              d.label
-            ),
-            active&&side&&React.createElement('span',{
-              className:'text-[8px] uppercase tracking-wider font-bold',
-              style:{color:_color},
-            },side==='UP'?'↑':'↓'),
+          React.createElement('div',{className:'text-[9px] font-bold tracking-[0.15em] uppercase text-[#EDEDED]/30 mb-1.5'},
+            d.label
           ),
-          React.createElement('div',{className:'text-[8px] mt-0.5',style:{color:_color,opacity:active?0.7:0.4}},
-            active?Math.round(d.signal.score)+'%':'—'
+          React.createElement('div',{className:'tabular-nums',style:{fontSize:'16px',color:_color}},
+            active?((side==='UP'?'↑':side==='DOWN'?'↓':'')+Math.round(d.signal.score)+'%'):'—'
           ),
         );
       })
@@ -32408,10 +32424,10 @@ function DayAwareScheduleHeader({dayContext}){
       React.createElement('span',{key:'t'},`${holiday} — institutional flow may be lighter than usual`),
     ]):null,
     // Row 5: next strong / next weak window — quick glance ahead
-    upcomingBest?React.createElement('div',{key:'up',className:'text-[10px]',style:{color:'rgba(35,185,129,0.85)'}},
+    upcomingBest?React.createElement('div',{key:'up',className:'text-[10px]',style:{color:'#23B981'}},
       `▸ Next strong window: ${String(upcomingBest.hour).padStart(2,'0')}:00 (in ${upcomingBest.minsUntil}m) · ${(upcomingBest.wr*100).toFixed(0)}% WR (n=${upcomingBest.n})`
     ):null,
-    upcomingWorst?React.createElement('div',{key:'down',className:'text-[10px]',style:{color:'rgba(232,69,94,0.85)'}},
+    upcomingWorst?React.createElement('div',{key:'down',className:'text-[10px]',style:{color:'#E8455E'}},
       `▸ Caution window ahead: ${String(upcomingWorst.hour).padStart(2,'0')}:00 (in ${upcomingWorst.minsUntil}m) · ${(upcomingWorst.wr*100).toFixed(0)}% WR (n=${upcomingWorst.n})`
     ):null,
     // Expanded detail: full day ranking + best/worst hours today
@@ -33207,7 +33223,7 @@ function ScalperAdvisorPanel({
   };
 
   // ── SHARED "tara's advisor" HEADER ─────────────────────────────────────
-  const _readDirColor=_dir==='UP'?'rgb(35,185,129)':_dir==='DOWN'?'rgba(232,69,94,0.92)':'#EDEDED';
+  const _readDirColor=_dir==='UP'?'rgb(35,185,129)':_dir==='DOWN'?'#E8455E':'#EDEDED';
   const _readArrow=_dir==='UP'?'▲':_dir==='DOWN'?'▼':'·';
   const _headerEl=React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-3 border-b border-[#24242E]'},
     React.createElement('div',{className:'flex items-baseline gap-2'},
@@ -33347,7 +33363,7 @@ function ScalperAdvisorPanel({
   const _stopDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
   const _cutCents=_entryCents&&_stopDelta>0?(_entryCents-_stopDelta):null;
   const _cutLoss=_cutCents!=null?((_cutCents-_entryCents)*0.01*_contracts):null;
-  const _taraDirColor=_taraDir==='UP'?'rgb(35,185,129)':_taraDir==='DOWN'?'rgba(232,69,94,0.92)':'#EDEDED';
+  const _taraDirColor=_taraDir==='UP'?'rgb(35,185,129)':_taraDir==='DOWN'?'#E8455E':'#EDEDED';
   const _taraDirLabel=_taraDir==='UP'?'long up':_taraDir==='DOWN'?'long down':'flat';
 
   // V9.17.17: LIVE TRADE VALUES
@@ -33662,7 +33678,7 @@ function ScalperAdvisorPanel({
       return React.createElement('div',{
         key:'exit-line',
         className:'mt-2 text-[10px] leading-snug',
-        style:{color:_trailKilled?'rgba(232,69,94,0.85)':'rgba(237,237,237,0.42)'},
+        style:{color:_trailKilled?'#E8455E':'rgba(237,237,237,0.42)'},
       },_txt);
     })(),
     // P&L strip
@@ -33694,7 +33710,7 @@ function ScalperAdvisorPanel({
         if(!_haveAny)_pnl=null;
       }
       const _pnlSign=_pnl==null?'':_pnl>=0?'+':'';
-      const _pnlColor=_pnl==null?'rgba(237,237,237,0.55)':_pnl>0?'rgb(35,185,129)':_pnl<0?'rgba(232,69,94,0.92)':'rgba(237,237,237,0.65)';
+      const _pnlColor=_pnl==null?'rgba(237,237,237,0.55)':_pnl>0?'rgb(35,185,129)':_pnl<0?'#E8455E':'rgba(237,237,237,0.65)';
       // V10.2.9: show breakdown only when BOTH types exist today; otherwise the
       //   single-source line is unambiguous already.
       const _showBreakdown=_todayAuto.length>0&&_todayManual.length>0;
@@ -33724,7 +33740,7 @@ function ScalperAdvisorPanel({
   // ── ENTRY PROMPT ──────────────────────────────────────────────────────
   if(showEntryPrompt){
     const _sideLabel=showEntryPrompt==='LONG_YES'?'long yes':'long no';
-    const _sideColor=showEntryPrompt==='LONG_YES'?'rgb(35,185,129)':'rgba(232,69,94,0.92)';
+    const _sideColor=showEntryPrompt==='LONG_YES'?'rgb(35,185,129)':'#E8455E';
     return React.createElement('div',{
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #24242E'},
@@ -33804,10 +33820,10 @@ function ScalperAdvisorPanel({
     const _marketPx=scalperPosition.side==='LONG_YES'?_cur:(100-_cur);
     const _unrealizedPerContract=_marketPx-scalperPosition.entryCents;
     const _unrealizedTotal=_unrealizedPerContract*scalperPosition.contracts;
-    const _color=_unrealizedPerContract>=1?'rgb(35,185,129)':_unrealizedPerContract<=-1?'rgba(232,69,94,0.92)':'#EDEDED';
+    const _color=_unrealizedPerContract>=1?'rgb(35,185,129)':_unrealizedPerContract<=-1?'#E8455E':'#EDEDED';
     let _rec='hold';
     let _recDetail='Position open · monitoring for target, stop, or reversal.';
-    let _recColor='rgba(35,185,129,0.85)';
+    let _recColor='#23B981';
     if(_marketPx>=scalperPosition.suggestedTargetCents){
       _rec='take profit';
       _recDetail=`Target ${scalperPosition.suggestedTargetCents}¢ reached. Lock in +${_unrealizedPerContract.toFixed(0)}¢ per contract.`;
@@ -33815,17 +33831,17 @@ function ScalperAdvisorPanel({
     } else if(_marketPx<=scalperPosition.suggestedStopCents){
       _rec='cut loss';
       _recDetail=`Stop ${scalperPosition.suggestedStopCents}¢ reached. Exit now (-${Math.abs(_unrealizedPerContract).toFixed(0)}¢ per contract).`;
-      _recColor='rgba(232,69,94,0.92)';
+      _recColor='#E8455E';
     } else if(scalperRead?.dir&&((scalperPosition.side==='LONG_YES'&&scalperRead.dir==='DOWN')||(scalperPosition.side==='LONG_NO'&&scalperRead.dir==='UP'))&&_conviction>=70){
       _rec='consider exit';
       _recDetail=`Tape reversed against you (${_conviction}% conviction ${scalperRead.dir}). Consider closing.`;
-      _recColor='rgba(35,185,129,0.92)';
+      _recColor='#23B981';
     }
     const _holdSec=Math.round((Date.now()-scalperPosition.entryTime)/1000);
     if(_holdSec>=120&&Math.abs(_unrealizedPerContract)<3){
       _rec='close neutral';
       _recDetail=`Position stale (${Math.floor(_holdSec/60)}m ${_holdSec%60}s) with no progress.`;
-      _recColor='rgba(35,185,129,0.85)';
+      _recColor='#23B981';
     }
     return React.createElement('div',{
       className:'p-4 rounded-lg',
@@ -33869,7 +33885,7 @@ function ScalperAdvisorPanel({
     const _suggestedEntry=_suggestedSide==='LONG_YES'?Number(kalshiYesPrice)||50:(100-(Number(kalshiYesPrice)||50));
     const _target=_suggestedEntry+scalperSettings.targetCents;
     const _stop=_suggestedEntry-scalperSettings.stopCents;
-    const _sideColor=_suggestedSide==='LONG_YES'?'rgb(35,185,129)':'rgba(232,69,94,0.92)';
+    const _sideColor=_suggestedSide==='LONG_YES'?'rgb(35,185,129)':'#E8455E';
     const _sideLabel=_suggestedSide==='LONG_YES'?'long yes':'long no';
     return React.createElement('div',{
       className:'p-4 rounded-lg',
@@ -34007,7 +34023,7 @@ function ScalperAdvisorPanel({
         style:{background:'rgba(232,69,94,0.06)',border:'1px solid rgba(232,69,94,0.30)'},
       },
         React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-1'},
-          React.createElement('span',{className:'text-[10px] font-bold uppercase tracking-wider',style:{color:'rgba(232,69,94,0.95)'}},'⚠ Kalshi error · order not placed'),
+          React.createElement('span',{className:'text-[10px] font-bold uppercase tracking-wider',style:{color:'#E8455E'}},'⚠ Kalshi error · order not placed'),
           React.createElement('div',{className:'flex gap-1.5 shrink-0'},
             autoOrderState._diag&&React.createElement('button',{
               onClick:()=>{
@@ -34033,13 +34049,13 @@ ${_d.responseBody||'(empty)'}`;
                 }catch(_){}
               },
               className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider',
-              style:{color:'rgba(35,185,129,0.95)',border:'1px solid rgba(35,185,129,0.40)',background:'rgba(35,185,129,0.05)'},
+              style:{color:'#23B981',border:'1px solid rgba(35,185,129,0.40)',background:'rgba(35,185,129,0.05)'},
               title:'Copy full request + response details to clipboard',
             },'⧉ Copy'),
             typeof onClearAutoOrder==='function'&&React.createElement('button',{
               onClick:onClearAutoOrder,
               className:'px-2 py-0.5 rounded-lg text-[9px] uppercase font-bold tracking-wider',
-              style:{color:'rgba(232,69,94,0.95)',border:'1px solid rgba(232,69,94,0.40)',background:'rgba(232,69,94,0.05)'},
+              style:{color:'#E8455E',border:'1px solid rgba(232,69,94,0.40)',background:'rgba(232,69,94,0.05)'},
               title:'Dismiss this error so auto-exec / the manual button can fire on the next attempt.',
             },'✕ Clear'),
           ),
@@ -34118,7 +34134,7 @@ ${_d.responseBody||'(empty)'}`;
         (()=>{
           const _enteredDir=_liveValid?autoOrderState?.dir:null;
           const _enteredLabel=_enteredDir==='UP'?'long up':_enteredDir==='DOWN'?'long down':null;
-          const _enteredColor=_enteredDir==='UP'?'rgb(35,185,129)':_enteredDir==='DOWN'?'rgba(232,69,94,0.92)':'#EDEDED';
+          const _enteredColor=_enteredDir==='UP'?'rgb(35,185,129)':_enteredDir==='DOWN'?'#E8455E':'#EDEDED';
           const _diverges=_enteredDir&&_taraDir&&_enteredDir!==_taraDir;
           if(_liveValid&&_enteredDir){
             return React.createElement('div',{className:'py-2'},
@@ -34174,7 +34190,7 @@ ${_d.responseBody||'(empty)'}`;
           React.createElement('div',{key:'ex-pnl',className:'flex items-baseline justify-between py-2 border-t border-[#24242E]'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'result'),
             React.createElement('span',{className:'text-base tabular-nums font-medium',style:{
-              color:_liveRealCents===0?'#EDEDED':(_liveIsWin?'rgb(35,185,129)':'rgba(232,69,94,0.95)'),
+              color:_liveRealCents===0?'#EDEDED':(_liveIsWin?'rgb(35,185,129)':'#E8455E'),
               fontFamily:'IBM Plex Mono,ui-monospace,monospace',
             }},
               _liveRealCents===0?'flat · $0.00':(_liveIsWin?'profit':'loss')+' · '+(_liveRealDollars>=0?'+':'-')+'$'+Math.abs(_liveRealDollars).toFixed(2)+' ('+(_liveRealCents>=0?'+':'')+_liveRealCents+'¢/contract)',
@@ -34280,7 +34296,7 @@ ${_d.responseBody||'(empty)'}`;
                   border:'1px solid rgba(232,69,94,0.30)',
                 },
               },
-                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'rgba(232,69,94,0.95)'}},'⚠ auto-exec will sit out'),
+                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#E8455E'}},'⚠ auto-exec will sit out'),
                 React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(237,237,237,0.85)'}},_previewSitOutReason),
                 React.createElement('div',{className:'text-[10px] mt-1',style:{color:'rgba(237,237,237,0.55)'}},'fix: raise max-bet, lower contracts/percent, or change sizing mode in settings'),
               ));
@@ -34344,7 +34360,7 @@ ${_d.responseBody||'(empty)'}`;
             if(_positionKnown&&_liveCurOurCents!=null){
               const _color=_liveUnrealCents==null||_liveUnrealCents===0
                 ?'#EDEDED'
-                :_liveUnrealCents>0?'rgb(35,185,129)':'rgba(232,69,94,0.92)';
+                :_liveUnrealCents>0?'rgb(35,185,129)':'#E8455E';
               const _arrow=_liveUnrealCents==null?'':_liveUnrealCents>0?'↑':_liveUnrealCents<0?'↓':'→';
               const _pnl=_liveUnrealCents!=null?`  ${_arrow}${_liveUnrealCents>=0?'+':''}${_liveUnrealCents}¢ = ${_liveUnrealDollars>=0?'+':'-'}$${Math.abs(_liveUnrealDollars).toFixed(2)}`:'';
               _rows.push(_renderTip(
@@ -34412,7 +34428,7 @@ ${_d.responseBody||'(empty)'}`;
               _rows.push(React.createElement('div',{
                 key:'sl-warning',
                 className:'pt-2 mt-1 border-t border-rose-500/30 text-[10px]',
-                style:{color:'rgba(232,69,94,0.95)',fontWeight:600},
+                style:{color:'#E8455E',fontWeight:600},
               },
                 `⚠ stop-loss delta ${_slDelta}¢ is very wide — `,
                 `position can lose ${Math.min(99,Math.round(_slDelta))}¢/contract `,
@@ -34429,7 +34445,7 @@ ${_d.responseBody||'(empty)'}`;
                     }
                   },
                   className:'underline ml-1 cursor-pointer',
-                  style:{color:'rgba(232,69,94,0.95)',background:'none',border:'none',padding:0,fontSize:'inherit'},
+                  style:{color:'#E8455E',background:'none',border:'none',padding:0,fontSize:'inherit'},
                 },'disable it (recommended)'),
               ));
             }
@@ -34459,7 +34475,7 @@ ${_d.responseBody||'(empty)'}`;
                 'stop',
                 `${_stopAt}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net after ${_fees.totalFeeCents}¢ fees · max risk)`,
                 `Auto-stop-loss. If our side drops ${_slDelta}¢ below entry (to ${_stopAt}¢), Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} salvage value. Stake: $${_stake.toFixed(2)}. Kalshi fees: ${_fees.entryFeeCents}¢ entry + ${_fees.exitFeeCents}¢ exit = ${_fees.totalFeeCents}¢. Net realized loss after fees: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. Most you can lose if the stop fires.`,
-                'rgba(232,69,94,0.92)',
+                '#E8455E',
               ));
             }else if(_positionKnown===false&&_slDelta===0){
               // No-stop-loss warning in pre-fill state
@@ -34489,7 +34505,7 @@ ${_d.responseBody||'(empty)'}`;
                   '⚠ partial fill',
                   `${_filled} of ${_requested} contracts filled`,
                   `Your order requested ${_requested} contracts but Kalshi only filled ${_filled} at your limit price (${readOrderState(autoOrderState).limitCents}¢). The remaining ${_requested-_filled} contract${_requested-_filled===1?'':'s'} may still fill if price comes back, or expire when the order TTL runs out (90s default). Exit math (target/stop) only applies to the ${_filled} actually filled. If you wanted exposure to all ${_requested}, you can manually buy more on Kalshi at the current offer.`,
-                  'rgba(35,185,129,0.95)',
+                  '#23B981',
                 ));
               }
             }
@@ -34511,7 +34527,7 @@ ${_d.responseBody||'(empty)'}`;
                   'exits when',
                   _bits.join(' · '),
                   `Tara will automatically close this position as soon as ANY of these conditions hit (whichever comes first):\n\n• ${_bits.join('\n• ')}\n\nIf none of them trigger before window close, the position settles at the strike: YES pays $1 if BTC ended above strike, $0 if below.`,
-                  'rgba(35,185,129,0.85)',
+                  '#23B981',
                 ));
               }
             }
@@ -34560,7 +34576,7 @@ ${_d.responseBody||'(empty)'}`;
                   React.createElement('div',{style:{color:_tpFires?'rgb(35,185,129)':'rgba(237,237,237,0.55)'}},
                     `TP @${_tp}¢ → ${_tpFires?'FIRES':`needs ≥${_tp}¢`}`,
                   ),
-                  _sl>0&&React.createElement('div',{style:{color:_slFires?'rgba(232,69,94,0.92)':'rgba(237,237,237,0.55)'}},
+                  _sl>0&&React.createElement('div',{style:{color:_slFires?'#E8455E':'rgba(237,237,237,0.55)'}},
                     `SL @-${_sl}¢ → drop ${_slDrop==null?'—':_slDrop+'¢'} · ${_slFires?'FIRES':`needs ≥${_sl}¢drop`}`,
                   ),
                   _sl===0&&React.createElement('div',{style:{color:'rgba(237,237,237,0.40)'}},'SL OFF (set stop-loss delta in settings)'),
@@ -34596,7 +34612,7 @@ ${_d.responseBody||'(empty)'}`;
         if(_s==='exited')return null;
         const _btnBg=_taraDir==='UP'?'rgba(35,185,129,0.12)':'rgba(232,69,94,0.12)';
         const _btnBorder=_taraDir==='UP'?'rgba(35,185,129,0.45)':'rgba(232,69,94,0.45)';
-        const _btnColor=_taraDir==='UP'?'rgb(35,185,129)':'rgba(232,69,94,0.95)';
+        const _btnColor=_taraDir==='UP'?'rgb(35,185,129)':'#E8455E';
         const _tier=_snapTier||taraCall?.tier||'';
         const _isLateTier=_tier==='time-cap-commit'||_tier==='timer-commit'||_tier==='no-go-edge'||_tier==='no-go-data'||_tier==='single';
         return React.createElement('div',{className:'pt-3 mt-3 border-t border-[#24242E]'},
@@ -34635,7 +34651,7 @@ ${_d.responseBody||'(empty)'}`;
             style:{
               background:'rgba(35,185,129,0.05)',
               border:'1px solid rgba(35,185,129,0.25)',
-              color:'rgba(35,185,129,0.85)',
+              color:'#23B981',
               letterSpacing:'0.02em',
             },
           },'✏ edit values for this window'),
@@ -34756,7 +34772,7 @@ ${_d.responseBody||'(empty)'}`;
             const _palette={
               emerald:{bg:'rgba(35,185,129,0.10)',br:'rgba(35,185,129,0.40)',co:'rgb(35,185,129)'},
               amber:{bg:'rgba(35,185,129,0.10)',br:'rgba(35,185,129,0.40)',co:'#23B981'},
-              rose:{bg:'rgba(232,69,94,0.10)',br:'rgba(232,69,94,0.40)',co:'rgba(232,69,94,0.95)'},
+              rose:{bg:'rgba(232,69,94,0.10)',br:'rgba(232,69,94,0.40)',co:'#E8455E'},
             }[manualOrderFeedback.color||'amber'];
             return React.createElement('div',{
               className:'mt-2 px-2 py-1.5 rounded-lg text-[10px] font-bold text-center',
@@ -39247,7 +39263,7 @@ function TaraApp(){
       const _flipShare=_soCosted>0?_soFlip/_soCosted:0;
       let _verdict,_col,_bg;
       if(_soCosted<4){_verdict='thin';_col='rgba(237,237,237,0.55)';_bg='rgba(237,237,237,0.06)';}
-      else if(_flipShare>0.40){_verdict='check gates';_col='rgba(35,185,129,0.95)';_bg='rgba(35,185,129,0.12)';}
+      else if(_flipShare>0.40){_verdict='check gates';_col='#23B981';_bg='rgba(35,185,129,0.12)';}
       else if(_flipShare<=0.20){_verdict='dead tape';_col='rgba(237,237,237,0.60)';_bg='rgba(237,237,237,0.06)';}
       else{_verdict='selective';_col='rgb(35,185,129)';_bg='rgba(35,185,129,0.10)';}
       _sitoutMix={verdict:_verdict,detail:_detail,color:_col,bg:_bg,priced:_soPriced,fade:_soFade,flip:_soFlip,noCost:_soNoCost,flipShare:_flipShare};
@@ -41947,7 +41963,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _kam=(typeof localStorage!=='undefined')?localStorage.getItem('taraKalshiAgreeMode'):null;
       _rows.kalshiAgreeMode={expected:'live',current:_kam,status:_kam==='live'?'✓':'✗ DRIFT'};
       if(_kam!=='live')_drifted++;
-      console.group('%c━━━ Hunter Drift Check ━━━','color:'+(_drifted===0?'rgb(35,185,129)':'rgba(232,69,94,0.95)')+';font-weight:bold');
+      console.group('%c━━━ Hunter Drift Check ━━━','color:'+(_drifted===0?'rgb(35,185,129)':'#E8455E')+';font-weight:bold');
       console.info(_drifted===0?'✓ All Hunter values match spec':`✗ ${_drifted} field${_drifted===1?'':'s'} drifted from Hunter spec`);
       console.table(_rows);
       if(_drifted>0){
@@ -53361,6 +53377,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         /* Major blocks get real separation from each other. */
         [data-tara-theme="simple"] main > * { margin-bottom: 0 !important; }
         [data-tara-theme="simple"] main .grid { gap: 22px !important; }
+        /* V13.4.301: the blanket rule above is for LAYOUT grids, which do want
+           real separation. It was also hitting the mockup's hairline-divider
+           grids, where the gap is not space -- it IS the divider: the cells sit
+           on a #16161c ground and a 1px gap lets exactly one hairline through.
+           At 22px those "hairlines" rendered as fat grey bars across Smart
+           Money, Entry Pricing and Live Feeds. Opting out by the gap-px class
+           keeps the layout rule intact for everything else. */
+        [data-tara-theme="simple"] main .grid.gap-px { gap: 1px !important; }
 
         /* Cards breathe. Dense data needs margin more than it needs small type. */
         [data-tara-theme="simple"] .p-3 { padding: 18px !important; }
@@ -53475,7 +53499,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         /* V13.4.226: :not([style*="color"]) added. This rule is for section
            HEADERS, but it matched every small uppercase tracked element — which
            includes the WIN / LOSS / SITOUT status pills in the log. Each of those
-           sets its own colour inline (WIN carries rgba(35,185,129,0.95)), and a
+           sets its own colour inline (WIN carries #23B981), and a
            stylesheet !important beats an inline style, so all three pills computed
            to the SAME muted white. Measured on the live page: WIN, LOSS and SITOUT
            all rendered rgba(255,255,255,0.58) at 10px, separated only by a
@@ -53511,13 +53535,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
 
         /* ── ACCENT COLORS — KNOCK BACK 8-12% ─────────────── */
-        [data-tara-theme="simple"] .text-rose-500 { color: rgba(232,69,94,0.92) !important; }
-        [data-tara-theme="simple"] .text-rose-400 { color: rgba(232,69,94,0.85) !important; }
+        [data-tara-theme="simple"] .text-rose-500 { color: #E8455E !important; }
+        [data-tara-theme="simple"] .text-rose-400 { color: #E8455E !important; }
         [data-tara-theme="simple"] .text-rose-300 { color: rgba(232,69,94,0.78) !important; }
-        [data-tara-theme="simple"] .text-emerald-400 { color: rgba(35,185,129,0.92) !important; }
-        [data-tara-theme="simple"] .text-emerald-300 { color: rgba(35,185,129,0.95) !important; }
-        [data-tara-theme="simple"] .text-amber-300 { color: rgba(35,185,129,0.90) !important; }
-        [data-tara-theme="simple"] .text-amber-400 { color: rgba(35,185,129,0.88) !important; }
+        [data-tara-theme="simple"] .text-emerald-400 { color: #23B981 !important; }
+        [data-tara-theme="simple"] .text-emerald-300 { color: #23B981 !important; }
+        [data-tara-theme="simple"] .text-amber-300 { color: #23B981 !important; }
+        [data-tara-theme="simple"] .text-amber-400 { color: #23B981 !important; }
         [data-tara-theme="simple"] .text-indigo-300 { color: rgba(176,176,176,0.85) !important; }
         [data-tara-theme="simple"] .text-indigo-400 { color: rgba(129,140,248,0.85) !important; }
 
@@ -54352,20 +54376,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           })()}
           {/* V13.4.296: compact price-vs-strike chart, matching the mockup's
               merged Price+Strike+Depth+Chart center-column panel.
-              WindowStrikeChart already existed (built for ThisTradeCard's
-              stage 1) -- called a second time here rather than moved, since
-              the two placements serve different questions (This Trade: is
-              THIS trade in the money; here: price at a glance alongside
-              depth/smart-money/tape/today). Self-contained, returns null with
-              no live tick history yet.
-              V13.4.298: wrapped hidden lg:block -- this call had no mobile
-              gate, so it showed a second time on mobile right below
-              ThisTradeCard's own copy (same chart, same data, no reason for a
-              user to see it twice). Desktop-only now, matching every other
-              new panel this dashboard rebuild added. */}
-          <div className="hidden lg:block">
-            <WindowStrikeChart tickHistoryRef={tickHistoryRef} targetMargin={targetMargin} currentPrice={currentPrice} timeState={timeState} height={110}/>
-          </div>
+              V13.4.301: this is now the ONLY WindowStrikeChart. The duplicate
+              inside ThisTradeCard is gone, so the hidden lg:block wrapper that
+              v298 added to stop the two colliding on mobile has been removed
+              too -- with nothing left to collide with, the chart belongs at
+              every width, which is also where the mockup puts it. */}
+          <WindowStrikeChart tickHistoryRef={tickHistoryRef} targetMargin={targetMargin} currentPrice={currentPrice} timeState={timeState} height={110}/>
         </div>
 
         {/* V13.4.293: Smart Money, relocated here from column 1 (it used to
@@ -55551,7 +55567,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
               {/* V8.7: SYNC ARCHITECTURE */}
               <section className={'bg-[#101014] border rounded-lg p-4'} style={{borderColor:'rgba(35,185,129,0.30)'}}>
-                <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(35,185,129,0.95)'}}>☁ Cross-Device Sync (V8.6)</h3>
+                <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'#23B981'}}>☁ Cross-Device Sync (V8.6)</h3>
                 <div className="space-y-2 text-xs leading-relaxed text-[#EDEDED]/70">
                   <p>All 11 sync paths use atomic Firestore transactions with smart merge functions:</p>
                   <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
