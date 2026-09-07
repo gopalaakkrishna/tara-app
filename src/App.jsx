@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.294-dashboard-mockup-rebuild-pass2';
-const TARA_VERSION_DISPLAY='Tara 13.4.294';
+const BASELINE_VERSION='2026.09.07-v13.4.295-dashboard-mockup-rebuild-pass3';
+const TARA_VERSION_DISPLAY='Tara 13.4.295';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17974,6 +17974,92 @@ function RecordCard({taraScorecards,windowType}){
   );
 }
 
+// V13.4.295: "Risk" -- the mockup's elevated-movement-risk banner. Didn't exist
+//   as a standalone panel before; MovementRiskPill (a small header pill) has
+//   the data but not the card chrome. movementRisk.predictive already reads
+//   "${dirBias} move likely next 30-60s" (the risk-scoring hook), so this is a
+//   wrapper around existing data, not a new prediction.
+function RiskBannerCard({movementRisk}){
+  if(!movementRisk)return null;
+  const{level,score,dirBias,predictive}=movementRisk;
+  if(level!=='ELEVATED'&&level!=='EXTREME')return null;
+  const _extreme=level==='EXTREME';
+  const _color=_extreme?'rgb(232,69,94)':T2_SITOUT_FG;
+  const _borderColor=_extreme?'rgba(232,69,94,0.35)':'rgba(212,160,58,0.35)';
+  const _headerBg=_extreme?'rgba(232,69,94,0.06)':T2_SITOUT_BG;
+  const _headerBorder=_extreme?'rgba(232,69,94,0.20)':'rgba(212,160,58,0.20)';
+  const _bodyText=predictive
+    ?predictive.charAt(0).toUpperCase()+predictive.slice(1)
+    :`Movement risk ${level.toLowerCase()} (${score}/100)`;
+  return(
+    <div className="rounded-[10px] border overflow-hidden shrink-0" style={{borderColor:_borderColor,background:'#0A0A0E'}}>
+      <div className="px-3 py-2 border-b flex items-baseline justify-between" style={{borderColor:_headerBorder,background:_headerBg}}>
+        <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_color}}>Risk</span>
+        <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_color}}>{level.charAt(0)+level.slice(1).toLowerCase()}</span>
+      </div>
+      <div className="px-3 py-2.5 text-[12.5px]" style={{color:'rgba(237,237,237,0.72)'}}>
+        {_bodyText}{dirBias?` (${dirBias==='UP'?'↑':'↓'})`:''}
+      </div>
+    </div>
+  );
+}
+
+// V13.4.295: "Schedule -- where she does well" -- the mockup's historical
+//   by-session win-rate panel. TradeScheduleStrip is forward-looking (what's
+//   coming up), not this. The computation already existed, buried in the Stats
+//   modal (StatsView) as a 2x2 grid; reused here verbatim, laid out as the
+//   mockup's horizontal bars instead.
+function ScheduleBySessionCard({taraCallLog}){
+  const completed=(taraCallLog||[]).filter(t=>t.result==='WIN'||t.result==='LOSS');
+  const bySession={};
+  completed.forEach(t=>{
+    const sess=t.session||'—';
+    if(!bySession[sess])bySession[sess]={W:0,L:0};
+    bySession[sess][t.result==='WIN'?'W':'L']++;
+  });
+  const _dom=(typeof getMarketSessions==='function'?getMarketSessions().dominant:null)||null;
+  const SESSIONS=[
+    {key:'ASIA',label:'Asia'},
+    {key:'EU',label:'Europe'},
+    {key:'US',label:'US'},
+    {key:'OFF-HOURS',label:'Off-hours'},
+  ];
+  const _rows=SESSIONS.map(s=>{
+    const v=bySession[s.key]||{W:0,L:0};
+    const n=v.W+v.L;
+    const wr=n>0?(100*v.W/n):0;
+    return{...s,n,wr,isCurrent:_dom===s.key};
+  });
+  const _best=_rows.filter(r=>r.n>=5).sort((a,b)=>b.wr-a.wr)[0]||null;
+  return(
+    <div className="bg-[#0A0A0E] rounded-[10px] border border-[#1B1B22] flex flex-col min-w-0">
+      <div className="px-3.5 py-2.5 border-b border-[#16161c] flex items-baseline justify-between gap-2">
+        <span className="text-[9px] uppercase tracking-[0.18em] font-bold text-[#EDEDED]/45">Schedule <span className="text-[#EDEDED]/25">· where she does well</span></span>
+        <span className="text-[9px] uppercase tracking-[0.18em] font-bold text-[#EDEDED]/30">By session</span>
+      </div>
+      <div className="py-1">
+        {_rows.map(r=>(
+          <div key={r.key} className={'flex items-center gap-3.5 px-3.5 py-2.5 border-b border-[#101015] last:border-b-0'+(r.isCurrent?' bg-emerald-500/[0.04]':'')}>
+            <span className="text-[12px] min-w-[64px]" style={{color:r.isCurrent?'#EDEDED':'rgba(237,237,237,0.65)'}}>{r.label}</span>
+            <div className="flex-1 h-[5px] rounded-full bg-[#16161c] overflow-hidden">
+              <div className="h-full rounded-full" style={{width:(r.n>0?r.wr:0)+'%',background:r.n<2?'rgba(237,237,237,0.15)':r.wr>=65?'#23B981':r.wr>=50?'rgba(35,185,129,0.6)':'rgba(232,69,94,0.6)'}}/>
+            </div>
+            <span className="text-[10px] tabular-nums font-bold min-w-[30px] text-right" style={{color:r.n<2?'rgba(237,237,237,0.3)':r.wr>=65?'#23B981':r.wr>=50?'rgba(237,237,237,0.75)':'rgba(232,69,94,0.85)'}}>{r.n>0?r.wr.toFixed(0)+'%':'—'}</span>
+            <span className="text-[9px] uppercase tracking-wider text-[#EDEDED]/30 min-w-[46px] text-right">n={r.n}</span>
+          </div>
+        ))}
+      </div>
+      {(_dom||_best)&&(
+        <div className="px-3.5 py-2.5 border-t border-[#16161c] flex items-center gap-2">
+          {_dom&&<span className="text-[9px] uppercase tracking-wider font-bold" style={{color:'#23B981'}}>Now · {SESSIONS.find(s=>s.key===_dom)?.label||_dom}</span>}
+          <span className="flex-1"/>
+          {_best&&<span className="text-[9px] uppercase tracking-wider text-[#EDEDED]/30">Best: {_best.label} ({_best.wr.toFixed(0)}%)</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // V13.4.294: added `desktopSplit` -- when true, this instance skips rendering
 //   Conviction / Entry Pricing / Record inline, because they're shown via the
 //   three components above instead, placed in their correct mockup columns.
@@ -28919,8 +29005,11 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           Hidden when localStorage 'taraCoachLeft'='1' (they render in ProjectionsCard). */}
       {!(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
         <div className="shrink-0">
+          {/* V13.4.295: HourlyLadderPanel moved out of here into its own bottom
+              row alongside the new Schedule card, matching the mockup (Hourly +
+              Schedule as a 2-column row below the main grid, not stacked inside
+              column 3). */}
           <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
-          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={onHourlyLock}/>
         </div>
       )}
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
@@ -53615,7 +53704,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
         <>
-        <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
               the first and largest thing on screen, because it is the only card that
@@ -54355,6 +54444,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               its own bottom row per the mockup, not column 3 -- deferred). */}
           <div className="flex flex-col gap-3 min-w-0">
           <RecordCard taraScorecards={taraScorecards} windowType={windowType}/>
+          <RiskBannerCard movementRisk={movementRisk}/>
           {/* V13.4.294: News + Live Feeds, relocated here from column 2. */}
           <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0'}>
             <T2Stamp code="FEED · 016"/>
@@ -54407,6 +54497,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}
             onHourlyLock={_onHourlyLock}/>
           </div>
+        </div>
+
+        {/* V13.4.295: HOURLY + SCHEDULE row -- matches the mockup's row below
+            the main 3-column grid. HourlyLadderPanel moved here from inside
+            RightPanel (column 3); ScheduleBySessionCard is new. lg:grid-cols-2
+            so both are visible together on desktop; single column on mobile,
+            same convention as the main grid above. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0">
+          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
+          <ScheduleBySessionCard taraCallLog={taraCallLog}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
