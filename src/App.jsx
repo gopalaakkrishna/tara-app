@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.307-autoexec-simple-panel';
-const TARA_VERSION_DISPLAY='Tara 13.4.307';
+const BASELINE_VERSION='2026.09.07-v13.4.308-autoexec-callwindow-redesign';
+const TARA_VERSION_DISPLAY='Tara 13.4.308';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19437,7 +19437,8 @@ function BestPracticesModal({open,onClose}){
 // direction all come from the committed snapshot when one exists.
 function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYesPrice,
                         autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat,
-                        tickHistoryRef,targetMargin,currentPrice,manualKalshiEntry}){
+                        tickHistoryRef,targetMargin,currentPrice,manualKalshiEntry,
+                        killSwitchEngaged,setShowTradingSettings}){
   // Declared BEFORE the early return: hooks must run in the same order on every
   //   render, and this component can return null on the very first one.
   const[whyOpen,setWhyOpen]=React.useState(false);
@@ -19609,6 +19610,13 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _placed=_haveFill&&_count>0;
   const _tp=Number(autoExecSettings&&autoExecSettings.autoExitOffer)||0;
   const _sl=Number(autoExecSettings&&autoExecSettings.stopLossDeltaCents)||0;
+  // V13.4.308: "make auto-exec visually simple, combine it into the call
+  //   window" -- the single highest-anxiety fact when watching a live window
+  //   is "is this actually armed right now", so that (and only that) moves
+  //   here, as one tappable word ahead of the exit-rule sentence it already
+  //   sits next to. Everything editable (the dials, Mission, presets) stays
+  //   in Trading Settings; tapping the word just opens it.
+  const _exec=computeAutoExecReadout(autoExecSettings,killSwitchEngaged);
 
   const Stage=({n,title,badge,badgeTone,children})=>(
     <div className="px-4 py-3.5 border-t border-[#16161c] first:border-t-0">
@@ -19773,6 +19781,13 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
           </div>
         )}
         <div className="text-[12px] text-[#EDEDED]/45 mt-2 leading-snug">
+          <span
+            className="uppercase font-bold tracking-[0.1em] cursor-pointer hover:opacity-75 transition-opacity"
+            style={{color:_exec.tone}}
+            onClick={()=>{if(typeof setShowTradingSettings==='function')setShowTradingSettings(true);}}
+            title="Open Trading Settings"
+          >{_exec.word}</span>
+          <span className="text-[#EDEDED]/25"> · </span>
           {_tp>0&&_tp<=TRAIL_ARM_C
             ? <span style={{color:'#E8455E'}}>Fixed target at {_tp}¢ fires before the trail can arm at {TRAIL_ARM_C}¢.</span>
             : (_tp>0||_sl>0)
@@ -19815,6 +19830,21 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 // so this is a region rather than one lucky cell.
 const TRAIL_ARM_C=90;
 const TRAIL_GIVEBACK_C=8;
+
+// V13.4.308: shared armed/dry/killed readout, extracted from the "Right now"
+//   banner in TradingSettingsModal (which now calls this instead of computing
+//   its own copy) so the same booleans/tone can also drive a compact indicator
+//   directly on Tara's own call card (ThisTradeCard, below) -- one source of
+//   truth, so the two surfaces can never quietly disagree about whether real
+//   orders are currently live.
+function computeAutoExecReadout(autoExecSettings,killSwitchEngaged){
+  const armed=!!autoExecSettings?.enabled;
+  const dry=autoExecSettings?.dryRun!==false;
+  const killed=!!killSwitchEngaged;
+  const tone=killed?'#E8455E':(armed&&!dry)?'#23B981':'#D4A03A';
+  const word=killed?'Killed':!armed?'Calling only':dry?'Armed · dry':'Armed · live';
+  return{armed,dry,killed,tone,word};
+}
 
 function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert,reversalRisk,onClearAutoOrder,liveCoachReversalRef}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
@@ -20497,9 +20527,10 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
       //   the old "Daily caps" controls did (they described enforcement that did
       //   not exist; removed in v13.4.254).
       (()=>{
-        const _armed=!!autoExecSettings?.enabled;
-        const _dry=autoExecSettings?.dryRun!==false;
-        const _killed=!!killSwitchEngaged;
+        // V13.4.308: sourced from the shared computeAutoExecReadout() helper
+        //   (also used by ThisTradeCard's compact indicator) instead of a
+        //   locally recomputed copy -- same formula, can't drift apart.
+        const{armed:_armed,dry:_dry,killed:_killed,tone:_tone}=computeAutoExecReadout(autoExecSettings,killSwitchEngaged);
         const _trailOn=typeof TRAIL_ARM_C!=="undefined";
         const _fixedTp=Number(autoExecSettings?.autoExitOffer)>0;
         const _fixedSl=Number(autoExecSettings?.stopLossDeltaCents)>0;
@@ -20509,7 +20540,6 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           :!_armed?"Calling only. Tara picks a side; you place the order."
           :_dry?"Armed, but practising. Orders are simulated, not sent to Kalshi."
           :"Armed and placing real orders.";
-        const _tone=_killed?"#E8455E":(_armed&&!_dry)?"#23B981":"#D4A03A";
         const _chip=(text,tone)=>React.createElement("span",{
           key:text,
           className:"text-[11px] px-2.5 py-1 rounded-md border",
@@ -22922,24 +22952,38 @@ function AutoExecSimplePanel({autoExecSettings,setAutoExecSettings,mission,setMi
 
   return React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#050508] border border-[#24242E]'},
     React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'Auto-Exec — Simple'),
-    React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
-      React.createElement('label',{className:'block'},
-        React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Take-profit (¢)'),
-        React.createElement('input',{
-          type:'number',min:0,max:99,step:1,value:_tpVal,
-          onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(0,Math.min(99,_num(e.target.value,0)))})),
-          className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-        }),
-        React.createElement('div',{className:'text-[9px] mt-1',style:{color:_tpColor}},_tpCaption),
+    // V13.4.308: was two separately-bordered input boxes; replaced with the
+    //   app's current "hairline grid" strip (same pattern as SmartMoneyStrip/
+    //   LiveFeedsCard -- gap-px over a #16161c background reads as a 1px
+    //   divider between #0A0A0E cells) so the two dials read as one clean
+    //   strip instead of two boxed form fields. Same onChange/clamp logic,
+    //   unchanged.
+    React.createElement('div',{className:'grid grid-cols-2 gap-px rounded-[10px] overflow-hidden mb-3',style:{background:'#16161c'}},
+      React.createElement('div',{className:'px-3 py-2.5',style:{background:'#0A0A0E'}},
+        React.createElement('div',{className:'text-[9px] uppercase tracking-[0.14em] text-[#EDEDED]/30 font-bold mb-1'},'Take-profit'),
+        React.createElement('div',{className:'flex items-baseline gap-1'},
+          React.createElement('input',{
+            type:'number',min:0,max:99,step:1,value:_tpVal,
+            onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(0,Math.min(99,_num(e.target.value,0)))})),
+            className:'w-10 bg-transparent text-[16px] font-bold tabular-nums focus:outline-none border-b border-transparent focus:border-[#2A2A34] transition-colors',
+            style:{color:_tpVal===0?'rgba(237,237,237,0.85)':_tpColor},
+          }),
+          React.createElement('span',{className:'text-[11px] text-[#EDEDED]/35'},'¢'),
+        ),
+        React.createElement('div',{className:'text-[9px] mt-1 leading-snug',style:{color:_tpColor}},_tpCaption),
       ),
-      React.createElement('label',{className:'block'},
-        React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Cut-loss (¢)'),
-        React.createElement('input',{
-          type:'number',min:0,max:50,step:1,value:_slVal,
-          onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
-          className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-        }),
-        React.createElement('div',{className:'text-[9px] mt-1',style:{color:_slColor}},_slCaption),
+      React.createElement('div',{className:'px-3 py-2.5',style:{background:'#0A0A0E'}},
+        React.createElement('div',{className:'text-[9px] uppercase tracking-[0.14em] text-[#EDEDED]/30 font-bold mb-1'},'Cut-loss'),
+        React.createElement('div',{className:'flex items-baseline gap-1'},
+          React.createElement('input',{
+            type:'number',min:0,max:50,step:1,value:_slVal,
+            onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
+            className:'w-10 bg-transparent text-[16px] font-bold tabular-nums focus:outline-none border-b border-transparent focus:border-[#2A2A34] transition-colors',
+            style:{color:_slVal===0?'rgba(237,237,237,0.85)':_slColor},
+          }),
+          React.createElement('span',{className:'text-[11px] text-[#EDEDED]/35'},'¢'),
+        ),
+        React.createElement('div',{className:'text-[9px] mt-1 leading-snug',style:{color:_slColor}},_slCaption),
       ),
     ),
     React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer gap-2 mb-2 pt-2',style:{borderTop:'1px solid #1B1B22'}},
@@ -53785,6 +53829,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             currentPrice={currentPrice}
             autoExecSettings={autoExecSettings}
             timeFormat={timeFormat}
+            killSwitchEngaged={killSwitchEngaged}
+            setShowTradingSettings={setShowTradingSettings}
           />
           {/* V13.4.294: Conviction + Entry Pricing, matching the mockup's left
               column order (This Trade -> Conviction -> Entry Pricing). Both
