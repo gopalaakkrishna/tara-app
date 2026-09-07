@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.298-dashboard-column-height-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.298';
+const BASELINE_VERSION='2026.09.07-v13.4.299-mockup-visual-language';
+const TARA_VERSION_DISPLAY='Tara 13.4.299';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17952,29 +17952,37 @@ function RecordCard({taraScorecards,windowType}){
   const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
   const total=(sc.wins||0)+(sc.losses||0);
   const wr=total>0?Math.round((sc.wins/total)*100):null;
+  // V13.4.299: rebuilt to the approved mockup. It used to lead with three
+  //   equally-sized coloured counts (green wins / red losses / gold sat-out),
+  //   which gave a sat-out tally the same visual weight as the win rate and put
+  //   three accent colours in one small panel. The mockup leads with the single
+  //   number that answers "is she any good" -- the win rate, big and green --
+  //   then drops the counts underneath at label size. Colour follows the one
+  //   accent rule: losses stay red because a loss is an outcome, sat-out is
+  //   neutral grey because sitting out is not a result.
   return(
-    <div className="bg-[#0A0A0E] p-3 rounded-[10px] border border-[#1B1B22] shrink-0">
-      <div className="flex justify-between items-baseline mb-1.5">
-        <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold">
-          Tara's Record <span className="text-[#EDEDED]/30">· {_TARA_RECORD_WINDOW_LABEL}</span>
-        </span>
-        {wr!==null&&<span className="text-[10px] tabular-nums text-[#EDEDED]/60">{wr}% win rate</span>}
-        {wr===null&&<span className="text-[10px] text-[#EDEDED]/35">no calls yet</span>}
+    <div className="rounded-[10px] border border-[#1B1B22] bg-[#0A0A0E] overflow-hidden shrink-0">
+      <div className="px-3.5 py-2 border-b border-[#16161c] flex items-baseline justify-between">
+        <span className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold">Record</span>
+        <span className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold">{_TARA_RECORD_WINDOW_LABEL}</span>
       </div>
-      <div className="flex items-end gap-3">
-        <div className="flex flex-col items-center">
-          <span className="text-2xl font-serif font-bold text-emerald-400 tabular-nums leading-none">{sc.wins||0}</span>
-          <span className="text-[8px] uppercase tracking-wider text-emerald-400/60 mt-1">wins</span>
-        </div>
-        <div className="h-7 w-px bg-[#EDEDED]/10"></div>
-        <div className="flex flex-col items-center">
-          <span className="text-2xl font-serif font-bold text-rose-400 tabular-nums leading-none">{sc.losses||0}</span>
-          <span className="text-[8px] uppercase tracking-wider text-rose-400/60 mt-1">losses</span>
-        </div>
-        <div className="h-7 w-px bg-[#EDEDED]/10"></div>
-        <div className="flex flex-col items-center">
-          <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_SITOUT_FG}}>{sc.sitouts||0}</span>
-          <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(212,160,58,0.65)'}}>sat out</span>
+      <div className="px-4 py-3.5">
+        {wr!==null
+          ?<div className="tabular-nums leading-none" style={{fontSize:'30px',color:'#23B981'}}>{wr}%</div>
+          :<div className="tabular-nums leading-none" style={{fontSize:'30px',color:'rgba(237,237,237,0.30)'}}>&mdash;</div>}
+        <div className="flex gap-4 mt-3.5">
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1">Won</div>
+            <div className="tabular-nums" style={{fontSize:'16px'}}>{sc.wins||0}</div>
+          </div>
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1">Lost</div>
+            <div className="tabular-nums" style={{fontSize:'16px',color:'#E8455E'}}>{sc.losses||0}</div>
+          </div>
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1">Sat out</div>
+            <div className="tabular-nums" style={{fontSize:'16px',color:'rgba(237,237,237,0.42)'}}>{sc.sitouts||0}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -17991,20 +17999,23 @@ function RiskBannerCard({movementRisk}){
   const{level,score,dirBias,predictive}=movementRisk;
   if(level!=='ELEVATED'&&level!=='EXTREME')return null;
   const _extreme=level==='EXTREME';
+  // V13.4.299: matched to the mockup's Risk panel. The tinted header fill is
+  //   gone -- the mockup carries caution purely as gold ink on the two labels
+  //   plus a warmed border, with the body text left plain. Gold is the mockup's
+  //   caution colour and this is the panel it was reserved for.
   const _color=_extreme?'rgb(232,69,94)':T2_SITOUT_FG;
-  const _borderColor=_extreme?'rgba(232,69,94,0.35)':'rgba(212,160,58,0.35)';
-  const _headerBg=_extreme?'rgba(232,69,94,0.06)':T2_SITOUT_BG;
-  const _headerBorder=_extreme?'rgba(232,69,94,0.20)':'rgba(212,160,58,0.20)';
+  const _borderColor=_extreme?'#3a2020':'#3a2a20';
+  const _headerBorder=_extreme?'#241616':'#241c16';
   const _bodyText=predictive
     ?predictive.charAt(0).toUpperCase()+predictive.slice(1)
     :`Movement risk ${level.toLowerCase()} (${score}/100)`;
   return(
     <div className="rounded-[10px] border overflow-hidden shrink-0" style={{borderColor:_borderColor,background:'#0A0A0E'}}>
-      <div className="px-3 py-2 border-b flex items-baseline justify-between" style={{borderColor:_headerBorder,background:_headerBg}}>
-        <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_color}}>Risk</span>
-        <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_color}}>{level.charAt(0)+level.slice(1).toLowerCase()}</span>
+      <div className="px-3.5 py-2 border-b flex items-baseline justify-between" style={{borderColor:_headerBorder}}>
+        <span className="text-[9px] uppercase tracking-[0.15em] font-bold" style={{color:_color}}>Risk</span>
+        <span className="text-[9px] uppercase tracking-[0.15em] font-bold" style={{color:_color}}>{level.charAt(0)+level.slice(1).toLowerCase()}</span>
       </div>
-      <div className="px-3 py-2.5 text-[12.5px]" style={{color:'rgba(237,237,237,0.72)'}}>
+      <div className="px-4 py-3 text-[12.5px]" style={{color:'rgba(237,237,237,0.72)'}}>
         {_bodyText}{dirBias?` (${dirBias==='UP'?'↑':'↓'})`:''}
       </div>
     </div>
@@ -23496,12 +23507,13 @@ const TodayPnLPill=React.memo(function TodayPnLPill({todayData,onClick}){
   const{wins,losses,wr,resolved,dollarPnL}=todayData;
   const _net=wins-losses;
   const _color=_net>=2?'rgba(35,185,129,0.95)':_net>=0?'rgba(35,185,129,0.85)':'rgba(232,69,94,0.85)';
-  const _bg=_net>=2?'rgba(35,185,129,0.08)':_net>=0?'rgba(35,185,129,0.06)':'rgba(232,69,94,0.06)';
-  const _border=_net>=2?'rgba(35,185,129,0.25)':_net>=0?'rgba(35,185,129,0.22)':'rgba(232,69,94,0.25)';
+  // V13.4.299: the tinted fill, border and drop shadow are gone. Today's W-L is
+  //   a real outcome, so it keeps green/red on the NUMBERS -- the mockup does
+  //   exactly that -- but the mockup carries it as bare text in the header rather
+  //   than as a raised pill.
   const _dollarLabel=dollarPnL!=null?(dollarPnL>=0?'+$':'-$')+Math.abs(dollarPnL).toFixed(2):null;
   return React.createElement('div',{
-    className:'flex items-baseline gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEDED]/3':''),
-    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'},
+    className:'flex items-baseline gap-1.5 sm:gap-2 shrink-0'+(onClick?' cursor-pointer':''),
     title:`Today: ${wins}W ${losses}L${todayData.sitouts>0?' '+todayData.sitouts+'so':''}${todayData.pending>0?' ('+todayData.pending+' pending)':''}${_dollarLabel?' · '+_dollarLabel:''}${onClick?' · click to configure bet size':''}`,
     onClick,
   },
@@ -24498,9 +24510,13 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
           taraLearnings&&React.createElement('button',{
             onClick:()=>setLearnOpen(true),
             title:`Adaptive learning · ${_learnTotal} resolved trades`,
-            className:'flex items-center gap-1 text-[9px] uppercase tracking-wider font-bold transition-colors '+(_learnTotal>=5?'text-amber-400/80 hover:text-amber-300':'text-[#EDEDED]/35 hover:text-[#EDEDED]/55'),
+            // V13.4.299: amber/indigo accents dropped. Neither a learning count
+            //   nor an "open" link is an outcome or a caution, so under the
+            //   mockup's one accent rule they are quiet label-grey like every
+            //   other piece of panel furniture.
+            className:'flex items-center gap-1 text-[9px] uppercase tracking-wider font-bold transition-colors text-[#EDEDED]/35 hover:text-[#EDEDED]/60',
           },'🧠 ',_learnTotal>=5?`learnings (${_learnTotal})`:`learning (${_learnTotal})`),
-          React.createElement('button',{onClick:()=>setOpen(true),className:'text-[9px] uppercase tracking-wider text-indigo-400/70 hover:text-indigo-300 font-bold'},totalAcrossWindows>0?'all →':'open ↗'),
+          React.createElement('button',{onClick:()=>setOpen(true),className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/35 hover:text-[#EDEDED]/60 font-bold'},totalAcrossWindows>0?'all →':'open ↗'),
         ),
       ),
       recent.length===0
@@ -24509,7 +24525,11 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
               ? 'No calls yet — record builds as windows resolve.'
               : `No ${windowType} calls yet — open the full record for everything.`
           )
-        : React.createElement('div',{className:'flex flex-wrap gap-1'},
+        // V13.4.299: was a wrap-around wall of coloured pills, one per call. The
+        //   mockup lists them as rows instead -- a coloured direction arrow, the
+        //   time in mono at 42% ink, then "UP · won" as plain text -- so colour
+        //   marks the outcome without the whole entry becoming a coloured object.
+        : React.createElement('div',{className:'flex flex-col -mx-1'},
             recent.map((e)=>{
               const r=e.result||'pending';
               const c=_resultColors[r]||_resultColors.pending;
@@ -24527,15 +24547,16 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
               }else if(r==='pending'&&(e.dir==='UP'||e.dir==='DOWN')){
                 _ddir=e.dir; // V13.4.10: a still-open real call gets its direction shown (dimmed), distinct from a sit-out's neutral dot
               }
+              const _outcomeWord=r==='WIN'?'won':r==='LOSS'?'lost':r==='SITOUT'?'sat out':'open';
               return React.createElement('div',{
                 key:e.id,
-                className:'flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[9px] tabular-nums font-bold',
-                style:{background:c.bg,color:c.fg},
+                className:'flex items-center gap-2.5 px-1 py-[5px]',
                 title:`${_fmtTime(e.time||e.id)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir||'?'} ${e.confidence||0}% · ${r}${e.gapBps!=null?` · ${formatSignedInt(e.gapBps)} bps`:''}`,
               },
-                React.createElement('span',null,_dirArrow(_ddir)),
-                React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time||e.id)),
-                e.result&&React.createElement('span',{className:'text-[8px]'},r==='WIN'?'✓':r==='LOSS'?'✗':'—'),
+                React.createElement('span',{className:'text-[10px] leading-none w-2.5 shrink-0',style:{color:c.fg}},_dirArrow(_ddir)),
+                React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:'rgba(237,237,237,0.42)'}},_fmtTime(e.time||e.id)),
+                React.createElement('span',{className:'text-[11px] truncate',style:{color:'rgba(237,237,237,0.66)'}},
+                  (_ddir||(r==='SITOUT'?'SIT OUT':'—'))+' · '+_outcomeWord),
               );
             })
           ),
@@ -28072,9 +28093,13 @@ function NewsFeedCard({timeFormat,pushToast}={}){
         {loading?(
           <div className={'text-[10px] text-[#EDEDED]/30 italic'}>Loading market news...</div>
         ):err&&news.length===0?(
-          <div className={'p-2 rounded-lg bg-amber-500/5 border border-amber-500/15'}>
-            <div className="text-[10px] text-amber-400/70 italic mb-1.5">News feed temporarily offline ({err}). Macro countdown above stays accurate.</div>
-            <button onClick={()=>{setLoading(true);setErr(null);try{fetchNewsRef.current?.();}catch(_){}}} className="text-[9px] uppercase tracking-[0.14em] font-bold px-2 py-0.5 rounded-lg border border-amber-500/30 text-amber-400/85 hover:bg-amber-500/10 transition-colors">↻ Retry</button>
+          // V13.4.299: the amber-tinted, amber-bordered box is gone. A feed
+          //   being down is worth saying plainly, not worth a coloured panel in
+          //   the middle of the right column -- the mockup has no tinted callout
+          //   boxes anywhere. Text carries it; the retry stays a plain control.
+          <div>
+            <div className="text-[10px] text-[#EDEDED]/45 italic mb-1.5">News feed temporarily offline ({err}). Macro countdown above stays accurate.</div>
+            <button onClick={()=>{setLoading(true);setErr(null);try{fetchNewsRef.current?.();}catch(_){}}} className="text-[9px] uppercase tracking-[0.15em] font-bold px-2 py-0.5 rounded-lg border border-[#2A2A34] text-[#EDEDED]/55 hover:text-[#EDEDED]/80 transition-colors">↻ Retry</button>
           </div>
         ):news.length===0?(
           <div className={'text-[10px] text-[#EDEDED]/30 italic'}>No news available</div>
@@ -28953,30 +28978,41 @@ function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
   const ls=bloomberg?.longShortRatio||1;
   return(
     <div>
-      <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
+      {/* V13.4.299: gold section label -> the mockup's neutral .k cap. Gold is
+          reserved for caution; a feed heading is neither a caution nor an
+          outcome. */}
+      <div className={'text-[9px] uppercase tracking-[0.15em] font-bold mb-2 text-[#EDEDED]/30'}>Live Feeds</div>
       {/* 2-up at every width. A 4-up variant was tried and measured: this column
           is ~420-470px on desktop, so four tiles land at 79px at 1280 and clip
           the "Funding" label. Two tiles give ~205px and read cleanly everywhere,
           including the full-width mobile card. */}
-      <div className="grid grid-cols-2 gap-2 mb-2">
-        <div className={'p-1.5 rounded-lg bg-[#050508] min-w-0'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
-          <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
+      {/* V13.4.299: the four tiles were separate rounded boxes floating on the
+          panel. The mockup divides them with hairlines instead -- a 1px grid gap
+          over a #16161c ground, so the divider IS the gap and the cells read as
+          one instrument rather than four chips. Only buy flow keeps green: OI,
+          funding and long/short were colouring every reading green-or-red as if
+          each were a won or lost trade, which is the accent inflation the brief
+          set out to remove. They are neutral now, and directional sign is
+          carried by the +/- that is already in the number. */}
+      <div className="grid grid-cols-2 gap-px mb-2 rounded-[10px] overflow-hidden" style={{background:'#16161c'}}>
+        <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
+          <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Buy Flow</div>
+          <div className="text-[15px] tabular-nums" style={{color:'#23B981'}}>{buyPct.toFixed(0)}%</div>
         </div>
-        <div className={'p-1.5 rounded-lg bg-[#050508] min-w-0'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>OI 5m</div>
-          <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
+        <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
+          <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>OI 5m</div>
+          <div className={'text-[15px] tabular-nums'}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
         </div>
-        <div className={'p-1.5 rounded-lg bg-[#050508] min-w-0'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Funding</div>
-          <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
+        <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
+          <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Funding</div>
+          <div className={'text-[15px] tabular-nums'}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
         </div>
-        <div className={'p-1.5 rounded-lg bg-[#050508] min-w-0'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>L/S</div>
-          <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
+        <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
+          <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Long/short</div>
+          <div className={'text-[15px] tabular-nums'}>{ls.toFixed(2)}</div>
         </div>
       </div>
-      <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-1'}>Recent Whales ($100K+)</div>
+      <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Recent Whales ($100K+)</div>
       <div className="max-h-28 overflow-y-auto space-y-0.5 text-[10px] font-mono">
         {whaleLog.length===0?(
           <div className={'text-[#EDEDED]/30 italic'}>No prints yet</div>
@@ -29022,7 +29058,8 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       )}
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
       <div className="shrink-0">
-        <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Score Breakdown</div>
+        {/* V13.4.299: gold -> neutral .k cap, same reasoning as Live Feeds. */}
+        <div className={'text-[9px] uppercase tracking-[0.15em] font-bold mb-2 text-[#EDEDED]/30'}>Score Breakdown</div>
         {(()=>{
           const sig=analysis?.rawSignalScores||{};
           const mtf=analysis?.mtfAlignment;
@@ -52659,8 +52696,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {/* LEFT: Logo + version + balance */}
           <div className="flex items-center gap-1.5 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
-            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-lg border'} style={{background:'rgba(35,185,129,0.10)',borderColor:'rgba(35,185,129,0.30)',color:'#23B981'}}>
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#23B981'}}></span>
+            {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
+                green dot. The build number is not an outcome, so under the
+                mockup's one-accent rule it has no claim on green at all -- and
+                the mockup renders it as plain mono text at 34% ink. */}
+            <span className={'hidden sm:flex items-center text-[10px] font-sans tabular-nums tracking-wider'} style={{color:'rgba(237,237,237,0.34)'}}>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
             {/* V13.1: telemetry-health badge - confirms rich-entry stamping after deploy */}
@@ -52670,18 +52710,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const _n=_real.length; if(_n===0)return null;
               const _rich=_real.filter(e=>!!e.taraVersion).length;
               const _pct=_rich/_n;
-              const _col=_pct>=0.9?{bg:'rgba(35,185,129,0.12)',bd:'rgba(35,185,129,0.35)',fg:'#23B981'}
-                        :_pct>=0.5?{bg:'rgba(212,162,76,0.12)',bd:'rgba(212,162,76,0.3)',fg:'rgba(255,255,255,0.62)'}
-                        :{bg:'rgba(232,69,94,0.12)',bd:'rgba(232,69,94,0.35)',fg:'#E8455E'};
+              // V13.4.299: chip chrome dropped, and green with it. Telemetry
+              //   health is not a trade outcome, so under the mockup's one-accent
+              //   rule a healthy reading is simply quiet neutral text. A degraded
+              //   stamp rate IS a caution, which is what gold is reserved for.
+              const _col=_pct>=0.9?{fg:'rgba(237,237,237,0.46)'}
+                        :_pct>=0.5?{fg:'#D4A03A'}
+                        :{fg:'#E8455E'};
               return React.createElement('span',{
-                className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.12em] px-1.5 py-0.5 rounded-lg uppercase cursor-default',
-                style:{background:_col.bg,border:'1px solid '+_col.bd,color:_col.fg},
+                className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.12em] uppercase cursor-default',
+                style:{color:_col.fg},
                 title:`Telemetry stamp rate on the last ${_n} real entries: ${_rich}/${_n} carry full signal data (regime, chop, SMC, trend, lock timing). Climbs to ${_n}/${_n} once every trading device runs v13.1+. Persistently low = a device is on a stale cached build - hard-refresh it.`,
               },`TEL ${_rich}/${_n}`);
             }catch(_){return null;}})()}
             {_SB_PAUSED&&React.createElement('span',{
-              className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-lg uppercase cursor-default',
-              style:{background:'rgba(212,162,76,0.1)',border:'1px solid rgba(212,162,76,0.3)',color:'rgba(212,162,76,0.8)'},
+              // V13.4.299: chip chrome dropped; gold text alone carries it, which
+              //   is the mockup's treatment for a caution.
+              className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] uppercase cursor-default',
+              style:{color:'#D4A03A'},
               title:'Cloud sync paused until ~Jun 18 — data saving to this browser only. Open Memory to backup.',
             },'💾 LOCAL')}
             {(()=>{
@@ -52693,8 +52739,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   const _ageSec=Math.round((Date.now()-(_wsp.savedAt||0))/1000);
                   if(_ageSec<300&&(_wsp.history||[]).length>=10){
                     return React.createElement('span',{
-                      className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-lg uppercase cursor-default',
-                      style:{background:'rgba(35,185,129,0.1)',border:'1px solid rgba(35,185,129,0.3)',color:'rgba(35,185,129,0.7)'},
+                      // V13.4.299: chip chrome and green both dropped. The mockup
+                      //   puts "Warm" in the header as plain gold tiny-caps -- warm
+                      //   vs cold is a readiness caution, not a won trade.
+                      className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] uppercase cursor-default',
+                      style:{color:'#D4A03A'},
                       title:`Warm state active — ${(_wsp.history||[]).length} candles restored from ${_ageSec}s ago. Signals start immediately.`,
                     },'⚡ WARM');
                   }
@@ -53182,10 +53231,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            after the head styles. Cards are the app's main surface and carry
            rounded-lg, so this is the line that actually controls how round the
            app looks. */
-        [data-tara-theme="simple"] .rounded-xl { border-radius: 24px !important; }
-        [data-tara-theme="simple"] .rounded-lg { border-radius: 18px !important; }
-        [data-tara-theme="simple"] button.rounded-lg,
-        [data-tara-theme="simple"] button.rounded-xl { border-radius: 9999px !important; }
+        /* V13.4.299: RETUNED to the approved mockup (hairline panels, not
+           pills). The note above is still the important part: because this block
+           is injected after the head styles AND carries a higher-specificity
+           selector, it beats index.html -- so index.html's radius scale alone
+           changed nothing on screen. Both had to move together.
+           The button pill rule is deleted outright: forcing every button to
+           9999px is what turned labels like "TEL 47/50" and "you · 64%" into
+           lozenges, which is precisely the "same-size rounded pills" the mockup
+           brief set out to remove. */
+        [data-tara-theme="simple"] .rounded-xl { border-radius: 12px !important; }
+        [data-tara-theme="simple"] .rounded-lg { border-radius: 10px !important; }
 
         /* ── HERO GLOW ON TARA'S CALL CARD ──────────────────── */
         /* Targets the first card under "Tara's Call" label. Since we can't easily
@@ -53267,16 +53323,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         /* V13.4.194: controls become pills with real presence, the way the
            reference nav/filter/legend chips do. Padding grows with the radius
            so the label is not crushed against a round edge. */
+        /* V13.4.299: the extra 14px side padding existed only to stop labels
+           being "crushed against a round edge". With the round edge gone the
+           padding is just bloat, so it goes too and controls sit at whatever
+           padding their own class asks for. Border colour is kept. */
         [data-tara-theme="simple"] button.rounded-lg,
         [data-tara-theme="simple"] button.rounded-xl {
           background-image: none;
           border-color: var(--tara-border-strong) !important;
-          padding-left: 14px !important;
-          padding-right: 14px !important;
         }
         /* The page's own frame gets the reference's large outer radius. */
+        /* V13.4.299: 26px -> 14px; the mockup's page frame is square-edged and
+           its largest radius anywhere is the 10px panel. */
         [data-tara-theme="simple"] main,
-        [data-tara-theme="simple"] .rounded-2xl { border-radius: 26px !important; }
+        [data-tara-theme="simple"] .rounded-2xl { border-radius: 14px !important; }
         @media (hover:hover) and (pointer:fine) {
           [data-tara-theme="simple"] button.rounded-lg:hover,
           [data-tara-theme="simple"] button.rounded-xl:hover {

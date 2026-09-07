@@ -113,24 +113,34 @@
            dark theme -- neutral greys read as "unstyled dark mode". */
         /* V13.4.198: sampled from kalshi.com's live tokens so the app sits in
            the same colour world as the exchange it trades on. */
-        --bg-0: #0A0C0F;   /* = Kalshi --surface-x10 (their page background) */
-        --bg-1: #151A21;   /* card — between their page and --surface-x30 */
-        --bg-2: #1B2029;   /* = Kalshi --surface-x30 (their elevated surface) */
-        --bg-3: #242C38;   /* overlay / popover */
+        /* V13.4.299: reverted to the APPROVED MOCKUP's palette. The Kalshi
+           indigo ground (#0A0C0F / #151A21) fought App.jsx, which already
+           hardcodes the mockup's neutral values in 250+ places (#050508 page,
+           #0A0A0E panel, #1B1B22 border). Two palettes were rendering at once
+           and the indigo one owned the page background. Mockup wins: it is the
+           design that was approved. See project_tara_dashboard_mockup_rebuild. */
+        --bg-0: #050508;   /* mockup page background */
+        --bg-1: #0A0A0E;   /* mockup panel background */
+        --bg-2: #101017;   /* one step up, same neutral world */
+        --bg-3: #16161c;   /* overlay / popover, = mockup divider tone */
 
-        /* Hairlines — visible edges, not 4% ghosts */
-        --line-1: rgba(255,255,255,0.08);
-        --line-2: rgba(255,255,255,0.15);
-        --line-3: rgba(255,255,255,0.24);
+        /* Hairlines — the mockup's actual edge tones, not white alphas. */
+        --line-1: #16161c;   /* inner dividers */
+        --line-2: #1B1B22;   /* panel border */
+        --line-3: #2A2A34;   /* strongest edge (mockup uses this for chips) */
 
         /* Ink */
         /* V13.4.200: the secondary tiers were sitting low enough that every
            label read as a grey haze over the card rather than as text. Lifted;
            ink-1 stays at Kalshi's --text-x10 so primary values are unchanged. */
-        --ink-1: rgba(255,255,255,0.92);  /* ~ Kalshi --text-x10 */
-        --ink-2: rgba(255,255,255,0.76);
-        --ink-3: rgba(255,255,255,0.58);
-        --ink-4: rgba(255,255,255,0.38);
+        /* V13.4.299: mockup ink is #EDEDED-based, not pure white — App.jsx
+           already uses rgba(237,237,237,…) in over a thousand places, so pure
+           white here made chrome read colder than the content it framed. The
+           four tiers below are the mockup's .k / .k2 / body / heading opacities. */
+        --ink-1: rgba(237,237,237,0.92);
+        --ink-2: rgba(237,237,237,0.82);
+        --ink-3: rgba(237,237,237,0.46);  /* = mockup .k2 */
+        --ink-4: rgba(237,237,237,0.30);  /* = mockup .k  */
 
         /* Signals + signature */
         --up: #23B981;
@@ -166,29 +176,11 @@
         text-rendering: optimizeLegibility;
       }
 
-      /* Ambient depth: a vignette + a faint accent bloom at the top, so the
-         page reads as a lit surface rather than flat #000. Fixed and
-         pointer-events:none so it can never intercept a trade click. */
-      body::before {
-        content: '';
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 0;
-        background:
-          radial-gradient(1000px 480px at 50% -14%, rgba(35, 185, 129, 0.035), transparent 66%);
-      }
-
-      /* Film grain — kills banding on large dark gradients. Very low opacity. */
-      body::after {
-        content: '';
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 9999;
-        opacity: 0.018;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      }
+      /* V13.4.299: the accent bloom and film grain are both GONE. The approved
+         mockup is a flat #050508 ground with no lighting effect and no texture
+         — its separation comes from hairlines and panel fills alone. A green
+         radial bloom behind everything also quietly broke the mockup's one
+         accent rule (green means an outcome), by tinting the whole page green. */
 
       /* ══════════════════════════════════════════════════════════════════
          V13.4.191 TYPE SCALE.
@@ -224,25 +216,41 @@
 
       /* Hero numerals: the hierarchy anchor. Tight tracking + lighter weight is
          what makes a large number read as considered rather than merely big. */
-      .text-2xl { font-size: 30px !important; letter-spacing: -0.03em !important; }
-      .text-3xl { font-size: 38px !important; letter-spacing: -0.035em !important; }
-      .text-4xl { font-size: 46px !important; letter-spacing: -0.04em !important; }
-      .text-5xl { font-size: 58px !important; letter-spacing: -0.042em !important; }
-      .text-6xl { font-size: 70px !important; letter-spacing: -0.045em !important; }
+      /* V13.4.299: sizes pulled back toward the mockup, tracking kept. The
+         mockup's whole hierarchy tops out around 27px (the price, the UP call,
+         the conviction figure); this scale ran to 70px, so a single number could
+         out-shout an entire column. Back to roughly Tailwind's own steps. */
+      .text-2xl { font-size: 24px !important; letter-spacing: -0.03em !important; }
+      .text-3xl { font-size: 28px !important; letter-spacing: -0.035em !important; }
+      .text-4xl { font-size: 34px !important; letter-spacing: -0.04em !important; }
+      .text-5xl { font-size: 42px !important; letter-spacing: -0.042em !important; }
+      .text-6xl { font-size: 52px !important; letter-spacing: -0.045em !important; }
 
       /* Micro-labels earn their size back through tracking, which is how small
          caps are supposed to work and how they stop reading as cramped. */
-      .uppercase { letter-spacing: 0.09em !important; }
+      /* V13.4.299: 0.09em -> 0.15em, the mockup's .k tracking. "Labels are tiny
+         caps" is one of the brief's four stated rules, and tracking is most of
+         what makes a 9px cap read as a label rather than as shouted body text. */
+      .uppercase { letter-spacing: 0.15em !important; }
 
       /* V13.4.194: radii taken from the reference dashboards -- their most
          recognisable trait is how round the cards are against true black.
          Buttons/chips become true pills; panels get a large, soft radius. */
-      .rounded-lg  { border-radius: 14px !important; }
-      .rounded-xl  { border-radius: 22px !important; }
-      .rounded-2xl { border-radius: 26px !important; }
-      button.rounded-lg, button.rounded-xl,
-      button.rounded-md, a.rounded-lg,
-      .rounded-full { border-radius: 9999px !important; }
+      /* V13.4.299 REVERSED. This block was the single biggest reason the live
+         page did not look like the approved mockup, whose brief says in as many
+         words: "hairline panels instead of same-size rounded pills". Measured
+         side by side, the live page had 48 bordered-and-filled pill chips to
+         the mockup's 2, and its dominant radii were 18px and 9999px against the
+         mockup's 3px and 10px.
+         The button/anchor line is the one that did the damage: it forced EVERY
+         button to a full pill no matter which radius class it asked for, so
+         chips like "TEL 47/50", "WARM" and "you · 64%" became lozenges. It is
+         deleted. .rounded-full stays at 9999px (Tailwind's own default) because
+         genuinely circular things -- status dots, the stage number discs, avatar
+         slots -- legitimately use it. */
+      .rounded-lg  { border-radius: 10px !important; }  /* = mockup .panel */
+      .rounded-xl  { border-radius: 12px !important; }
+      .rounded-2xl { border-radius: 14px !important; }
 
       /* Display face: tighter tracking so headings read as designed, not default. */
       .font-serif {
@@ -251,9 +259,16 @@
       }
 
       /* Numerics never reflow mid-tick. */
+      /* V13.4.299: "Numbers are mono" is the brief's third rule. App.jsx already
+         marks its 313 numeric sites with tabular-nums, so routing that class to
+         the mono face applies the rule everywhere at once instead of editing 313
+         call sites. IBM Plex Mono is already loaded and configured as font-mono,
+         so this costs no extra request. Tracking matches the mockup's .m. */
       .tabular-nums, [class*='tabular'] {
+        font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-variant-numeric: tabular-nums;
         font-feature-settings: 'tnum' 1;
+        letter-spacing: -0.015em;
       }
 
       /* One interaction language instead of per-component transitions. */
