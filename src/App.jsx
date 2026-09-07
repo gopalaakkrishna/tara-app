@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.292-exit-rules-and-time-exit-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.292';
+const BASELINE_VERSION='2026.09.07-v13.4.293-dashboard-mockup-rebuild-pass1';
+const TARA_VERSION_DISPLAY='Tara 13.4.293';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -53316,327 +53316,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           currentStreak={currentStreak}
         />
 
-        {/* V9.10.2: Unified Today card */}
-        <UnifiedTodayCard
-          todayData={todayData}
-          bestWindowsToday={bestWindowsToday}
-          tickHistoryRef={tickHistoryRef}
-          upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
-          timeFormat={timeFormat}
-          settings={tradingSettings}
-        />
+        {/* V13.4.293: Today card moved to the center column. */}
 
 
-        {/* STATS BAR */}
-        <div className={'bg-[#0A0A0E] rounded-[10px] border border-[#1B1B22] relative overflow-hidden shrink-0'}>
-          <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
-          <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
-            
-            {/* Strike — auto or manual + live price (V10.7.44a) */}
-            <div className="flex min-w-0 w-full lg:w-auto col-span-1 gap-2 items-start">
-              {/* LEFT: feed toggle + big live price */}
-              <div className="flex flex-col shrink-0 min-w-[80px]">
-                {/* Feed source button — moved here from header */}
-                <button
-                  onClick={()=>{
-                    const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);
-                    const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];
-                    setPriceSource(_next);
-                  }}
-                  className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border transition-colors mb-1 self-start"
-                  style={{background:feedFrozen?'rgba(232,69,94,0.12)':feedSlow?'rgba(35,185,129,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(232,69,94,0.45)':feedSlow?'rgba(35,185,129,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#23B981':'rgba(237,237,237,0.55)'}}
-                  title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle. ${feedFrozen?`FROZEN ${feedStaleSeconds}s`:feedSlow?`Slow (${feedStaleSeconds}s)`:'Live'}`}
-                >
-                  <span>FEED</span>
-                  <span className="opacity-50">·</span>
-                  <span>{PRICE_SOURCES[priceSource].label}</span>
-                  {feedFrozen&&<span className="opacity-90">·{feedStaleSeconds}s</span>}
-                </button>
-                {/* V10.9.11b: REF (CF-Benchmark blend) health badge — placed right
-                    under the FEED button so feed status + reference status sit
-                    together. Green = blend live & CF-accurate; amber = degraded
-                    (falling back toward the raw chart feed). This is the visible
-                    answer to "is the OKX offset being corrected right now." */}
-                {(()=>{
-                  const _b=brtiApprox;
-                  const _ready=_b&&_b.current>0&&_b.samples60s>=5&&(_b.sourceCount>=2||(_b.sourceCount>=1&&_b.hasAnchor));
-                  const _div=_b&&_b.divergenceBps!=null?_b.divergenceBps:null;
-                  const _label=!_b||!(_b.current>0)?'warming':_ready?`${_b.sourceCount}src`:`${_b.sourceCount||0}src·deg`;
-                  const _ok=_ready;
-                  const _title=!_b||!(_b.current>0)
-                    ?'Reference blend warming up — using chart feed for now'
-                    :`CF-Benchmark blend · ${_b.sourceCount} source${_b.sourceCount===1?'':'s'} (${(_b.sources||[]).join('+')||'—'})${_b.correctedCount?` · ${_b.correctedCount} bias-corrected`:''}${_b.hasAnchor?' · anchor live':' · NO CB/KR anchor'} · ${_b.samples60s} samples${_div!=null?` · chart ${_div>=0?'+':''}${_div}bps vs blend`:''}`;
-                  return(
-                    <div
-                      className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border self-start mt-1"
-                      style={{
-                        background:_ok?'rgba(35,185,129,0.10)':'rgba(35,185,129,0.10)',
-                        borderColor:_ok?'rgba(35,185,129,0.30)':'rgba(35,185,129,0.40)',
-                        color:_ok?'rgb(35,185,129)':'#23B981',
-                      }}
-                      title={_title}
-                    >
-                      <span>REF</span>
-                      <span className="opacity-50">·</span>
-                      <span className="tabular-nums">{_label}</span>
-                      {_div!=null&&Math.abs(_div)>=8&&<span className="opacity-80">{_div>=0?'+':''}{Math.round(_div)}</span>}
-                    </div>
-                  );
-                })()}
-                {/* Big live price */}
-                {currentPrice>0&&(
-                  <div className="flex flex-col">
-                    <div className={`flex items-center gap-1 font-serif font-bold tabular-nums ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
-                      <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#EDEDED]/30'}`}/>
-                      <span className="text-lg sm:text-xl leading-tight">${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                    </div>
-                    {targetMargin>0&&(
-                      <span className={`text-[10px] font-bold px-1 py-0.5 rounded-lg mt-0.5 self-start ${currentPrice>=targetMargin?'text-emerald-400 bg-emerald-500/10':'text-rose-400 bg-rose-500/10'}`}>
-                        {currentPrice>=targetMargin?'+':''}{(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(0)}bps
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-              {/* Divider */}
-              <div className="w-px self-stretch bg-[#EDEDED]/10 shrink-0"/>
-              {/* RIGHT: strike label + input */}
-              <div className="flex flex-col flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
-                  <div className={'text-xs text-[#EDEDED]/40 uppercase tracking-wide shrink-0'}>Strike</div>
-                  <span
-                    onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
-                    title={(()=>{
-                      const baseTooltip=strikeSource==='kalshi'?'Strike from Kalshi · click to re-capture':strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live';
-                      const dbg=kalshiDebug;
-                      let dbgLine='';
-                      if(dbg.ok===null)dbgLine='\n\nKalshi: not yet polled';
-                      else if(dbg.ok===false)dbgLine=`\n\nKalshi extraction FAILED: ${dbg.reason}`;
-                      else if(dbg.bestStrike)dbgLine=`\n\nKalshi: ${dbg.reason}`;
-                      else dbgLine=`\n\nKalshi: ${dbg.totalMarkets} markets · ${dbg.matchingClose} matching close · NO STRIKE EXTRACTABLE\nFields: ${(dbg.sampleFields||[]).slice(0,5).join(', ')}`;
-                      return baseTooltip+dbgLine;
-                    })()}
-                    className={`text-[10px] px-1.5 py-0.5 rounded-lg cursor-pointer select-none font-bold transition-colors ${strikeSource==='kalshi'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
-                  >{strikeSource==='kalshi'?'KLSH':strikeMode==='auto'?'LIVE':'MANUAL'}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
-                  <input type="number"
-                    value={targetMargin===0?'':targetMargin}
-                    onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
-                    onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
-                    onBlur={()=>{}}
-                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#24242E] focus:border-indigo-400'}
-                    placeholder="Auto-set"
-                  />
-                  {targetMargin>0&&strikeMode==='manual'&&(
-                    <button
-                      onClick={()=>{isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);}}
-                      className="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-indigo-500 hover:bg-indigo-400 text-white transition-colors">OK ✓</button>
-                  )}
-                </div>
-                {strikeSource!=='kalshi'&&kalshiDebug.ok!==null&&(
-                  <div className="text-[9px] text-[#EDEDED]/35 mt-1 font-mono">
-                    {kalshiDebug.ok===false?(
-                      <span className="text-rose-400/70">Kalshi: {kalshiDebug.reason}</span>
-                    ):kalshiDebug.bestStrike?(
-                      <span className="text-emerald-400/60">Kalshi {kalshiDebug.bestStrike} from {kalshiDebug.bestTicker?.slice(-20)||'?'}</span>
-                    ):(
-                      <span className="text-amber-400/60">Kalshi: {kalshiDebug.totalMarkets} mkts · {kalshiDebug.matchingClose} matching · no strike → fields: {(kalshiDebug.sampleFields||[]).slice(0,4).join(' ')}</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* V13.4.200: Bet/Max Win + Live Offer inputs REMOVED from the strike
-                bar at user request. Consequence, recorded because it is not
-                obvious: betAmount/maxPayout fed recordPnL (which early-returns
-                on bet<=0), the Kelly sizing calc, and offer/peak tracking, so
-                lifetime P&L via that path no longer accumulates. The state and
-                every consumer are left intact, so re-adding an input anywhere
-                (e.g. Settings) restores it with no other change. */}
-            <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block lg:ml-auto'}></div>
-
-            {/* Position / Score */}
-            <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
-              {positionStatus?(
-                <div className={'bg-[#050508] border border-amber-500/20 rounded-lg p-1.5'}>
-                  <div className="flex justify-between text-xs mb-1"><span className={'text-[#EDEDED]/40 uppercase tracking-wide'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
-                  <div className="flex justify-between items-center">
-                    <span className={`text-lg font-serif font-bold ${positionStatus.pnlPct>0?'text-emerald-400':'text-rose-400'}`}>{positionStatus.pnlPct>0?'+':''}{positionStatus.pnlPct.toFixed(1)}%</span>
-                    <span className={`text-xs font-bold uppercase ${positionStatus.isStopHit?'text-rose-500 animate-pulse':'text-[#EDEDED]/30'}`}>{positionStatus.isStopHit?'STOP HIT':'SAFE'}</span>
-                  </div>
-                </div>
-              ):null /* V9.19.3: Personal Scorecard UI removed per user — manual W/L tracking deprecated in favor of taraCallLog-derived stats (V9.19.2 WR pill + Predictor P&L strip). Underlying `scorecards` state + localStorage `taraPersonalScorecards_v1` preserved so loss-streak cooldown and Discord broadcasts keep working. */}
-            </div>
-          </div>
-
-          {/* V9.1.5: Upgraded compact DOM strip — same compact form as V9.1.2 but
-              with quality dots, dominant percentage prominent, and a 4-cell band
-              breakdown beneath the main bar (TIGHT/CLOSE/STD/WIDE).
-              Reads orderBook.bands populated by the level-2 fetch. */}
-          {(()=>{
-            const _bands=orderBook?.bands||null;
-            const _hlBids=Number(_bands?.std?.b)||orderBook.localBuy*currentPrice||0;
-            const _hlAsks=Number(_bands?.std?.a)||orderBook.localSell*currentPrice||0;
-            const _hlTotal=_hlBids+_hlAsks;
-            const _hlBidPct=_hlTotal>0?(_hlBids/_hlTotal)*100:50;
-            const _hlAskPct=100-_hlBidPct;
-            const _domDominantPct=Math.max(_hlBidPct,_hlAskPct);
-            const _MIN_DOM=50000;
-            const _aboveFloor=_hlTotal>=_MIN_DOM;
-            // Quality: do STD and WIDE bands agree at >=58% strength?
-            let _qLevel='thin';
-            if(_bands){
-              const _wideTot=(Number(_bands.wide?.b)||0)+(Number(_bands.wide?.a)||0);
-              if(_aboveFloor&&_wideTot>=_MIN_DOM){
-                const _stdSide=_hlBidPct>=50?'BID':'ASK';
-                const _stdStr=Math.max(_hlBidPct,100-_hlBidPct);
-                const _widePct=_wideTot>0?((Number(_bands.wide?.b)||0)/_wideTot)*100:50;
-                const _wideSide=_widePct>=50?'BID':'ASK';
-                const _wideStr=Math.max(_widePct,100-_widePct);
-                const _agree=_stdSide===_wideSide;
-                let _score=0;
-                if(_agree)_score+=1;
-                if(_stdStr>=58)_score+=1;
-                if(_wideStr>=58)_score+=1;
-                if(_wideTot>=500000)_score+=1;
-                _qLevel=_score>=3?'high':_score>=2?'medium':'low';
-              }
-            }
-            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#23B981':_qLevel==='low'?'rgba(232,69,94,0.72)':null;
-            const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
-            const _renderCell=(name,band,floor=_MIN_DOM)=>{
-              const _b=Number(band?.b)||0,_a=Number(band?.a)||0;
-              const _t=_b+_a;
-              const _af=_t>=floor;
-              const _p=_t>0?(_b/_t)*100:50;
-              const _isBid=_p>=50;
-              const _color=!_af?'rgba(237,237,237,0.30)':_isBid?'#6FA98C':'rgba(232,69,94,0.72)';
-              const _disp=Math.max(_p,100-_p);
-              return React.createElement('div',{key:name,className:'text-center'},
-                React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
-                React.createElement('div',{className:'text-[10px] font-bold tabular-nums leading-tight',style:{color:_color}},_af?_disp.toFixed(0)+'%':'—')
-              );
-            };
-            return(
-              <div className="px-3 pb-2 block">
-                <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="text-xs text-[#EDEDED]/50 uppercase tracking-wide whitespace-nowrap">Depth of Market</span>
-                    {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
-                      React.createElement('span',{className:'inline-flex gap-0.5'},
-                        [0,1,2].map(i=>React.createElement('span',{
-                          key:i,className:'inline-block w-1 h-1 rounded-full',
-                          style:{background:(_qLevel==='high'||(_qLevel==='medium'&&i<2)||(_qLevel==='low'&&i<1))?_qColor:'rgba(237,237,237,0.18)'},
-                        }))
-                      ),
-                      React.createElement('span',{className:'text-[8px] uppercase tracking-[0.16em] font-bold',style:{color:_qColor}},_qLabel)
-                    )}
-                  </div>
-                  <span className="text-xs text-[#EDEDED]/40 tabular-nums">
-                    <span className="text-emerald-400/85 font-bold">{_hlBidPct.toFixed(0)}%</span>
-                    <span className="text-[#EDEDED]/25 mx-1">BID /</span>
-                    <span className="text-rose-400/85 font-bold">{_hlAskPct.toFixed(0)}%</span>
-                    <span className="text-[#EDEDED]/25 ml-1">ASK</span>
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-[#050508] rounded-full overflow-hidden flex">
-                  <div style={{width:`${_hlBidPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
-                  <div style={{width:`${_hlAskPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
-                </div>
-                {_bands&&(
-                  <div className="grid grid-cols-4 gap-2 mt-1">
-                    {_renderCell('TIGHT',_bands.tight)}
-                    {_renderCell('CLOSE',_bands.close)}
-                    {_renderCell('STD',_bands.std)}
-                    {_renderCell('WIDE',_bands.wide)}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* V9.1.5: Upgraded compact Tape Flow strip — same compact form as V9.1.2
-              but with quality dots, dominant percentage prominent, and a 4-cell time
-              breakdown beneath the main bar (5s/15s/30s/60s). */}
-          {tapeWindows&&(()=>{
-            const _w5=tapeWindows.w5||{},_w15=tapeWindows.w15||{},_w30=tapeWindows.w30||{},_w60=tapeWindows.w60||{};
-            const _tBuy=_w30.buys||0,_tSell=_w30.sells||0;
-            const _tTotal=_tBuy+_tSell;
-            if(_tTotal<=0)return null;
-            const _tBuyPct=(_tBuy/_tTotal)*100;
-            const _tSellPct=100-_tBuyPct;
-            const _hlAboveFloor=_tTotal>=TAPE_FLOORS.w30;
-            const _fmt=(n)=>n>=1e6?'$'+(n/1e6).toFixed(1)+'M':n>=1e3?'$'+(n/1e3).toFixed(0)+'K':'$'+Math.round(n);
-            // Quality: do 30s + 60s agree directionally with strength + meaningful volume?
-            let _qLevel='thin';
-            const _w60Tot=(_w60.buys||0)+(_w60.sells||0);
-            if(_hlAboveFloor&&_w60Tot>=TAPE_FLOORS.w60){
-              const _w30Pct=_w30.buyPct!=null?_w30.buyPct:_tBuyPct;
-              const _w60Pct=_w60.buyPct!=null?_w60.buyPct:50;
-              const _w30Side=_w30Pct>=50?'BUY':'SELL';
-              const _w60Side=_w60Pct>=50?'BUY':'SELL';
-              const _w30Str=Math.max(_w30Pct,100-_w30Pct);
-              const _w60Str=Math.max(_w60Pct,100-_w60Pct);
-              let _score=0;
-              if(_w30Side===_w60Side)_score+=1;
-              if(_w30Str>=60)_score+=1;
-              if(_w60Str>=60)_score+=1;
-              if(_w60Tot>=500000)_score+=1;
-              _qLevel=_score>=3?'high':_score>=2?'medium':'low';
-            }
-            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#23B981':_qLevel==='low'?'rgba(232,69,94,0.72)':null;
-            const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
-            const _renderTapeCell=(name,w,floor)=>{
-              const _t=(w.buys||0)+(w.sells||0);
-              const _af=_t>=floor;
-              const _p=w.buyPct!=null?w.buyPct:50;
-              const _isBuy=_p>=50;
-              const _color=!_af?'rgba(237,237,237,0.30)':_isBuy?'#6FA98C':'rgba(232,69,94,0.72)';
-              const _disp=Math.max(_p,100-_p);
-              return React.createElement('div',{key:name,className:'text-center'},
-                React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
-                React.createElement('div',{className:'text-[10px] font-bold tabular-nums leading-tight',style:{color:_color}},_af?_disp.toFixed(0)+'%':'—')
-              );
-            };
-            const _domDominantPct=Math.max(_tBuyPct,_tSellPct);
-            return(
-              <div className="px-3 pb-2 block">
-                <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="text-xs text-[#EDEDED]/50 uppercase tracking-wide whitespace-nowrap">Tape Flow · 30s</span>
-                    {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
-                      React.createElement('span',{className:'inline-flex gap-0.5'},
-                        [0,1,2].map(i=>React.createElement('span',{
-                          key:i,className:'inline-block w-1 h-1 rounded-full',
-                          style:{background:(_qLevel==='high'||(_qLevel==='medium'&&i<2)||(_qLevel==='low'&&i<1))?_qColor:'rgba(237,237,237,0.18)'},
-                        }))
-                      ),
-                      React.createElement('span',{className:'text-[8px] uppercase tracking-[0.16em] font-bold',style:{color:_qColor}},_qLabel)
-                    )}
-                  </div>
-                  <span className="text-xs text-[#EDEDED]/40 tabular-nums">
-                    <span className="text-emerald-400/85 font-bold">{_fmt(_tBuy)}</span>
-                    <span className="text-[#EDEDED]/25 mx-1">BUY /</span>
-                    <span className="text-rose-400/85 font-bold">{_fmt(_tSell)}</span>
-                    <span className="text-[#EDEDED]/25 ml-1">SELL</span>
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-[#050508] rounded-full overflow-hidden flex">
-                  <div style={{width:`${_tBuyPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
-                  <div style={{width:`${_tSellPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
-                </div>
-                <div className="grid grid-cols-4 gap-2 mt-1">
-                  {_renderTapeCell('5S',_w5,TAPE_FLOORS.w5)}
-                  {_renderTapeCell('15S',_w15,TAPE_FLOORS.w15)}
-                  {_renderTapeCell('30S',_w30,TAPE_FLOORS.w30)}
-                  {_renderTapeCell('60S',_w60,TAPE_FLOORS.w60)}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
+        {/* V13.4.293: Price/Strike/Depth + Tape Flow moved to the center column. */}
 
         {/* V9.1.1: TapeStrip relocated — now renders between TaraCallCard and
             ProjectionsCard for tighter signal-to-decision adjacency. */}
@@ -53991,8 +53674,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               );
             })()}
 
-            {/* V8.9.0: Smart-money detector strip — visible at decision time. */}
-            <SmartMoneyStrip signals={_smartMoneySignals} lockDir={lockedCallRef.current?.dir||null}/>
+        {/* V13.4.293: Smart Money moved to the center column. */}
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
@@ -54128,6 +53810,345 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             lockedSnapshot={taraCallSnapshotRef.current||null}
             onClearAutoOrder={()=>setAutoOrderState(null)}
           />
+        {/* V13.4.293: relocated from a full-width stack above the grid, and
+            from column 1, into the center column -- matching the approved
+            mockup, whose center column is Price+Strike+Depth+Chart, then Smart
+            Money, then Tape Flow, then Today. See project_tara_dashboard_mockup_rebuild
+            memory for the full before/after mapping. */}
+        {/* STATS BAR */}
+        <div className={'bg-[#0A0A0E] rounded-[10px] border border-[#1B1B22] relative overflow-hidden shrink-0'}>
+          <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
+          <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
+            
+            {/* Strike — auto or manual + live price (V10.7.44a) */}
+            <div className="flex min-w-0 w-full lg:w-auto col-span-1 gap-2 items-start">
+              {/* LEFT: feed toggle + big live price */}
+              <div className="flex flex-col shrink-0 min-w-[80px]">
+                {/* Feed source button — moved here from header */}
+                <button
+                  onClick={()=>{
+                    const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);
+                    const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];
+                    setPriceSource(_next);
+                  }}
+                  className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border transition-colors mb-1 self-start"
+                  style={{background:feedFrozen?'rgba(232,69,94,0.12)':feedSlow?'rgba(35,185,129,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(232,69,94,0.45)':feedSlow?'rgba(35,185,129,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#23B981':'rgba(237,237,237,0.55)'}}
+                  title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle. ${feedFrozen?`FROZEN ${feedStaleSeconds}s`:feedSlow?`Slow (${feedStaleSeconds}s)`:'Live'}`}
+                >
+                  <span>FEED</span>
+                  <span className="opacity-50">·</span>
+                  <span>{PRICE_SOURCES[priceSource].label}</span>
+                  {feedFrozen&&<span className="opacity-90">·{feedStaleSeconds}s</span>}
+                </button>
+                {/* V10.9.11b: REF (CF-Benchmark blend) health badge — placed right
+                    under the FEED button so feed status + reference status sit
+                    together. Green = blend live & CF-accurate; amber = degraded
+                    (falling back toward the raw chart feed). This is the visible
+                    answer to "is the OKX offset being corrected right now." */}
+                {(()=>{
+                  const _b=brtiApprox;
+                  const _ready=_b&&_b.current>0&&_b.samples60s>=5&&(_b.sourceCount>=2||(_b.sourceCount>=1&&_b.hasAnchor));
+                  const _div=_b&&_b.divergenceBps!=null?_b.divergenceBps:null;
+                  const _label=!_b||!(_b.current>0)?'warming':_ready?`${_b.sourceCount}src`:`${_b.sourceCount||0}src·deg`;
+                  const _ok=_ready;
+                  const _title=!_b||!(_b.current>0)
+                    ?'Reference blend warming up — using chart feed for now'
+                    :`CF-Benchmark blend · ${_b.sourceCount} source${_b.sourceCount===1?'':'s'} (${(_b.sources||[]).join('+')||'—'})${_b.correctedCount?` · ${_b.correctedCount} bias-corrected`:''}${_b.hasAnchor?' · anchor live':' · NO CB/KR anchor'} · ${_b.samples60s} samples${_div!=null?` · chart ${_div>=0?'+':''}${_div}bps vs blend`:''}`;
+                  return(
+                    <div
+                      className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border self-start mt-1"
+                      style={{
+                        background:_ok?'rgba(35,185,129,0.10)':'rgba(35,185,129,0.10)',
+                        borderColor:_ok?'rgba(35,185,129,0.30)':'rgba(35,185,129,0.40)',
+                        color:_ok?'rgb(35,185,129)':'#23B981',
+                      }}
+                      title={_title}
+                    >
+                      <span>REF</span>
+                      <span className="opacity-50">·</span>
+                      <span className="tabular-nums">{_label}</span>
+                      {_div!=null&&Math.abs(_div)>=8&&<span className="opacity-80">{_div>=0?'+':''}{Math.round(_div)}</span>}
+                    </div>
+                  );
+                })()}
+                {/* Big live price */}
+                {currentPrice>0&&(
+                  <div className="flex flex-col">
+                    <div className={`flex items-center gap-1 font-serif font-bold tabular-nums ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
+                      <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#EDEDED]/30'}`}/>
+                      <span className="text-lg sm:text-xl leading-tight">${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                    </div>
+                    {targetMargin>0&&(
+                      <span className={`text-[10px] font-bold px-1 py-0.5 rounded-lg mt-0.5 self-start ${currentPrice>=targetMargin?'text-emerald-400 bg-emerald-500/10':'text-rose-400 bg-rose-500/10'}`}>
+                        {currentPrice>=targetMargin?'+':''}{(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(0)}bps
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Divider */}
+              <div className="w-px self-stretch bg-[#EDEDED]/10 shrink-0"/>
+              {/* RIGHT: strike label + input */}
+              <div className="flex flex-col flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
+                  <div className={'text-xs text-[#EDEDED]/40 uppercase tracking-wide shrink-0'}>Strike</div>
+                  <span
+                    onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
+                    title={(()=>{
+                      const baseTooltip=strikeSource==='kalshi'?'Strike from Kalshi · click to re-capture':strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live';
+                      const dbg=kalshiDebug;
+                      let dbgLine='';
+                      if(dbg.ok===null)dbgLine='\n\nKalshi: not yet polled';
+                      else if(dbg.ok===false)dbgLine=`\n\nKalshi extraction FAILED: ${dbg.reason}`;
+                      else if(dbg.bestStrike)dbgLine=`\n\nKalshi: ${dbg.reason}`;
+                      else dbgLine=`\n\nKalshi: ${dbg.totalMarkets} markets · ${dbg.matchingClose} matching close · NO STRIKE EXTRACTABLE\nFields: ${(dbg.sampleFields||[]).slice(0,5).join(', ')}`;
+                      return baseTooltip+dbgLine;
+                    })()}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-lg cursor-pointer select-none font-bold transition-colors ${strikeSource==='kalshi'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
+                  >{strikeSource==='kalshi'?'KLSH':strikeMode==='auto'?'LIVE':'MANUAL'}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
+                  <input type="number"
+                    value={targetMargin===0?'':targetMargin}
+                    onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
+                    onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
+                    onBlur={()=>{}}
+                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#24242E] focus:border-indigo-400'}
+                    placeholder="Auto-set"
+                  />
+                  {targetMargin>0&&strikeMode==='manual'&&(
+                    <button
+                      onClick={()=>{isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);}}
+                      className="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-indigo-500 hover:bg-indigo-400 text-white transition-colors">OK ✓</button>
+                  )}
+                </div>
+                {strikeSource!=='kalshi'&&kalshiDebug.ok!==null&&(
+                  <div className="text-[9px] text-[#EDEDED]/35 mt-1 font-mono">
+                    {kalshiDebug.ok===false?(
+                      <span className="text-rose-400/70">Kalshi: {kalshiDebug.reason}</span>
+                    ):kalshiDebug.bestStrike?(
+                      <span className="text-emerald-400/60">Kalshi {kalshiDebug.bestStrike} from {kalshiDebug.bestTicker?.slice(-20)||'?'}</span>
+                    ):(
+                      <span className="text-amber-400/60">Kalshi: {kalshiDebug.totalMarkets} mkts · {kalshiDebug.matchingClose} matching · no strike → fields: {(kalshiDebug.sampleFields||[]).slice(0,4).join(' ')}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            {/* V13.4.200: Bet/Max Win + Live Offer inputs REMOVED from the strike
+                bar at user request. Consequence, recorded because it is not
+                obvious: betAmount/maxPayout fed recordPnL (which early-returns
+                on bet<=0), the Kelly sizing calc, and offer/peak tracking, so
+                lifetime P&L via that path no longer accumulates. The state and
+                every consumer are left intact, so re-adding an input anywhere
+                (e.g. Settings) restores it with no other change. */}
+            <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block lg:ml-auto'}></div>
+
+            {/* Position / Score */}
+            <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
+              {positionStatus?(
+                <div className={'bg-[#050508] border border-amber-500/20 rounded-lg p-1.5'}>
+                  <div className="flex justify-between text-xs mb-1"><span className={'text-[#EDEDED]/40 uppercase tracking-wide'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
+                  <div className="flex justify-between items-center">
+                    <span className={`text-lg font-serif font-bold ${positionStatus.pnlPct>0?'text-emerald-400':'text-rose-400'}`}>{positionStatus.pnlPct>0?'+':''}{positionStatus.pnlPct.toFixed(1)}%</span>
+                    <span className={`text-xs font-bold uppercase ${positionStatus.isStopHit?'text-rose-500 animate-pulse':'text-[#EDEDED]/30'}`}>{positionStatus.isStopHit?'STOP HIT':'SAFE'}</span>
+                  </div>
+                </div>
+              ):null /* V9.19.3: Personal Scorecard UI removed per user — manual W/L tracking deprecated in favor of taraCallLog-derived stats (V9.19.2 WR pill + Predictor P&L strip). Underlying `scorecards` state + localStorage `taraPersonalScorecards_v1` preserved so loss-streak cooldown and Discord broadcasts keep working. */}
+            </div>
+          </div>
+
+          {/* V9.1.5: Upgraded compact DOM strip — same compact form as V9.1.2 but
+              with quality dots, dominant percentage prominent, and a 4-cell band
+              breakdown beneath the main bar (TIGHT/CLOSE/STD/WIDE).
+              Reads orderBook.bands populated by the level-2 fetch. */}
+          {(()=>{
+            const _bands=orderBook?.bands||null;
+            const _hlBids=Number(_bands?.std?.b)||orderBook.localBuy*currentPrice||0;
+            const _hlAsks=Number(_bands?.std?.a)||orderBook.localSell*currentPrice||0;
+            const _hlTotal=_hlBids+_hlAsks;
+            const _hlBidPct=_hlTotal>0?(_hlBids/_hlTotal)*100:50;
+            const _hlAskPct=100-_hlBidPct;
+            const _domDominantPct=Math.max(_hlBidPct,_hlAskPct);
+            const _MIN_DOM=50000;
+            const _aboveFloor=_hlTotal>=_MIN_DOM;
+            // Quality: do STD and WIDE bands agree at >=58% strength?
+            let _qLevel='thin';
+            if(_bands){
+              const _wideTot=(Number(_bands.wide?.b)||0)+(Number(_bands.wide?.a)||0);
+              if(_aboveFloor&&_wideTot>=_MIN_DOM){
+                const _stdSide=_hlBidPct>=50?'BID':'ASK';
+                const _stdStr=Math.max(_hlBidPct,100-_hlBidPct);
+                const _widePct=_wideTot>0?((Number(_bands.wide?.b)||0)/_wideTot)*100:50;
+                const _wideSide=_widePct>=50?'BID':'ASK';
+                const _wideStr=Math.max(_widePct,100-_widePct);
+                const _agree=_stdSide===_wideSide;
+                let _score=0;
+                if(_agree)_score+=1;
+                if(_stdStr>=58)_score+=1;
+                if(_wideStr>=58)_score+=1;
+                if(_wideTot>=500000)_score+=1;
+                _qLevel=_score>=3?'high':_score>=2?'medium':'low';
+              }
+            }
+            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#23B981':_qLevel==='low'?'rgba(232,69,94,0.72)':null;
+            const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
+            const _renderCell=(name,band,floor=_MIN_DOM)=>{
+              const _b=Number(band?.b)||0,_a=Number(band?.a)||0;
+              const _t=_b+_a;
+              const _af=_t>=floor;
+              const _p=_t>0?(_b/_t)*100:50;
+              const _isBid=_p>=50;
+              const _color=!_af?'rgba(237,237,237,0.30)':_isBid?'#6FA98C':'rgba(232,69,94,0.72)';
+              const _disp=Math.max(_p,100-_p);
+              return React.createElement('div',{key:name,className:'text-center'},
+                React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
+                React.createElement('div',{className:'text-[10px] font-bold tabular-nums leading-tight',style:{color:_color}},_af?_disp.toFixed(0)+'%':'—')
+              );
+            };
+            return(
+              <div className="px-3 pb-2 block">
+                <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-xs text-[#EDEDED]/50 uppercase tracking-wide whitespace-nowrap">Depth of Market</span>
+                    {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
+                      React.createElement('span',{className:'inline-flex gap-0.5'},
+                        [0,1,2].map(i=>React.createElement('span',{
+                          key:i,className:'inline-block w-1 h-1 rounded-full',
+                          style:{background:(_qLevel==='high'||(_qLevel==='medium'&&i<2)||(_qLevel==='low'&&i<1))?_qColor:'rgba(237,237,237,0.18)'},
+                        }))
+                      ),
+                      React.createElement('span',{className:'text-[8px] uppercase tracking-[0.16em] font-bold',style:{color:_qColor}},_qLabel)
+                    )}
+                  </div>
+                  <span className="text-xs text-[#EDEDED]/40 tabular-nums">
+                    <span className="text-emerald-400/85 font-bold">{_hlBidPct.toFixed(0)}%</span>
+                    <span className="text-[#EDEDED]/25 mx-1">BID /</span>
+                    <span className="text-rose-400/85 font-bold">{_hlAskPct.toFixed(0)}%</span>
+                    <span className="text-[#EDEDED]/25 ml-1">ASK</span>
+                  </span>
+                </div>
+                <div className="w-full h-1 bg-[#050508] rounded-full overflow-hidden flex">
+                  <div style={{width:`${_hlBidPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
+                  <div style={{width:`${_hlAskPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
+                </div>
+                {_bands&&(
+                  <div className="grid grid-cols-4 gap-2 mt-1">
+                    {_renderCell('TIGHT',_bands.tight)}
+                    {_renderCell('CLOSE',_bands.close)}
+                    {_renderCell('STD',_bands.std)}
+                    {_renderCell('WIDE',_bands.wide)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* V13.4.293: Smart Money, relocated here from column 1 (it used to
+            render bare inside the giant prediction card). SmartMoneyStrip itself
+            has no panel chrome of its own -- it expects a parent panel, which this
+            wrapper now provides, matching every other center-column card. */}
+        <div className="bg-[#0A0A0E] p-3 rounded-[10px] border border-[#1B1B22] shrink-0">
+          <SmartMoneyStrip signals={_smartMoneySignals} lockDir={lockedCallRef.current?.dir||null}/>
+        </div>
+
+        {/* V13.4.293: Tape Flow, split out of the old combined stats-bar div
+            into its own panel -- the mockup shows it as a separate card, not
+            merged with price/strike/depth. */}
+        <div className={'bg-[#0A0A0E] rounded-[10px] border border-[#1B1B22] relative overflow-hidden shrink-0'}>
+          {/* V9.1.5: Upgraded compact Tape Flow strip — same compact form as V9.1.2
+              but with quality dots, dominant percentage prominent, and a 4-cell time
+              breakdown beneath the main bar (5s/15s/30s/60s). */}
+          {tapeWindows&&(()=>{
+            const _w5=tapeWindows.w5||{},_w15=tapeWindows.w15||{},_w30=tapeWindows.w30||{},_w60=tapeWindows.w60||{};
+            const _tBuy=_w30.buys||0,_tSell=_w30.sells||0;
+            const _tTotal=_tBuy+_tSell;
+            if(_tTotal<=0)return null;
+            const _tBuyPct=(_tBuy/_tTotal)*100;
+            const _tSellPct=100-_tBuyPct;
+            const _hlAboveFloor=_tTotal>=TAPE_FLOORS.w30;
+            const _fmt=(n)=>n>=1e6?'$'+(n/1e6).toFixed(1)+'M':n>=1e3?'$'+(n/1e3).toFixed(0)+'K':'$'+Math.round(n);
+            // Quality: do 30s + 60s agree directionally with strength + meaningful volume?
+            let _qLevel='thin';
+            const _w60Tot=(_w60.buys||0)+(_w60.sells||0);
+            if(_hlAboveFloor&&_w60Tot>=TAPE_FLOORS.w60){
+              const _w30Pct=_w30.buyPct!=null?_w30.buyPct:_tBuyPct;
+              const _w60Pct=_w60.buyPct!=null?_w60.buyPct:50;
+              const _w30Side=_w30Pct>=50?'BUY':'SELL';
+              const _w60Side=_w60Pct>=50?'BUY':'SELL';
+              const _w30Str=Math.max(_w30Pct,100-_w30Pct);
+              const _w60Str=Math.max(_w60Pct,100-_w60Pct);
+              let _score=0;
+              if(_w30Side===_w60Side)_score+=1;
+              if(_w30Str>=60)_score+=1;
+              if(_w60Str>=60)_score+=1;
+              if(_w60Tot>=500000)_score+=1;
+              _qLevel=_score>=3?'high':_score>=2?'medium':'low';
+            }
+            const _qColor=_qLevel==='high'?'#6FA98C':_qLevel==='medium'?'#23B981':_qLevel==='low'?'rgba(232,69,94,0.72)':null;
+            const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
+            const _renderTapeCell=(name,w,floor)=>{
+              const _t=(w.buys||0)+(w.sells||0);
+              const _af=_t>=floor;
+              const _p=w.buyPct!=null?w.buyPct:50;
+              const _isBuy=_p>=50;
+              const _color=!_af?'rgba(237,237,237,0.30)':_isBuy?'#6FA98C':'rgba(232,69,94,0.72)';
+              const _disp=Math.max(_p,100-_p);
+              return React.createElement('div',{key:name,className:'text-center'},
+                React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/50 font-medium leading-tight'},name),
+                React.createElement('div',{className:'text-[10px] font-bold tabular-nums leading-tight',style:{color:_color}},_af?_disp.toFixed(0)+'%':'—')
+              );
+            };
+            const _domDominantPct=Math.max(_tBuyPct,_tSellPct);
+            return(
+              <div className="px-3 pb-2 block">
+                <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-xs text-[#EDEDED]/50 uppercase tracking-wide whitespace-nowrap">Tape Flow · 30s</span>
+                    {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
+                      React.createElement('span',{className:'inline-flex gap-0.5'},
+                        [0,1,2].map(i=>React.createElement('span',{
+                          key:i,className:'inline-block w-1 h-1 rounded-full',
+                          style:{background:(_qLevel==='high'||(_qLevel==='medium'&&i<2)||(_qLevel==='low'&&i<1))?_qColor:'rgba(237,237,237,0.18)'},
+                        }))
+                      ),
+                      React.createElement('span',{className:'text-[8px] uppercase tracking-[0.16em] font-bold',style:{color:_qColor}},_qLabel)
+                    )}
+                  </div>
+                  <span className="text-xs text-[#EDEDED]/40 tabular-nums">
+                    <span className="text-emerald-400/85 font-bold">{_fmt(_tBuy)}</span>
+                    <span className="text-[#EDEDED]/25 mx-1">BUY /</span>
+                    <span className="text-rose-400/85 font-bold">{_fmt(_tSell)}</span>
+                    <span className="text-[#EDEDED]/25 ml-1">SELL</span>
+                  </span>
+                </div>
+                <div className="w-full h-1 bg-[#050508] rounded-full overflow-hidden flex">
+                  <div style={{width:`${_tBuyPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
+                  <div style={{width:`${_tSellPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
+                </div>
+                <div className="grid grid-cols-4 gap-2 mt-1">
+                  {_renderTapeCell('5S',_w5,TAPE_FLOORS.w5)}
+                  {_renderTapeCell('15S',_w15,TAPE_FLOORS.w15)}
+                  {_renderTapeCell('30S',_w30,TAPE_FLOORS.w30)}
+                  {_renderTapeCell('60S',_w60,TAPE_FLOORS.w60)}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* V9.10.2: Unified Today card */}
+        <UnifiedTodayCard
+          todayData={todayData}
+          bestWindowsToday={bestWindowsToday}
+          tickHistoryRef={tickHistoryRef}
+          upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
+          timeFormat={timeFormat}
+          settings={tradingSettings}
+        />
+
           <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
