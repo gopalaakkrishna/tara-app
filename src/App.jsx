@@ -495,6 +495,28 @@ const _execCostCents=(dir,maxAgeMs=60000)=>{
   return null;
 };
 
+// V13.4.291: the mid-price version of _execCostCents — what a contract is
+//   "worth" on OUR side of the book, ignoring the spread we have to cross.
+//   Slippage is (what we actually paid) − (this), so both terms must be on the
+//   same side: for DOWN we hold NO, whose mid is 100 − the YES mid. Comparing a
+//   NO fill against a YES mid is the same inversion trap documented at
+//   _exitYesLimitCents and in the V13.4.290 P&L fix.
+//   This exists because entryFairValue / entrySlippageBps / kalshiAtFill had no
+//   writer anywhere in the file — the log read them off autoOrderState, which
+//   never carried them. See the note at the top of this file: across 6,541
+//   logged entries those three were populated zero times, which is why
+//   execution cost is described there as the single largest unknown in the
+//   system. It was not unmeasurable; it was never written down.
+const _execFairCents=(dir,maxAgeMs=60000)=>{
+  const q=_kalshiQuote;
+  if(!q||!q.at||(Date.now()-q.at)>maxAgeMs)return null;
+  const m=Number(q.mid);
+  if(!Number.isFinite(m))return null;
+  if(dir==='UP')  return m;
+  if(dir==='DOWN')return 100-m;
+  return null;
+};
+
 // What one contract of an OPEN position could be sold for right now — the
 // mirror of _execCostCents, which prices getting in. Exiting crosses the other
 // side of the book:
@@ -5633,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.290-sports-board-by-sport-only';
-const TARA_VERSION_DISPLAY='Tara 13.4.290';
+const BASELINE_VERSION='2026.09.07-v13.4.291-sitout-keep-and-exec-cost';
+const TARA_VERSION_DISPLAY='Tara 13.4.291';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20147,26 +20169,40 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             if(_s==='patient-skipped'){
               return React.createElement('span',{className:'text-[#EDEDED]/65'},_aos.reason||'');
             }
-            // No order info available yet
-            if(!_aos.dir||_aos.count==null||_aos.limitCents==null)return null;
+            // V13.4.291: this gate asked for _aos.count and _aos.limitCents, two
+            //   names the writer never sets. `undefined == null` is true under the
+            //   loose equality used here, so BOTH halves were always true and this
+            //   entire auto-exec status panel returned null on every render since it
+            //   was written -- the exited / exiting / filled / resting branches below
+            //   have never once been seen. Everything now reads through the order
+            //   authority, which knows the real names and the legacy ones.
+            const _o=readOrderState(_aos);
+            const _oCount=_o.count||0;
+            const _oEntry=_o.fillCents!=null?_o.fillCents:_o.limitCents;
+            if(!_o.dir||_oEntry==null)return null;
             // V9.17.16: compute live values
             const _yes=Number(kalshiYesPrice);
             const _yesValid=Number.isFinite(_yes)&&_yes>0&&_yes<100;
-            const _curOurSide=_yesValid?(_aos.dir==='UP'?_yes:(100-_yes)):null;
-            const _maxPayoutCents=_aos.count*100; // each contract pays $1 on win
+            const _curOurSide=_yesValid?(_o.dir==='UP'?_yes:(100-_yes)):null;
+            const _maxPayoutCents=_oCount*100; // each contract pays $1 on win
             const _maxPayoutDollars=(_maxPayoutCents/100).toFixed(2);
-            const _entry=_aos.fillPrice!=null?_aos.fillPrice:_aos.limitCents;
+            const _entry=_oEntry;
             // EXITED — show realized P&L
-            if(_s==='exited'&&_aos.exitFillPrice!=null&&_aos.fillPrice!=null){
-              const _profitCents=_aos.exitFillPrice-_aos.fillPrice;
-              const _profitDollars=(_profitCents*_aos.count/100);
+            if(_s==='exited'&&_o.exitCents!=null&&_o.fillCents!=null){
+              // exitCents is the RAW YES price; fillCents is our-side. The
+              //   V13.4.290 inversion again -- convert before subtracting or a DOWN
+              //   loss reads as a win.
+              const _exitOurSide=_o.dir==='DOWN'?(100-_o.exitCents):_o.exitCents;
+              const _profitCents=Number.isFinite(_o.pnlPerContract)
+                ?_o.pnlPerContract:(_exitOurSide-_o.fillCents);
+              const _profitDollars=(_profitCents*_oCount/100);
               const _isWin=_profitCents>0;
               const _isFlat=_profitCents===0;
               const _color=_isFlat?'text-[#EDEDED]/65':(_isWin?'text-emerald-400':'text-rose-400');
               const _sign=_profitCents>0?'+':'';
               return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap'},
-                React.createElement('span',{className:'text-[#EDEDED]/65'},_aos.dir,' · ',_aos.count,' contracts'),
-                React.createElement('span',{className:'text-[#EDEDED]/65'},'entry ',_aos.fillPrice,'¢ → exit ',_aos.exitFillPrice,'¢'),
+                React.createElement('span',{className:'text-[#EDEDED]/65'},_o.dir,' · ',_oCount,' contracts'),
+                React.createElement('span',{className:'text-[#EDEDED]/65'},'entry ',_o.fillCents,'¢ → exit ',Math.round(_o.dir==='DOWN'?(100-_o.exitCents):_o.exitCents),'¢'),
                 React.createElement('span',{className:_color+' font-semibold tabular-nums'},
                   _isFlat?'FLAT · $0.00':(_isWin?'PROFIT':'LOSS')+' · '+_sign+'$'+Math.abs(_profitDollars).toFixed(2)+' ('+_sign+_profitCents+'¢/contract)',
                 ),
@@ -20175,18 +20211,18 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             // EXITING — show exit reason and trigger price
             if(_s==='exiting'){
               return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap'},
-                React.createElement('span',{className:'text-[#EDEDED]/65'},_aos.dir,' · ',_aos.count,' contracts @ ',_aos.fillPrice||_aos.limitCents,'¢'),
+                React.createElement('span',{className:'text-[#EDEDED]/65'},_o.dir,' · ',_oCount,' contracts @ ',_entry,'¢'),
                 _aos.exitReason&&React.createElement('span',{className:'text-amber-400 text-[10px]'},'→ ',_aos.exitReason),
               );
             }
             // FILLED — show entry, current offer, unrealized P&L, max payout
             if(_s==='filled'){
               const _unrealCents=_yesValid?(_curOurSide-_entry):null;
-              const _unrealDollars=_unrealCents!=null?(_unrealCents*_aos.count/100):null;
+              const _unrealDollars=_unrealCents!=null?(_unrealCents*_oCount/100):null;
               const _unrealColor=_unrealCents==null?'text-[#EDEDED]/55':(_unrealCents>0?'text-emerald-400':(_unrealCents<0?'text-rose-400':'text-[#EDEDED]/55'));
               const _unrealSign=_unrealCents!=null&&_unrealCents>0?'+':'';
               return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap tabular-nums'},
-                React.createElement('span',{className:'text-[#EDEDED]/65'},_aos.dir,' · ',_aos.count,' @ ',_entry,'¢'),
+                React.createElement('span',{className:'text-[#EDEDED]/65'},_o.dir,' · ',_oCount,' @ ',_entry,'¢'),
                 _yesValid&&React.createElement('span',{className:_unrealColor},
                   'now ',Math.round(_curOurSide),'¢ ',
                   _unrealCents!=null?'('+_unrealSign+_unrealCents+'¢ = '+_unrealSign+'$'+Math.abs(_unrealDollars).toFixed(2)+')':'',
@@ -20196,7 +20232,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             }
             // PLACING / SUBMITTED / RESTING / PARTIALLY_FILLED — order out, no fill yet
             return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap tabular-nums'},
-              React.createElement('span',{className:'text-[#EDEDED]/65'},_aos.dir,' · ',_aos.count,' contracts @ ',_aos.limitCents,'¢'),
+              React.createElement('span',{className:'text-[#EDEDED]/65'},_o.dir,' · ',_oCount,' contracts @ ',_o.limitCents!=null?_o.limitCents:_entry,'¢'),
               _yesValid&&React.createElement('span',{className:'text-[#EDEDED]/45'},'(now ',Math.round(_curOurSide),'¢)'),
               React.createElement('span',{className:'text-[#EDEDED]/45 text-[10px]'},'max $',_maxPayoutDollars),
             );
@@ -34180,10 +34216,16 @@ ${_d.responseBody||'(empty)'}`;
             // collapsible engineering monitoring
             if(_liveValid&&_liveStatus==='filled'&&autoOrderState){
               const _aos=autoOrderState;
-              const _fp=_aos.fillPrice!=null
-                ?_aos.fillPrice
-                :(Date.now()-(_aos.placedAt||Date.now())>15000&&Number.isFinite(_aos.limitCents)?_aos.limitCents:null);
-              const _fpLabel=_fp==null?'—':`${_fp}¢${_aos.fillPrice==null?' [est]':''}`;
+              // V13.4.291: fillPrice / limitCents / placedAt are all names the
+              //   writer never set, so _fp was always null and this read "—" even on
+              //   a filled position; the 15s staleness fallback could never fire
+              //   because placedAt fell back to Date.now(), making the elapsed time
+              //   0 forever. placedAt is now stamped at the placing write.
+              const _oM=readOrderState(_aos);
+              const _fp=_oM.fillCents!=null
+                ?_oM.fillCents
+                :((Date.now()-(Number(_aos.placedAt)||Date.now())>15000&&_oM.limitCents!=null)?_oM.limitCents:null);
+              const _fpLabel=_fp==null?'—':`${_fp}¢${_oM.fillCents==null?' [est]':''}`;
               const _cur=_liveCurOurCents;
               const _curLabel=_cur==null?'—':`${_cur}¢`;
               const _tp=_tpCents;
@@ -35622,7 +35664,21 @@ function TaraApp(){
   useEffect(()=>{try{if(autoExecCooldownUntil>Date.now())localStorage.setItem('tara_autoexec_cooldown',String(autoExecCooldownUntil));else localStorage.removeItem('tara_autoexec_cooldown');}catch(_){}},[autoExecCooldownUntil]);
   // Active auto-exec order state. Tracks the order Tara placed for the current lock.
   // Cleared when the position closes (window roll, manual close, or auto-exit fill).
-  // Shape: {orderId, ticker, side, count, limitCents, dir, placedAt, status, fillPrice, exitOrderId, error, dryRun}
+  // Shape: written by _runEntry / _runExit as
+  //   {status, dir, ticker, dryRun, manual, offerCents, requestedCount, windowId,
+  //    asset, placedAt, fairValueCents, attempts, ladderPath, at,
+  //    rungCents, takesSpread, step,
+  //    filledCount, filledAtCents, tookSpread, savedVsTakeCents, kalshiAtFill,
+  //    exitReason, exitOrder, exitAtCents, pnlCentsPerContract,
+  //    reason (on error)}
+  // V13.4.291: the previous version of this comment described
+  //   {orderId, side, count, limitCents, placedAt, fillPrice, exitOrderId, error}
+  //   -- a contract NO writer ever honoured. Readers trusted it and hand-read
+  //   those names, which is the origin of this file's worst bug family: the log's
+  //   entry-pricing block, the auto-exec status panel, the position reconciler and
+  //   the persisted realized-P&L block were ALL dead, silently, for their whole
+  //   lifetime. Read through readOrderState rather than these keys; it accepts both
+  //   the real names and the legacy ones. If you add a field here, add a writer.
   const[autoOrderState,setAutoOrderState]=useState(null);
   const autoOrderStateRef=useRef(autoOrderState);
   useEffect(()=>{autoOrderStateRef.current=autoOrderState;},[autoOrderState]);
@@ -41812,10 +41868,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 ...((()=>{
                   const _aos=autoOrderStateRef.current;
                   if(!_aos||!pendingTradeRef.current?.autoExec)return{};
-                  const _entry=Number.isFinite(_aos.fillPrice)?_aos.fillPrice:null;
-                  const _exit=Number.isFinite(_aos.exitFillPrice)?_aos.exitFillPrice:null;
-                  const _contracts=Number.isFinite(_aos.count)?_aos.count:0;
-                  const _realized=(_entry!=null&&_exit!=null)?(_exit-_entry):null;
+                  // V13.4.291: read through the order authority. These five fields
+                  //   are PERSISTED to the trade record, and every one of them was
+                  //   null or 0 on every auto-exec trade ever logged: fillPrice,
+                  //   exitFillPrice and count are names the writer never sets.
+                  const _ordR=readOrderState(_aos);
+                  const _entry=_ordR.fillCents;                 // our-side already
+                  // exitAtCents is the RAW YES price sent to Kalshi; entry is
+                  //   our-side. Subtracting them directly is the exact inversion
+                  //   fixed in V13.4.290 for the ticket -- it only ever happened to
+                  //   be right for UP. Convert before comparing.
+                  const _exit=(_ordR.exitCents!=null)
+                    ?(_ordR.dir==='DOWN'?(100-_ordR.exitCents):_ordR.exitCents):null;
+                  const _contracts=_ordR.count||0;
+                  // The writer already computes this correctly at exit time against
+                  //   _exitValueCents (our-side both ends); prefer it and only fall
+                  //   back to the local subtraction when it is absent.
+                  const _realized=Number.isFinite(_ordR.pnlPerContract)
+                    ?_ordR.pnlPerContract
+                    :((_entry!=null&&_exit!=null)?(_exit-_entry):null);
                   return{
                     entryFillCents:_entry,
                     exitFillCents:_exit,
@@ -42067,15 +42138,39 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     // 1. Auto-exec path
                     const _aos=(typeof autoOrderStateRef!=='undefined')?autoOrderStateRef.current:null;
                     const _matchAuto=_aos&&_aos.windowId===_capturedWindowId&&_aos.asset===_resolveAsset;
-                    if(_matchAuto&&(_aos.fillPrice!=null||_aos.limitCents!=null)){
+                    // V13.4.291: this block read fillPrice / limitCents / attempts /
+                    //   ladderPath / fairValueCents / kalshiAtFill off autoOrderState.
+                    //   The writer sets NONE of those names -- it writes filledAtCents
+                    //   and rungCents, and never wrote the last four at all. So the
+                    //   `if` was false on every trade ever placed and this returned
+                    //   nothing, every time. That is the actual reason the note at the
+                    //   top of this file records entrySlippageBps / kalshiAtFill /
+                    //   entryFairValue as populated ZERO times across 6,541 entries and
+                    //   entrySource as never once 'auto-exec-filled': not that fills
+                    //   never happened, but that the log was reading keys nobody wrote.
+                    //   Execution cost is called the single largest unknown in the
+                    //   system there; it was never unmeasurable, just never recorded.
+                    //   Now routed through readOrderState, the one authority that knows
+                    //   both the real names and the legacy ones.
+                    const _ordLog=readOrderState(_aos);
+                    if(_matchAuto&&(_ordLog.fillCents!=null||_ordLog.limitCents!=null)){
+                      const _filled=_ordLog.fillCents!=null;
+                      const _fair=Number(_aos.fairValueCents);
+                      const _fairOk=Number.isFinite(_fair);
                       return{
-                        entryPrice:Number(_aos.fillPrice??_aos.limitCents)||null,
-                        entrySource:_aos.fillPrice!=null?'auto-exec-filled':'auto-exec-limit',
+                        entryPrice:Number(_ordLog.fillCents??_ordLog.limitCents)||null,
+                        entrySource:_filled?'auto-exec-filled':'auto-exec-limit',
                         entryAttempts:Number(_aos.attempts)||1,
                         entryLadderPath:Array.isArray(_aos.ladderPath)?_aos.ladderPath.slice(0,10):null,
-                        entryFairValue:Number(_aos.fairValueCents)||null,
-                        entrySlippageBps:_aos.fillPrice!=null&&_aos.fairValueCents!=null?Math.round((Number(_aos.fillPrice)-Number(_aos.fairValueCents))*100)/100:null,
-                        kalshiAtFill:Number(_aos.kalshiAtFill)||null,
+                        entryFairValue:_fairOk?_fair:null,
+                        // NOTE: the key says Bps, the value is and always was CENTS to
+                        //   2dp. Keeping the historical key so the persisted schema and
+                        //   every export stay readable; the unit is stated here rather
+                        //   than silently corrected. Both terms are our-side (see
+                        //   _execFairCents) so a DOWN fill cannot invert.
+                        entrySlippageBps:(_filled&&_fairOk)
+                          ?Math.round((Number(_ordLog.fillCents)-_fair)*100)/100:null,
+                        kalshiAtFill:Number.isFinite(Number(_aos.kalshiAtFill))?Number(_aos.kalshiAtFill):null,
                       };
                     }
                     // 2. Manual entry path
@@ -46014,7 +46109,34 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   ladder may fill at slightly different rungs as it works the price, which is
     //   exactly the comparison "requested vs filled" needs to make.
     const requestedCount=Math.max(1,Math.floor((stake*100)/costCents));
-    setAutoOrderState({status:'placing',dir,ticker,dryRun,manual:!!manual,offerCents:costCents,requestedCount,at:Date.now()});
+    // V13.4.291: placedAt, fairValueCents, attempts and ladderPath are all read
+    //   downstream (the "waiting Ns" line, the 15s stale-limit estimate, and the
+    //   trade log's entryFairValue / entrySlippageBps / entryAttempts /
+    //   entryLadderPath) but NOTHING in the file ever wrote them -- the shape
+    //   comment further down describes a contract no writer honoured. `placedAt`
+    //   fell back to Date.now(), so the wait timer read 0s forever and the stale
+    //   check never fired. Stamp them here, where the reference price is known and
+    //   still fresh: _quoteUsable was asserted three lines up.
+    setAutoOrderState({
+      status:'placing',dir,ticker,dryRun,manual:!!manual,
+      offerCents:costCents,requestedCount,
+      // V13.4.291: the trade log gates its whole auto-exec entry-pricing block on
+      //   `_aos.windowId===_capturedWindowId && _aos.asset===_resolveAsset`, and
+      //   neither field was ever stamped -- so that gate was false on every trade
+      //   regardless of the field-name bugs below it. The lock already carries a
+      //   windowId (stamped so auto-exec can reject stale locks from prior
+      //   windows); reuse exactly that one so the log matches the same identity
+      //   the entry itself was authorised against.
+      windowId:(lock&&lock.windowId)||null,
+      asset:'BTC',
+      placedAt:Date.now(),
+      // Our-side mid at the moment we decided to enter. Slippage is measured
+      //   against THIS, not against the fill, so it captures the whole cost of
+      //   getting in rather than just the last rung.
+      fairValueCents:_execFairCents(dir,30000),
+      attempts:0,ladderPath:[],
+      at:Date.now(),
+    });
 
     try{
       const res=await kalshiRunEntryLadder({
@@ -46028,6 +46150,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         onRung:(rung)=>setAutoOrderState(prev=>Object.assign({},prev||{},{
           status:rung.takesSpread?'placing':'resting',
           rungCents:rung.priceCents,takesSpread:!!rung.takesSpread,step:rung.step,
+          // V13.4.291: the ladder's actual walk. entryLadderPath and entryAttempts
+          //   were read from fields no writer set, so every logged trade claimed
+          //   exactly 1 attempt and a null path however far the ladder had to work
+          //   the price. Capped at 10 -- the log slices to 10 anyway.
+          attempts:(Number(prev&&prev.attempts)||0)+1,
+          ladderPath:[...(Array.isArray(prev&&prev.ladderPath)?prev.ladderPath:[]),
+            {step:rung.step,cents:rung.priceCents,tookSpread:!!rung.takesSpread}].slice(-10),
         })),
       });
       if(!res.ok){
@@ -46043,6 +46172,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // Realised saving versus crossing — the number V13.4.228 says decides
         // whether arming this was worth doing at all.
         savedVsTakeCents:costCents-filledAt,
+        // V13.4.291: raw YES mid at the moment of the fill. Stored raw (not
+        //   our-side) to match kalshiAtLock, the field it is meant to be compared
+        //   against; fairValueCents above is the our-side figure that pairs with
+        //   filledAtCents. Keeping the two scales explicit is the whole lesson of
+        //   the V13.4.290 P&L inversion.
+        kalshiAtFill:(Number.isFinite(Number(_kalshiQuote&&_kalshiQuote.mid))&&_kalshiQuote.at
+          &&(Date.now()-_kalshiQuote.at)<=30000)?Number(_kalshiQuote.mid):null,
         at:Date.now(),
       }));
       return res;
@@ -46256,23 +46392,34 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   is still open on Kalshi until fill completes).
       if(_aos&&(_aos.status==='filled'||_aos.status==='exiting'||_aos.status==='exit-pending')&&_aos.ticker){
         const _match=positions.find(p=>p.ticker===_aos.ticker);
+        // V13.4.291: this read _aos.count, a name the writer never sets, so
+        //   Number(_aos.count) was NaN at every one of these five call sites.
+        //   Two consequences, and the second is the dangerous one:
+        //     • the phantom note read "thinks you hold 0 contract(s)";
+        //     • `_match.count !== NaN` is ALWAYS true, so a matched, perfectly
+        //       correct position raised a count-mismatch alert every single time.
+        //   A safety reconciler that cries wolf on every live position trains you
+        //   to ignore it, and then a real mismatch is invisible. Route through the
+        //   authority, and only compare when the count is actually known.
+        const _ordRec=readOrderState(_aos);
+        const _taraCount=_ordRec.count||0;
         if(!_match){
           _details.push({
             kind:'phantom-auto',
             ticker:_aos.ticker,
-            taraCount:Number(_aos.count)||0,
+            taraCount:_taraCount,
             kalshiCount:0,
             side:_aos.side||(_aos.dir==='UP'?'yes':'no'),
-            note:`Tara's auto-exec thinks you hold ${Number(_aos.count)||0} contract(s) but Kalshi shows none — likely closed manually or order errored`,
+            note:`Tara's auto-exec thinks you hold ${_taraCount} contract(s) but Kalshi shows none — likely closed manually or order errored`,
           });
-        }else if(_match.count!==Number(_aos.count)){
+        }else if(_taraCount>0&&_match.count!==_taraCount){
           _details.push({
             kind:'count-mismatch-auto',
             ticker:_aos.ticker,
-            taraCount:Number(_aos.count)||0,
+            taraCount:_taraCount,
             kalshiCount:_match.count,
             side:_match.side,
-            note:`Auto-exec thinks ${Number(_aos.count)||0} contracts, Kalshi shows ${_match.count}`,
+            note:`Auto-exec thinks ${_taraCount} contracts, Kalshi shows ${_match.count}`,
           });
         }
       }
@@ -47490,7 +47637,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _applyNoSitout=(snap)=>{
       try{
         if(!NO_SITOUT_MODE||!snap||snap.call!=='SIT_OUT')return snap;
-        if(_SITOUT_KEEP.has(snap.noGoCategory))return snap;   // market-side, keep
+        // V13.4.291: this asked ONLY for noGoCategory, but the two snapshots
+        //   _SITOUT_KEEP names write their label as `tier` and never set
+        //   noGoCategory at all -- see tier:'no-go-price-unavailable-sitout' and
+        //   tier:'kalshi-window-closed' further down this same effect. So the
+        //   test was _SITOUT_KEEP.has(undefined), permanently false, and the
+        //   keep-set has been unreachable since it was introduced in V13.4.249.
+        //   Both "physical impossibility" cases were therefore converted into
+        //   directional commits -- the price-unavailable one carrying
+        //   kalshiAtLock:null, which is precisely the blind commit against an
+        //   absent market that _SITOUT_KEEP's own comment says it exists to
+        //   prevent. The file already treats these two fields as interchangeable
+        //   labels elsewhere (_snapTierLc reads `tier||noGoCategory`; the
+        //   edge-watch check asks both), so ask both here too.
+        if(_SITOUT_KEEP.has(snap.tier)||_SITOUT_KEEP.has(snap.noGoCategory))return snap;   // market-side, keep
         if(_secsLeftNow()<=LOCK_DEADLINE_SEC)return snap;     // past the deadline
         const _d=(snap._intendedDir==='UP'||snap._intendedDir==='DOWN')?snap._intendedDir
           :(_commitDir==='UP'||_commitDir==='DOWN')?_commitDir:null;
@@ -47506,6 +47666,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           locked:true,
           wasOverriddenNoTrade:false,
           noGoCategory:null,
+          // V13.4.291: the spread inherited isNoGo:true from the source sit-out
+          //   (late-trend-oppose and tier1-only-skip both set it). _logSnapshotEntry
+          //   stamps `result: snapshot.isNoGo ? 'NO_TRADE' : null`, and the resolver
+          //   only ever picks up entries with `result===null`. So every sit-out this
+          //   converted into a REAL directional commit was logged pre-resolved as
+          //   NO_TRADE and could never settle to WIN or LOSS -- a live trade that
+          //   auto-exec would place, permanently missing from the record and from
+          //   every win-rate, ML and calibration filter (all of which key on
+          //   `t.result`). Worse than a wrong number: an invisible, non-random hole,
+          //   since these are by definition the marginal windows Tara wanted to skip.
+          //   A converted sit-out is a trade; let it resolve like one.
+          isNoGo:false,
           confidence:snap.confidence||_commitConf,
           tier:'no-sitout-commit',
           _noSitoutFrom:snap.noGoCategory||snap.tier||'sitout',
