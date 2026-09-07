@@ -35554,6 +35554,23 @@ function TaraApp(){
           //   to console -- inside the band measured negative at all 7 levels
           //   tested. The v267 fix five lines up cannot catch this: it only clears
           //   an already-nonzero value, and this migration is what MADE it nonzero.
+          //   Removing the migration stops it happening to a NEW device, but does
+          //   nothing for a device it already hit -- verified live on this dev
+          //   origin, which loaded with stopLossDeltaCents:15 and the
+          //   'tara_v10_2_5_stoploss_default_applied' sentinel already set. One-shot
+          //   retroactive clear, gated on that sentinel actually existing (proof
+          //   this exact migration ran here) AND the value still being exactly 15
+          //   (its only possible output) -- a value the user later hand-typed to
+          //   something else, or hand-typed to 15 AFTER this fix shipped, is left
+          //   alone by either condition failing.
+          try{
+            if(localStorage.getItem('tara_v10_2_5_stoploss_default_applied')
+               &&!localStorage.getItem('tara_v13_4_292_v10_2_5_undo')&&_v===15){
+              try{console.info('[V13.4.292] fixed stop-loss 15c -> off (undoing the V10.2.5 migration that wrote it; measured loser at every level tested)');}catch(_){}
+              _v=0;
+            }
+            localStorage.setItem('tara_v13_4_292_v10_2_5_undo','1');
+          }catch(_){}
           try{
             // V10.2.31 — clamp persisted SL to max 50¢. If a user had set a wide
             //   stop pre-V10.2.31 (max was 90¢), bring it back into the safe range
