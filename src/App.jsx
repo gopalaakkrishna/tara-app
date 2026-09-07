@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.293-dashboard-mockup-rebuild-pass1';
-const TARA_VERSION_DISPLAY='Tara 13.4.293';
+const BASELINE_VERSION='2026.09.07-v13.4.294-dashboard-mockup-rebuild-pass2';
+const TARA_VERSION_DISPLAY='Tara 13.4.294';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17819,52 +17819,172 @@ const _sitoutValue=(log)=>{
     be:Math.round(cost/withRead.length)};
 };
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
+// V13.4.294: hoisted out of TaraCallCard so the new standalone
+//   ConvictionMeterCard/EntryPricingCard/RecordCard (dashboard-mockup-rebuild
+//   pass 2) can share the exact same snapshot normalisation instead of
+//   duplicating it -- one implementation, not three copies to keep in sync.
+const _normalizeLegacySnap=(_snap)=>{
+  if(!_snap)return _snap;
+  const _legacyNoGo=_snap.call==='NO_TRADE'||_snap.isNoGo===true;
+  const _legacySitOut=_snap.call==='SIT_OUT';
+  if(!_legacyNoGo&&!_legacySitOut)return _snap;
+  const _impliedDir=_snap.direction||(_snap.atPosterior!=null?(_snap.atPosterior>=50?'UP':'DOWN'):null);
+  if(!_impliedDir)return _snap; // can't promote, leave as-is (TaraCallCard SCANNING fallback)
+  const _post=typeof _snap.atPosterior==='number'?_snap.atPosterior:50;
+  const _snapConf=Number(_snap.confidence);
+  const _conf=(Number.isFinite(_snapConf)&&_snapConf>0)
+    ?Math.round(_snapConf)
+    :(_impliedDir==='UP'?Math.max(50,Math.round(_post)):Math.max(50,Math.round(100-_post)));
+  return{
+    ..._snap,
+    call:_impliedDir,
+    direction:_impliedDir,
+    confidence:_conf,
+    caution:_snap.caution||_snap.reason||(_legacyNoGo?'No-trade conditions present':'Sit-out conditions present'),
+    isNoGo:false,
+    wasOverriddenNoTrade:_legacyNoGo,
+    wasOverriddenSitOut:_legacySitOut,
+    locked:true,
+  };
+};
+
+// V13.4.294: Conviction meter, extracted verbatim from inside TaraCallCard so
+//   it can render as its own panel in column 1 (mockup order: This Trade ->
+//   Conviction -> Entry Pricing) instead of being bundled with everything else
+//   TaraCallCard renders. Same computation, same JSX -- just callable alone.
+function ConvictionMeterCard({taraCall,analysis}){
+  const tc=taraCall;
+  if(!tc)return null;
+  const snap=_normalizeLegacySnap(tc.snapshot);
+  const _livePost=analysis?.rawProbAbove??snap?.atPosterior??50;
+  const _post=Number(_livePost);
+  if(!isFinite(_post))return null;
+  const _dir=(()=>{
+    const _c=(snap&&(snap.call==='UP'||snap.call==='DOWN'))?snap.call
+      :(tc&&(tc.call==='UP'||tc.call==='DOWN'))?tc.call
+      :(tc&&(tc.direction==='UP'||tc.direction==='DOWN'))?tc.direction:null;
+    return _c||(_post>=50?'UP':'DOWN');
+  })();
+  const _dirPost=_dir==='UP'?_post:(100-_post);
+  const _signedConv=_dirPost-50;
+  const _opposing=_signedConv<0;
+  const _conv=Math.abs(_signedConv);
+  const _zone=_opposing?'opposing':_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
+  const _zoneLabel=_opposing?'OPPOSING — live has moved against this call':_conv<5?'DEADZONE — coin flip':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
+  const _zoneColor=_opposing?'rgb(232,69,94)':_conv<5?'rgb(232,69,94)':_conv<10?'#23B981':_conv<15?'rgb(35,185,129)':'rgb(52,211,153)';
+  const _zoneBg=_opposing?'rgba(232,69,94,0.08)':_conv<5?'rgba(232,69,94,0.06)':_conv<10?'rgba(35,185,129,0.06)':_conv<15?'rgba(35,185,129,0.06)':'rgba(52,211,153,0.08)';
+  const _zoneBorder=_opposing?'rgba(232,69,94,0.40)':_conv<5?'rgba(232,69,94,0.30)':_conv<10?'rgba(35,185,129,0.30)':_conv<15?'rgba(35,185,129,0.30)':'rgba(52,211,153,0.40)';
+  const _dirColor=_opposing?'rgb(232,69,94)':(_dir==='UP'?'rgb(35,185,129)':'rgb(232,69,94)');
+  const _maxScale=30;
+  const _convClamped=Math.min(_conv,_maxScale);
+  const _fillPct=(_convClamped/_maxScale)*100;
+  return(
+    <div className="bg-[#0A0A0E] p-3 rounded-[10px] border border-[#1B1B22] shrink-0">
+      <div className="px-0.5 py-0.5 rounded-lg" style={{background:_zoneBg,border:'1px solid '+_zoneBorder,padding:'6px 10px'}}>
+        <div className="flex items-center justify-between mb-1 gap-2">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_zoneColor}}>Conviction</span>
+            <span className="text-[10px] font-bold tabular-nums" style={{color:_dirColor}}>{_conv.toFixed(1)}pt {_opposing?'⚠':(_dir==='UP'?'▲':'▼')}</span>
+          </div>
+          <span className="text-[9px] uppercase tracking-wider font-bold" style={{color:_zoneColor}}>{_zoneLabel}</span>
+        </div>
+        <div className="relative h-1.5 rounded-full overflow-hidden" style={{background:'rgba(237,237,237,0.06)'}}>
+          <div className="absolute inset-y-0 left-0" style={{width:'16.6%',background:'rgba(232,69,94,0.10)'}}/>
+          <div className="absolute inset-y-0 left-0 transition-all" style={{width:`${_fillPct}%`,background:_zoneColor}}/>
+          <div className="absolute inset-y-0" style={{left:'16.6%',width:'1px',background:'rgba(237,237,237,0.20)'}}/>
+          <div className="absolute inset-y-0" style={{left:'33.3%',width:'1px',background:'rgba(237,237,237,0.15)'}}/>
+          <div className="absolute inset-y-0" style={{left:'50%',width:'1px',background:'rgba(237,237,237,0.15)'}}/>
+        </div>
+        <div className="flex justify-between mt-0.5 text-[8px] tabular-nums text-[#EDEDED]/30">
+          <span>0</span>
+          <span style={{marginLeft:'3%'}}>5</span>
+          <span style={{marginLeft:'5%'}}>10</span>
+          <span style={{marginLeft:'5%'}}>15</span>
+          <span>30+</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// V13.4.294: "Entry Pricing" -- the mockup's take/rest/saves panel. Extracted
+//   verbatim from TaraCallCard's "EXECUTION ROW" (V13.4.213); this already WAS
+//   the panel the mockup wants, just buried in the wrong column. Needs only
+//   {taraCall} -- _kalshiQuote/_quoteUsable are module-level globals.
+function EntryPricingCard({taraCall}){
+  const tc=taraCall;
+  try{
+    const _q=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
+    const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000&&_quoteUsable(_q));
+    const _dir=(tc?.call==='UP'||tc?.call==='DOWN')?tc.call:(tc?.direction==='UP'||tc?.direction==='DOWN'?tc.direction:null);
+    if(!_fresh||!_dir)return null;
+    const _take=_dir==='UP'?_q.ask:(100-_q.bid);
+    const _rest=_dir==='UP'?_q.bid:(100-_q.ask);
+    if(!Number.isFinite(_take)||!Number.isFinite(_rest))return null;
+    const _fee=0.07*(_take/100)*(1-_take/100)*100;
+    const _save=(_take-_rest)+_fee;
+    return(
+      <div className="bg-[#0A0A0E] p-3 rounded-[10px] border border-[#1B1B22] shrink-0">
+        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[#050508] border border-[#2A2A34]">
+          <span className="text-[10px] uppercase tracking-[0.18em] font-bold shrink-0" style={{color:'rgba(255,255,255,0.55)'}}>Entry Pricing</span>
+          <div className="flex items-baseline gap-2 tabular-nums">
+            <span className="text-[11px]" style={{color:'rgba(255,255,255,0.55)'}}>take {_take.toFixed(0)}c</span>
+            <span style={{color:'rgba(255,255,255,0.25)'}}>·</span>
+            <span className="text-[12px] font-bold" style={{color:'rgba(255,255,255,0.92)'}}>rest {_rest.toFixed(0)}c</span>
+            <span className="text-[9px]" style={{color:'rgba(255,255,255,0.45)'}}>saves {_save.toFixed(1)}c</span>
+          </div>
+        </div>
+      </div>
+    );
+  }catch(_e){return null;}
+}
+
+// V13.4.294: "Record" -- extracted verbatim from TaraCallCard's Scorecard
+//   section. Needs only {taraScorecards, windowType}.
+function RecordCard({taraScorecards,windowType}){
+  const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
+  const total=(sc.wins||0)+(sc.losses||0);
+  const wr=total>0?Math.round((sc.wins/total)*100):null;
+  return(
+    <div className="bg-[#0A0A0E] p-3 rounded-[10px] border border-[#1B1B22] shrink-0">
+      <div className="flex justify-between items-baseline mb-1.5">
+        <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold">
+          Tara's Record <span className="text-[#EDEDED]/30">· {_TARA_RECORD_WINDOW_LABEL}</span>
+        </span>
+        {wr!==null&&<span className="text-[10px] tabular-nums text-[#EDEDED]/60">{wr}% win rate</span>}
+        {wr===null&&<span className="text-[10px] text-[#EDEDED]/35">no calls yet</span>}
+      </div>
+      <div className="flex items-end gap-3">
+        <div className="flex flex-col items-center">
+          <span className="text-2xl font-serif font-bold text-emerald-400 tabular-nums leading-none">{sc.wins||0}</span>
+          <span className="text-[8px] uppercase tracking-wider text-emerald-400/60 mt-1">wins</span>
+        </div>
+        <div className="h-7 w-px bg-[#EDEDED]/10"></div>
+        <div className="flex flex-col items-center">
+          <span className="text-2xl font-serif font-bold text-rose-400 tabular-nums leading-none">{sc.losses||0}</span>
+          <span className="text-[8px] uppercase tracking-wider text-rose-400/60 mt-1">losses</span>
+        </div>
+        <div className="h-7 w-px bg-[#EDEDED]/10"></div>
+        <div className="flex flex-col items-center">
+          <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_SITOUT_FG}}>{sc.sitouts||0}</span>
+          <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(212,160,58,0.65)'}}>sat out</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// V13.4.294: added `desktopSplit` -- when true, this instance skips rendering
+//   Conviction / Entry Pricing / Record inline, because they're shown via the
+//   three components above instead, placed in their correct mockup columns.
+//   The MOBILE call site never passes this prop, so mobile is unaffected and
+//   keeps showing everything bundled together, exactly as before.
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk,desktopSplit}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
     const total=(sc.wins||0)+(sc.losses||0);
     const wr=total>0?Math.round((sc.wins/total)*100):null;
-    // V5.5b/c: Snapshot persistence. Once Tara has committed (snap set), the display
-    //   stays committed for the window — never flips back to WATCHING/SIT_OUT/different
-    //   direction. User spec: 'once she says down up or sitout she sticks to it no
-    //   matter what'. All display values read from snap when present.
-    // V8.9.2: User mandate — Tara always picks a direction every round. NO_TRADE
-    //   and SIT_OUT snapshots (legacy or cloud-synced from older versions) are
-    //   normalized here at read-time: promote to direction with caution, never
-    //   show ⊘ NO TRADE or SITTING OUT label. Live snapshot creation is also
-    //   directional now (V8.9.2 engine change) — this is defensive cleanup so
-    //   no path can leak the old labels.
-    const _normalizeLegacySnap=(_snap)=>{
-      if(!_snap)return _snap;
-      const _legacyNoGo=_snap.call==='NO_TRADE'||_snap.isNoGo===true;
-      const _legacySitOut=_snap.call==='SIT_OUT';
-      if(!_legacyNoGo&&!_legacySitOut)return _snap;
-      const _impliedDir=_snap.direction||(_snap.atPosterior!=null?(_snap.atPosterior>=50?'UP':'DOWN'):null);
-      if(!_impliedDir)return _snap; // can't promote, leave as-is (TaraCallCard SCANNING fallback)
-      const _post=typeof _snap.atPosterior==='number'?_snap.atPosterior:50;
-      // V13.4.265: prefer the snapshot's OWN frozen confidence. This derivation
-      //   from atPosterior exists for genuinely legacy snapshots that predate the
-      //   field -- but it was overriding modern snapshots that carry the real
-      //   committed value, giving this panel a number no other panel could
-      //   reproduce. Falls back to the derivation when the field is absent or 0
-      //   (some sit-out builders write `_commitConf||0`).
-      const _snapConf=Number(_snap.confidence);
-      const _conf=(Number.isFinite(_snapConf)&&_snapConf>0)
-        ?Math.round(_snapConf)
-        :(_impliedDir==='UP'?Math.max(50,Math.round(_post)):Math.max(50,Math.round(100-_post)));
-      return{
-        ..._snap,
-        call:_impliedDir,
-        direction:_impliedDir,
-        confidence:_conf,
-        caution:_snap.caution||_snap.reason||(_legacyNoGo?'No-trade conditions present':'Sit-out conditions present'),
-        isNoGo:false,
-        wasOverriddenNoTrade:_legacyNoGo,
-        wasOverriddenSitOut:_legacySitOut,
-        locked:true,
-      };
-    };
     const snap=_normalizeLegacySnap(tc.snapshot);
     const isCommittedSnap=snap!==null;
     // V8.9.2: isNoGoSnap and isSatOutSnap are now structurally false thanks to
@@ -18242,8 +18362,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         )}
         {/* V10.7.48: Conviction Meter — visualizes how strong Tara's directional signal is.
              Conviction = |posterior - 50|. Deadzone (0-5) = no real edge → sit out at end.
-             Built off live tc.posterior so it updates every tick during scanning. */}
-        {(()=>{
+             Built off live tc.posterior so it updates every tick during scanning.
+             V13.4.294: skipped when desktopSplit -- ConvictionMeterCard renders
+             this in column 1 instead. Mobile (no desktopSplit prop) is unaffected. */}
+        {!desktopSplit&&(()=>{
           // V10.7.67b: Always use live tc posterior for conviction display.
           //   Prior: snap?.atPosterior was read first — snap in WATCHING state often
           //   had atPosterior=null → fell through to tc?.posterior which could also
@@ -18481,16 +18603,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           );
         })()}
 
-        {/* V13.4.213: EXECUTION ROW. The measured cost of crossing the spread
-            (2.31c/contract on the quoted book) is larger than the measured edge
-            itself, yet the rest-vs-take prices only existed in the Trade Coach
-            column. This puts them on the card the eye is already on, at the
-            moment the order gets placed.
-            Colourless on purpose -- green now means WIN and amber means SIT-OUT
-            app-wide, and "rest here" is neither. Shows even at zero spread,
-            since resting still avoids the taker fee; that case used to be
-            hidden because the old block required saveC > 0. */}
-        {(()=>{
+        {/* V13.4.213: EXECUTION ROW -- this IS the mockup's "Entry Pricing"
+            panel. V13.4.294: skipped when desktopSplit -- EntryPricingCard
+            renders it in column 1 instead. Mobile is unaffected. */}
+        {!desktopSplit&&(()=>{
           try{
             const _q=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
             // V13.4.214: _quoteUsable rejects the empty book that made this row
@@ -18608,7 +18724,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           );
         })()}
 
-        {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
+        {/* V4.3: Scorecard — this IS the mockup's "Record" panel.
+            V13.4.294: skipped when desktopSplit -- RecordCard renders it in
+            column 3 instead. Mobile is unaffected. */}
+        {!desktopSplit&&(
         <div className="border-t border-[#24242E] pt-2.5">
           <div className="flex justify-between items-baseline mb-1.5">
             {/* V13.4.162: was "Tara's Record", which read as an all-time count. The
@@ -18642,6 +18761,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             </div>
           </div>
         </div>
+        )}
 
         {/* V13.4.255: the sit-out value panel was removed. It priced every
             sat-out window to show whether sitting out had been worth it -- a
@@ -18911,10 +19031,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         ]):null}
 
         {/* V5.6.1: Tara's Memory — last 6 calls with results. Synced to Firestore so it
-            survives refresh + spans devices. Click "all" to see the full history. */}
-        {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
-            even before Tara has committed to any windows. */}
-        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry}/>
+            survives refresh + spans devices. Click "all" to see the full history.
+            V13.4.294: skipped when desktopSplit -- rendered independently in
+            column 3 instead. Mobile is unaffected. */}
+        {!desktopSplit&&<TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry}/>}
       </div>
     );
 
@@ -26292,7 +26412,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block" desktopSplit={true}/>
 
       {/* V9.1.5: Tape + Depth render as upgraded compact strips next to the small
           DOM bar at the top of the analysis card. No big panels here anymore. */}
@@ -53525,6 +53645,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             autoExecSettings={autoExecSettings}
             timeFormat={timeFormat}
           />
+          {/* V13.4.294: Conviction + Entry Pricing, matching the mockup's left
+              column order (This Trade -> Conviction -> Entry Pricing). Both
+              extracted from TaraCallCard, which skips them here on desktop
+              (desktopSplit) -- see project_tara_dashboard_mockup_rebuild memory. */}
+          <ConvictionMeterCard taraCall={taraCall} analysis={analysis}/>
+          <EntryPricingCard taraCall={taraCall}/>
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
@@ -54192,26 +54318,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             });
           }}/>
 
-          {/* v13.4.153: News + Live Feeds, directly under Tara's Call.
-              Desktop: bottom of the projections column, where Tara's Call is.
-              Mobile: the SIGNAL tab — on phones ProjectionsCard suppresses its
-              own Tara's Call block (the prediction card already carries it), so
-              gating this to 'projections' would have parked News under a tab
-              that has no Tara's Call on it. DOM order puts this right after the
-              prediction card once the grid collapses to one column. */}
-          {/* V13.4.276: this panel absorbs the column's leftover height on desktop.
-              The grid stretches all three columns to the tallest, and this one is the
-              shortest, so the slack used to show as raw whitespace beside the other
-              two. Giving it to the LIVE FEED is not padding -- the feed is a scrolling
-              list that was being truncated, so the space becomes more visible rows.
-              lg: only; on mobile the column is a single stack with nothing to absorb. */}
-          <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 lg:flex-1 lg:min-h-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
-            <T2Stamp code="FEED · 016"/>
-            <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
-            <div className="pt-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-              <LiveFeedsCard tapeRef={tapeRef} bloomberg={bloomberg} whaleLog={whaleLog} timeFormat={timeFormat}/>
-            </div>
-          </div>
+          {/* V13.4.294: News + Live Feeds moved to column 3, matching the
+              mockup's right column (Record -> Risk -> Live Feeds -> Memory ->
+              News). See project_tara_dashboard_mockup_rebuild memory. */}
           {/* V13.4.276: schedule moved here from the prediction column. Its own
               comment above records the original ask -- "put schedule in the news
               place" -- and it had drifted into column 1 instead, where it was 455px
@@ -54235,10 +54344,69 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             )}
           </div>{/* /Tara's Call column */}
 
-          {/* ── V111: RIGHT PANEL - Engine Log (col 3) ── */}
+          {/* ── V111: RIGHT PANEL - Engine Log (col 3) ──
+              V13.4.294: wrapped so Record/News+LiveFeeds/Memory can sit above it,
+              matching the mockup's right column. RightPanel's own content
+              (Hourly Ladder, Trade Coach, Score Breakdown, Engine Log) isn't in
+              the mockup as such but is kept -- same "keep extra, don't delete"
+              call as pass 1 made for MissionPanel. See
+              project_tara_dashboard_mockup_rebuild memory for what's still not
+              matched here (Risk banner not built yet; Hourly Ladder belongs in
+              its own bottom row per the mockup, not column 3 -- deferred). */}
+          <div className="flex flex-col gap-3 min-w-0">
+          <RecordCard taraScorecards={taraScorecards} windowType={windowType}/>
+          {/* V13.4.294: News + Live Feeds, relocated here from column 2. */}
+          <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0'}>
+            <T2Stamp code="FEED · 016"/>
+            <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
+            <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+              <LiveFeedsCard tapeRef={tapeRef} bloomberg={bloomberg} whaleLog={whaleLog} timeFormat={timeFormat}/>
+            </div>
+          </div>
+          {/* V13.4.294: Memory, relocated here from inside TaraCallCard (which
+              skips it on desktop now -- desktopSplit). Same onEditEntry/
+              onDeleteEntry logic as the ProjectionsCard call site above --
+              duplicated rather than hoisted to a shared handler, matching this
+              file's existing convention of per-call-site inline edit/delete
+              closures (the mobile TaraCallCard call site has its own copy too). */}
+          <TaraMemoryStrip taraCallLog={displayedCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={(entryId,newValue,field)=>{
+            const _field=field||'result';
+            setTaraCallLog(prev=>{
+              const next=prev.map(e=>{
+                if(e.id!==entryId)return e;
+                if(_field==='__fullUpdate__'&&newValue&&typeof newValue==='object'){
+                  return{...e,...newValue,manualEdit:true,manualEditedAt:Date.now()};
+                }
+                const _valUp=String(newValue||'').toUpperCase();
+                if(_field==='direction'){
+                  if(_valUp!=='UP'&&_valUp!=='DOWN'&&_valUp!=='SIT_OUT')return e;
+                  let _autoResult=e.result;
+                  if(_valUp==='SIT_OUT')_autoResult='SITOUT';
+                  else if(typeof e.closingPrice==='number'&&typeof e.strike==='number'&&e.strike>0){
+                    const _wonByPrice=_valUp==='UP'?(e.closingPrice>=e.strike):(e.closingPrice<e.strike);
+                    _autoResult=_wonByPrice?'WIN':'LOSS';
+                  }
+                  return{...e,dir:_valUp,result:_autoResult,manualEdit:true,manualEditedAt:Date.now()};
+                }else{
+                  const valid=_valUp==='WIN'||_valUp==='LOSS'||_valUp==='SITOUT';
+                  if(!valid)return e;
+                  return{...e,result:_valUp,manualEdit:true,manualEditedAt:Date.now()};
+                }
+              });
+              setTimeout(()=>_recomputeLearningsFromLog(next),0);
+              return next;
+            });
+          }} onDeleteEntry={(entryId)=>{
+            setTaraCallLog(prev=>{
+              const next=prev.filter(e=>e.id!==entryId);
+              setTimeout(()=>_recomputeLearningsFromLog(next),0);
+              return next;
+            });
+          }}/>
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}
             taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}
             onHourlyLock={_onHourlyLock}/>
+          </div>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
