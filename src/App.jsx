@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.291-sitout-keep-and-exec-cost';
-const TARA_VERSION_DISPLAY='Tara 13.4.291';
+const BASELINE_VERSION='2026.09.07-v13.4.292-exit-rules-and-time-exit-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.292';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20362,9 +20362,17 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         if(typeof NO_SITOUT_MODE!=="undefined"&&NO_SITOUT_MODE)_chips.push(_chip("Never sits out","#D4A03A"));
         _chips.push(_chip("No daily cap","#D4A03A"));
         // one line on how it gets out, since that is the other half of behaviour
-        const _exit=_trailOn
-          ?("Sells at "+TRAIL_GIVEBACK_C+"c off its high once worth "+TRAIL_ARM_C+"c"+((_fixedTp||_fixedSl)?", plus a fixed rule you set.":", otherwise holds to the close."))
-          :"Holds to the close.";
+        // V13.4.292: this used to say "sells at 8c off its high..." whenever ANY
+        //   fixed rule was set, even one that makes the trailing stop unreachable
+        //   (a take-profit at or under TRAIL_ARM_C fires and closes the position
+        //   before it can ever reach the arm point) -- claiming the trail is
+        //   active in exactly the state where it cannot fire. Now says so plainly.
+        const _tpKillsTrail=_fixedTp&&Number(autoExecSettings?.autoExitOffer)<=TRAIL_ARM_C;
+        const _exit=_tpKillsTrail
+          ?("Fixed take-profit at "+Number(autoExecSettings?.autoExitOffer)+"c fires before the "+TRAIL_ARM_C+"c trailing stop can ever arm.")
+          :_trailOn
+            ?("Sells at "+TRAIL_GIVEBACK_C+"c off its high once worth "+TRAIL_ARM_C+"c"+((_fixedTp||_fixedSl)?", plus a fixed rule you set.":", otherwise holds to the close."))
+            :"Holds to the close.";
         return React.createElement("div",{
           className:"mb-4 rounded-[10px] border overflow-hidden",
           style:{borderColor:_tone+"38",background:"#0A0A0E"},
@@ -20819,7 +20827,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply SNIPER preset?\\n\\nMax-WR play. Stacks ALL V10.2.x filters:\\n• Min tier: confluence+ (top WR tier)\\n• Min qScoreV2: 55 (V2 60+ shows 90%+ WR)\\n• Edge cap: 6pt (tightest)\\n• Phase 4: PREGATE (blocks wait/abort)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Take-profit: 80¢ (book early)\\n• Stop-loss: 10¢ (cut fast)\\n• Max trades/day: 4\\n• Max bet: $2\\n• Cooldown: 2 losses → 45 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 78%+ WR, ~2-4 trades/day.\\nFew trades, mostly wins.'))return;
+                  if(!confirm('Apply SNIPER preset?\\n\\nMax-WR play. Stacks ALL V10.2.x filters:\\n• Min tier: confluence+ (top WR tier)\\n• Min qScoreV2: 55 (V2 60+ shows 90%+ WR)\\n• Edge cap: 6pt (tightest)\\n• Phase 4: PREGATE (blocks wait/abort)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Max trades/day: 4\\n• Max bet: $2\\n• Cooldown: 2 losses → 45 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 78%+ WR, ~2-4 trades/day.\\nFew trades, mostly wins.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'confluence',
@@ -20829,8 +20837,12 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
                     skipMarginalCaution:true,
-                    autoExitOffer:80,
-                    stopLossDeltaCents:10,
+                    // V13.4.292: autoExitOffer:80/stopLossDeltaCents:10 REMOVED, same
+                    //   reason as the V13.4.266 Patient/Fast fix -- both are measured
+                    //   losers (fixed TP negative at 8/9 levels, fixed SL negative at
+                    //   all 7 levels tested), and 80c sits under TRAIL_ARM_C (90), so
+                    //   it fired before the trailing stop -- the only rule that
+                    //   measured positive -- could ever arm.
                     maxAutoTradesPerDay:4,
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2,
@@ -20864,7 +20876,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply HUNTER preset?\\n\\nWin-ideally + take volume balance:\\n• Min tier: tape+ (skips raw single-tier)\\n• Min qScoreV2: 40\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY (badge only, no block)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Take-profit: 82¢\\n• Stop-loss: 13¢\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 70-72% WR, ~6-10 trades/day.\\nThe "win and earn" sweet spot.'))return;
+                  if(!confirm('Apply HUNTER preset?\\n\\nWin-ideally + take volume balance:\\n• Min tier: tape+ (skips raw single-tier)\\n• Min qScoreV2: 40\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY (badge only, no block)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 70-72% WR, ~6-10 trades/day.\\nThe "win and earn" sweet spot.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
@@ -20874,8 +20886,10 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
                     skipMarginalCaution:true,
-                    autoExitOffer:82,
-                    stopLossDeltaCents:13,
+                    // V13.4.292: autoExitOffer:82/stopLossDeltaCents:13 REMOVED, same
+                    //   reason as the V13.4.266 Patient/Fast fix and the Sniper preset
+                    //   above -- both measured losers, and 82c sits under TRAIL_ARM_C
+                    //   (90), disabling the only rule that measured positive.
                     maxAutoTradesPerDay:8,
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2.5,
@@ -20912,7 +20926,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply HAWK preset?\\n\\n"Confident lock + cheap entry" — for sure-shot trades:\\n\\n• Min tier: tape+ (Hunter base)\\n• Min qScoreV2: 50 (tighter than Hunter\'s 40)\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY\\n• Skip time-cap-commit: ON (with smart bypass V10.2.34)\\n• Skip marginal-caution: ON\\n\\n• PATIENT ENTRY: ON (max 70¢, wait 60s)\\n  → Tara locks, then waits for offer to drop to ≤70¢ before buying\\n  → If 60s passes without hitting threshold → sit out\\n  → "Patient" tier trades won 80% over last 60 / 66% lifetime\\n\\n• ENTRY LADDER: ON (rest 3¢ inside, 2 tries, then take)\n  → resting instead of crossing is worth +2.8¢ a contract on your own record\n\n• Take-profit: 88¢\\n• Stop-loss: 13¢\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE.\\n\\nExpected: 72-76% WR, ~4-7 trades/day.\\nThe disciplined-entry preset.'))return;
+                  if(!confirm('Apply HAWK preset?\\n\\n"Confident lock + cheap entry" — for sure-shot trades:\\n\\n• Min tier: tape+ (Hunter base)\\n• Min qScoreV2: 50 (tighter than Hunter\'s 40)\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY\\n• Skip time-cap-commit: ON (with smart bypass V10.2.34)\\n• Skip marginal-caution: ON\\n\\n• PATIENT ENTRY: ON (max 70¢, wait 60s)\\n  → Tara locks, then waits for offer to drop to ≤70¢ before buying\\n  → If 60s passes without hitting threshold → sit out\\n  → "Patient" tier trades won 80% over last 60 / 66% lifetime\\n\\n• ENTRY LADDER: ON (rest 3¢ inside, 2 tries, then take)\n  → resting instead of crossing is worth +2.8¢ a contract on your own record\n\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE.\\n\\nExpected: 72-76% WR, ~4-7 trades/day.\\nThe disciplined-entry preset.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
@@ -20937,9 +20951,10 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                     entryLadderUndercutCents:3,
                     entryLadderStepSec:12,
                     entryLadderMaxSteps:2,
-                    // Exits — slightly more patient target than Hunter
-                    autoExitOffer:88,
-                    stopLossDeltaCents:13,
+                    // V13.4.292: autoExitOffer:88/stopLossDeltaCents:13 REMOVED, same
+                    //   reason as Sniper/Hunter above -- 88c also sits under
+                    //   TRAIL_ARM_C (90), disabling the only rule that measured
+                    //   positive.
                     // Caps + cooldown — match Hunter
                     maxAutoTradesPerDay:8,
                     maxAutoTradesPerWindow:1,
@@ -20978,7 +20993,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply BARGAIN HUNTER preset?\\n\\n"Deep value entries + smart cashout":\\n\\n• PATIENT ENTRY: max 55¢ (vs Hawk\'s 70¢)\\n  → Waits up to 90s for offer to drop to ≤55¢\\n  → If 90s passes → sit out (no expensive entries)\\n\\n• ENTRY LADDER (V10.7.16): ON\\n  → Submits limit 4¢ below offer, waits 15s\\n  → If unfilled, retry 2¢ below, wait 15s more\\n  → Then takes market (saves 2-4¢/contract avg)\\n\\n• Min tier: tape+\\n• Min qScoreV2: 55 (higher bar than Hawk)\\n• Edge cap: 6pt (tightest)\\n• Skip marginal-caution + time-cap: ON\\n\\n• SMART CASHOUT V10.7.9: ENABLED\\n  → Peak trigger: 12¢ (arms earlier)\\n  → Trail floor: 45% (locks more of peak)\\n  → Loss cut: 18¢ (cut faster)\\n  → Late-window profit lock: 4¢ in last 60s\\n  → Late-window loss cut: 10¢ in last 60s\\n\\n• Take-profit (max payout): 92¢\\n• Stop-loss fallback: 12¢\\n• Max trades/day: 10\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-75% WR, 3-6 trades/day.\\nFew trades, cheap entries, max upside captured.'))return;
+                  if(!confirm('Apply BARGAIN HUNTER preset?\\n\\n"Deep value entries + smart cashout":\\n\\n• PATIENT ENTRY: max 55¢ (vs Hawk\'s 70¢)\\n  → Waits up to 90s for offer to drop to ≤55¢\\n  → If 90s passes → sit out (no expensive entries)\\n\\n• ENTRY LADDER (V10.7.16): ON\\n  → Submits limit 4¢ below offer, waits 15s\\n  → If unfilled, retry 2¢ below, wait 15s more\\n  → Then takes market (saves 2-4¢/contract avg)\\n\\n• Min tier: tape+\\n• Min qScoreV2: 55 (higher bar than Hawk)\\n• Edge cap: 6pt (tightest)\\n• Skip marginal-caution + time-cap: ON\\n\\n• SMART CASHOUT V10.7.9: ENABLED\\n  → Peak trigger: 12¢ (arms earlier)\\n  → Trail floor: 45% (locks more of peak)\\n  → Loss cut: 18¢ (cut faster)\\n  → Late-window profit lock: 4¢ in last 60s\\n  → Late-window loss cut: 10¢ in last 60s\\n\\n• Max trades/day: 10\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-75% WR, 3-6 trades/day.\\nFew trades, cheap entries, max upside captured.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
@@ -21008,9 +21023,14 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                     entryLadderUndercutCents:4, // start 4¢ below offer
                     entryLadderStepSec:15, // wait 15s per rung
                     entryLadderMaxSteps:2, // 2 attempts (4¢, then 2¢) before market
-                    // Exits — wait for max payout
-                    autoExitOffer:92, // higher than Hawk's 88
-                    stopLossDeltaCents:12, // tighter than Hawk's 13
+                    // V13.4.292: autoExitOffer:92/stopLossDeltaCents:12 REMOVED. 92c
+                    //   was the one preset value above TRAIL_ARM_C (90), but that only
+                    //   leaves a degenerate ~2c arming window before the fixed target
+                    //   closes it -- essentially no room for the 8c giveback the trail
+                    //   needs, and stopLossDeltaCents:12 is still a measured loser at
+                    //   every level tested (10-40c). Smart cashout (below) is this
+                    //   preset's advertised profit-lock mechanism; the fixed pair was
+                    //   redundant with it even before being wrong.
                     // Caps
                     maxAutoTradesPerDay:10,
                     maxAutoTradesPerWindow:1,
@@ -21056,11 +21076,11 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply SURGEON preset?\\n\\n• Take-profit 80¢ (book early)\\n• Stop-loss 12¢ (cut fast)\\n• Edge cap 8pt (tightest)\\n• Min tier: confluence+ (top 2 only)\\n• Skip time-cap commits: ON\\n• Max trades/day: 3\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 72-75% WR, ~3-5 trades/day.'))return;
+                  if(!confirm('Apply SURGEON preset?\\n\\n• Edge cap 8pt (tightest)\\n• Min tier: confluence+ (top 2 only)\\n• Skip time-cap commits: ON\\n• Max trades/day: 3\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 72-75% WR, ~3-5 trades/day.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
-                    autoExitOffer:80,
-                    stopLossDeltaCents:12,
+                    // V13.4.292: autoExitOffer:80/stopLossDeltaCents:12 REMOVED, same
+                    //   reason as Sniper/Hunter/Hawk above.
                     maxEdgePt:8,
                     minTier:'confluence',
                     skipTimeCapCommit:true,
@@ -21090,11 +21110,11 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply BALANCED preset?\\n\\n• Take-profit 82¢\\n• Stop-loss 15¢\\n• Edge cap 10pt\\n• Min tier: any\\n• Skip time-cap commits: ON\\n• Max trades/day: 5\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-72% WR, ~8-12 trades/day. Audit-optimal.'))return;
+                  if(!confirm('Apply BALANCED preset?\\n\\n• Edge cap 10pt\\n• Min tier: any\\n• Skip time-cap commits: ON\\n• Max trades/day: 5\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-72% WR, ~8-12 trades/day. Audit-optimal.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
-                    autoExitOffer:82,
-                    stopLossDeltaCents:15,
+                    // V13.4.292: autoExitOffer:82/stopLossDeltaCents:15 REMOVED, same
+                    //   reason as the presets above.
                     maxEdgePt:10,
                     minTier:'any',
                     skipTimeCapCommit:true,
@@ -21124,11 +21144,11 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply VOLUME preset?\\n\\n• Take-profit 85¢\\n• Stop-loss 18¢\\n• Edge cap 15pt\\n• Min tier: any\\n• Skip time-cap commits: OFF (includes lower-WR cluster)\\n• Max trades/day: 10\\n• Max bet: $3\\n• Cooldown: 3 losses → 20 min\\n\\nExpected: 66-68% WR, ~15-25 trades/day. Higher turnover.'))return;
+                  if(!confirm('Apply VOLUME preset?\\n\\n• Edge cap 15pt\\n• Min tier: any\\n• Skip time-cap commits: OFF (includes lower-WR cluster)\\n• Max trades/day: 10\\n• Max bet: $3\\n• Cooldown: 3 losses → 20 min\\n\\nExpected: 66-68% WR, ~15-25 trades/day. Higher turnover.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
-                    autoExitOffer:85,
-                    stopLossDeltaCents:18,
+                    // V13.4.292: autoExitOffer:85/stopLossDeltaCents:18 REMOVED, same
+                    //   reason as the presets above.
                     maxEdgePt:15,
                     minTier:'any',
                     skipTimeCapCommit:false,
@@ -21231,38 +21251,49 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
           React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
             React.createElement('label',{className:'block'},
-              _labelTip('take-profit','Take-profit at offer ¢','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
+              _labelTip('take-profit','Take-profit at offer ¢','Auto-sell when the Kalshi offer on your side reaches this. Measured negative at 8 of 9 levels tested (70-95¢) over 454 replayed calls: 99% of wins touch 80¢+ at some point vs 34% of losses, so a fixed target truncates nearly every winner to spare a third of the losers. 0 = disabled (recommended) — the trailing stop below replaces it. Any value at or under 90¢ fires before the trailing stop can arm, disabling it.'),
               React.createElement('input',{
-                type:'number',min:60,max:99,step:1,value:autoExecSettings?.autoExitOffer||85,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(60,Math.min(99,_num(e.target.value,85)))})),
+                // V13.4.292: was min:60 with a `||85` fallback, so this control could
+                //   never express "off" and displayed a fabricated 85 when the real
+                //   setting was the safe, measured-correct 0 -- matching the same
+                //   `??` pattern the stop-loss field beside it already used correctly.
+                type:'number',min:0,max:99,step:1,value:autoExecSettings?.autoExitOffer??0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(0,Math.min(99,_num(e.target.value,0)))})),
                 className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
               }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                const _c=autoExecSettings?.autoExitOffer||85;
+              React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
+                const _c=Number(autoExecSettings?.autoExitOffer)||0;
+                if(_c===0)return 'rgba(35,185,129,0.85)';
+                if(_c<=TRAIL_ARM_C)return 'rgba(232,69,94,0.95)';
+                return 'rgba(237,237,237,0.40)';
+              })()}},(()=>{
+                const _c=Number(autoExecSettings?.autoExitOffer)||0;
+                if(_c===0)return '✓ DISABLED (recommended) — trailing stop only, sells 8¢ off its high once worth 90¢.';
+                if(_c<=TRAIL_ARM_C)return `⚠ FIRES BEFORE THE TRAIL CAN ARM — ${_c}¢ closes the position before it can reach the ${TRAIL_ARM_C}¢ trailing-stop arm point. This disables the only exit rule measured to work.`;
                 return `= sell when our-side offer ≥ ${_c}¢ on a 100¢ contract (locks in ${_c}% of max payout)`;
               })()),
-              _tipBox('take-profit','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
+              _tipBox('take-profit','Auto-sell when the Kalshi offer on your side reaches this. Measured negative at 8 of 9 levels tested (70-95¢). 0 = disabled (recommended) — the trailing stop replaces it.'),
             ),
             React.createElement('label',{className:'block'},
-              _labelTip('stop-loss','Stop-loss drawdown (¢)','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. V10.2.31 capped at 50¢ — values above 30¢ are dangerous (position can lose most of its value before exit fires). Hunter sets 13¢, Sniper 10¢. Tighter (8-12¢) = cuts losers faster. Looser (20-30¢) = holds longer for recovery. 0 = disabled.'),
+              _labelTip('stop-loss','Stop-loss drawdown (¢)','Auto-sell when our-side offer drops by this many cents below your fill price. Measured negative at all 7 levels tested (10-40¢) over 454 replayed calls. 0 = disabled (recommended) — position holds to Kalshi settlement, capped at the stake you sized the trade for.'),
               React.createElement('input',{
                 // V10.2.31 — max lowered 90 → 50. 75¢ stop on a typical 50-85¢ entry
                 //   means exit at -25¢ to 10¢, i.e. effectively at zero. Useful
                 //   range is 8-30¢; everything above is "no stop" with extra steps.
-                type:'number',min:0,max:50,step:1,value:autoExecSettings?.stopLossDeltaCents??15,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,15)))})),
+                type:'number',min:0,max:50,step:1,value:autoExecSettings?.stopLossDeltaCents??0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
                 className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
               }),
               React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
                 const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
-                if(_c===0)return 'rgba(232,69,94,0.95)';
+                if(_c===0)return 'rgba(35,185,129,0.85)';
                 if(_c>=30)return 'rgba(232,69,94,0.95)';
                 return 'rgba(237,237,237,0.40)';
               })()}},(()=>{
                 const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
-                if(_c===0)return '⚠ DISABLED — position holds to settle (full bet at risk if Tara is wrong). Not recommended.';
-                if(_c>=30)return `⚠ WIDE STOP — ${_c}¢ delta means exit only after losing ${_c}¢/contract. On a typical 50-85¢ fill, this is too late. Hunter recommends 13¢.`;
-                return `= exit if our-side offer drops ${_c}¢ below fill (e.g. filled at 87¢, exit at ${87-_c}¢)`;
+                if(_c===0)return '✓ DISABLED (recommended) — measured negative at every level tested; holds to Kalshi settlement instead.';
+                if(_c>=30)return `⚠ WIDE STOP — ${_c}¢ delta means exit only after losing ${_c}¢/contract. On a typical 50-85¢ fill, this is too late.`;
+                return `⚠ measured negative at all 7 levels tested (10-40¢) — exits if our-side offer drops ${_c}¢ below fill (e.g. filled at 87¢, exit at ${87-_c}¢)`;
               })()),
               _tipBox('stop-loss','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. V10.2.31 capped at 50¢ — values above 30¢ are dangerous.'),
             ),
@@ -21717,8 +21748,13 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
                 const _c=autoExecSettings?.smartExitExtendCents||5;
-                const _base=autoExecSettings?.autoExitOffer||85;
-                return `= raise take-profit target by ${_c}¢ when tape strong (${_base}¢ → ${_base+_c}¢)`;
+                // V13.4.292: was `||85`, fabricating a base target when the real
+                //   take-profit is off (0) -- "raise target from 85 to 90" when no
+                //   fixed target exists to raise.
+                const _base=Number(autoExecSettings?.autoExitOffer)||0;
+                return _base>0
+                  ?`= raise take-profit target by ${_c}¢ when tape strong (${_base}¢ → ${_base+_c}¢)`
+                  :`= raise take-profit target by ${_c}¢ when tape strong (no fixed target is set — this has no effect until one is)`;
               })()),
             ),
             autoExecSettings?.smartExitsEnabled&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed'},
@@ -32794,7 +32830,15 @@ function ScalperAdvisorPanel({
     // Snapshot originals so we can restore on window roll
     const _origs={
       betSize:Number(tradingSettings?.betSize)||10,
-      autoExitOffer:Number(autoExecSettings?.autoExitOffer)||85,
+      // V13.4.292: `||85` fabricated an 85c take-profit out of a genuinely
+      //   disabled (0) setting -- opening this editor to change stake alone
+      //   and saving would arm a fixed TP under TRAIL_ARM_C nobody asked for,
+      //   and both restore paths below (window-roll and refresh-hydrate) then
+      //   wrote that fabricated 85 back as if it were the real prior value.
+      //   `||0` lets a genuine 0 pass through; the only case it changes is
+      //   `undefined` (settings not loaded yet), which now falls back to the
+      //   safe off state instead of a fixed rule nobody chose.
+      autoExitOffer:Number(autoExecSettings?.autoExitOffer)||0,
       stopLossDeltaCents:Number(autoExecSettings?.stopLossDeltaCents)||0,
       entryOverride:ticketEntryOverrideRef?.current||null,
     };
@@ -32809,7 +32853,7 @@ function ScalperAdvisorPanel({
     }catch(_){}
     // Seed inputs with current effective values
     setEditStake(String(Number(tradingSettings?.betSize)||10));
-    setEditCashOut(String(Number(autoExecSettings?.autoExitOffer)||85));
+    setEditCashOut(String(Number(autoExecSettings?.autoExitOffer)||0));
     setEditCutDelta(String(Number(autoExecSettings?.stopLossDeltaCents)||0));
     // Entry seed comes from current display (Tara's calculated)
     const _curEntry=ticketEntryOverrideRef?.current
@@ -32833,7 +32877,7 @@ function ScalperAdvisorPanel({
       return Math.max(min,Math.min(max,n));
     };
     const _stakeNum=_parseNum(editStake,Number(tradingSettings?.betSize)||10,0.5,500);
-    const _coNum=_parseNum(editCashOut,Number(autoExecSettings?.autoExitOffer)||85,1,99);
+    const _coNum=_parseNum(editCashOut,Number(autoExecSettings?.autoExitOffer)||0,0,99);
     const _cutNum=_parseNum(editCutDelta,Number(autoExecSettings?.stopLossDeltaCents)||0,0,90);
     const _entryNum=editEntry===''?null:_parseNum(editEntry,null,1,99);
     try{
@@ -33042,7 +33086,9 @@ function ScalperAdvisorPanel({
   const _previewSitOutReason=(_previewSize&&!_previewWillFire)?_previewSize.reason:null;
   const _maxPayout=_contracts*1.0; // dollars (each contract pays $1 at settle if right)
   const _maxProfit=_maxPayout-_betSize;
-  const _cashOutCents=Number(autoExecSettings?.autoExitOffer)||85;
+  // V13.4.292: was `||85`, fabricating a fixed cash-out price for this
+  //   projection when the real setting is off (0).
+  const _cashOutCents=Number(autoExecSettings?.autoExitOffer)||0;
   const _cashOutProfit=_entryCents?((_cashOutCents-_entryCents)*0.01*_contracts):0;
   const _stopDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
   const _cutCents=_entryCents&&_stopDelta>0?(_entryCents-_stopDelta):null;
@@ -34068,7 +34114,12 @@ ${_d.responseBody||'(empty)'}`;
             //   $1-3 stakes the fee is 1-5¢ total; for bigger positions it matters
             //   more. Now displayed as part of the net so the "+$0.85 net" is
             //   what actually lands in your account, not gross.
-            const _tpCents=Number(autoExecSettings?.autoExitOffer)||85;
+            // V13.4.292: was `||85`, which meant _tpCents could never be 0, which
+            //   meant the `_tpCents>0` guard right below was always true -- this
+            //   tooltip row rendered a fabricated "85¢ target" as an active exit
+            //   rule even when take-profit was genuinely off. `||0` lets the guard
+            //   actually guard.
+            const _tpCents=Number(autoExecSettings?.autoExitOffer)||0;
             if(_tpCents>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
               const _n=_positionKnown?_liveContractsActual:_contracts;
               const _entry=_positionKnown?_liveEntryCents:_entryCents;
@@ -34112,17 +34163,20 @@ ${_d.responseBody||'(empty)'}`;
                 `⚠ stop-loss delta ${_slDelta}¢ is very wide — `,
                 `position can lose ${Math.min(99,Math.round(_slDelta))}¢/contract `,
                 `(${_positionKnown?'~$'+(_slDelta*_liveContractsActual/100).toFixed(2)+' total':'most of stake'}) `,
-                `before exit fires. Hunter recommends 13¢, Sniper 10¢. `,
+                `before exit fires. A fixed stop-loss measured negative at every level tested (10-40¢) — 13¢ included. `,
                 React.createElement('button',{
                   onClick:()=>{
                     if(typeof setAutoExecSettings==='function'){
-                      setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:13}));
-                      try{console.info('[V10.2.31] Stop-loss reset to Hunter default 13¢');}catch(_){}
+                      // V13.4.292: this used to offer 13¢ as "the fix" -- itself a
+                      //   measured loser, just a narrower one. 0 (off) is the actual
+                      //   measured-correct state; the trailing stop replaces it.
+                      setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:0}));
+                      try{console.info('[V13.4.292] Stop-loss disabled (measured-correct default; trailing stop replaces it)');}catch(_){}
                     }
                   },
                   className:'underline ml-1 cursor-pointer',
                   style:{color:'rgba(232,69,94,0.95)',background:'none',border:'none',padding:0,fontSize:'inherit'},
-                },'reset to 13¢'),
+                },'disable it (recommended)'),
               ));
             }
             // stop (cut loss)
@@ -34369,15 +34423,22 @@ ${_d.responseBody||'(empty)'}`;
               }),
             ),
             // Cash out row
-            React.createElement('div',{key:'r3',className:'flex items-center justify-between py-1.5 gap-2'},
-              React.createElement('span',{className:'text-[11px] text-[#EDEDED]/70'},'cash out at (¢)'),
-              React.createElement('input',{
-                type:'number',min:'1',max:'99',step:'1',value:editCashOut,
-                onChange:(e)=>setEditCashOut(e.target.value),
-                className:'flex-1 max-w-[120px] px-2 py-1 rounded-lg text-[12px] tabular-nums text-right',
-                style:{background:'#050508',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
-                placeholder:'e.g. 85',
-              }),
+            React.createElement('div',{key:'r3',className:'flex flex-col py-1.5 gap-1'},
+              React.createElement('div',{className:'flex items-center justify-between gap-2'},
+                React.createElement('span',{className:'text-[11px] text-[#EDEDED]/70'},'cash out at (¢)'),
+                React.createElement('input',{
+                  type:'number',min:'0',max:'99',step:'1',value:editCashOut,
+                  onChange:(e)=>setEditCashOut(e.target.value),
+                  className:'flex-1 max-w-[120px] px-2 py-1 rounded-lg text-[12px] tabular-nums text-right',
+                  style:{background:'#050508',border:'1px solid rgba(237,237,237,0.15)',color:'#EDEDED',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
+                  placeholder:'0 = off',
+                }),
+              ),
+              // V13.4.292: fixed take-profit measured negative at 8/9 levels tested,
+              //   and any value here at or under 90c fires before the trailing stop
+              //   (this file's only measured-positive exit rule) can arm. 0 = off is
+              //   the recommended state, matching the stop-loss row below.
+              React.createElement('span',{className:'text-[9px] italic',style:{color:'rgba(237,237,237,0.45)'}},'0 = disabled (recommended) · under 90 disables the trailing stop'),
             ),
             // Cut loss row
             React.createElement('div',{key:'r4',className:'flex items-center justify-between py-1.5 gap-2'},
@@ -35315,7 +35376,18 @@ function TaraApp(){
           }catch(_){}
           return _v;
         })(),
-        autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
+        // V13.4.292: REMOVED the `autoExitSecLeft` field that used to sit here
+        //   (`Number(v.autoExitSecLeft)>0?...:20`). The exit executor read THIS
+        //   key, but every UI control, every preset, and both mode buttons wrote
+        //   `timeExitSecLeft` instead -- a name that never appears in the object
+        //   this hydrator builds. Since nothing ever wrote `autoExitSecLeft`,
+        //   `Number(undefined)>0` was always false and it was permanently 20 on
+        //   every install, old or new. Net effect: every filled position was
+        //   force-closed with 20s left in the window regardless of what the
+        //   "Time exit" control showed (0 = "no time exit," believed and
+        //   default everywhere) -- a winner sitting at 95c got sold at the bid
+        //   instead of settling at 100 for free. The executor now reads
+        //   `timeExitSecLeft` below, the key everything actually writes.
         // V13.4.253: fixed take-profit defaults OFF. Measured negative at 8 of
         //   9 levels (70..95c) across 454 replayed calls -- 99% of wins touch
         //   80c+ against 34% of losses, so a fixed level truncates the winners.
@@ -35457,10 +35529,6 @@ function TaraApp(){
         lockStabilitySec:Number(v.lockStabilitySec)>=0?Number(v.lockStabilitySec):0,
         // ── V9.6.0: ADVANCED EXIT LOGIC ──────────────────────────────────
         // Stop-loss: exit if our side drops by N¢ from the fill price. 0 = disabled.
-        // V10.2.5: PROMOTED FROM ADVANCED TO RISK GUARDRAILS — it's a discipline
-        //   guard, not an opinion. One-shot migration: if user has 0 (default),
-        //   bump to 15. Honors customizations (any non-zero value left alone).
-        //   Sentinel 'tara_v10_2_5_stoploss_default_applied' ensures single-run.
         stopLossDeltaCents:(()=>{
           // V13.4.253: default OFF (0 = no fixed stop). Measured negative at ALL
           //   7 levels tested (10..40c) over the same 454 calls -- the shipped
@@ -35476,19 +35544,22 @@ function TaraApp(){
               _v=0;
             }
           }catch(_){}
+          // V13.4.292: REMOVED the V10.2.5 one-shot migration that used to sit here
+          //   ("if(_v===0){_v=15;}" gated on 'tara_v10_2_5_stoploss_default_applied").
+          //   It ran AFTER the v267 clear above and was untouched by it -- the clear's
+          //   guard is `_v>0`, so it sees a fresh 0 and skips, then V10.2.5 promotes
+          //   that same 0 straight to 15. Every fresh install, cleared browser
+          //   profile, incognito window, or the second Vercel origin (separate
+          //   localStorage) booted with a 15c fixed stop-loss armed and logged only
+          //   to console -- inside the band measured negative at all 7 levels
+          //   tested. The v267 fix five lines up cannot catch this: it only clears
+          //   an already-nonzero value, and this migration is what MADE it nonzero.
           try{
-            if(!localStorage.getItem('tara_v10_2_5_stoploss_default_applied')){
-              if(_v===0){
-                _v=15;
-                try{console.info('[V10.2.5] stop-loss default applied: 0→15¢ (promoted to Risk guardrails)');}catch(_){}
-              }
-              localStorage.setItem('tara_v10_2_5_stoploss_default_applied','1');
-            }
             // V10.2.31 — clamp persisted SL to max 50¢. If a user had set a wide
             //   stop pre-V10.2.31 (max was 90¢), bring it back into the safe range
             //   on next load. Logs the clamp so it's visible — not silent.
             if(_v>50){
-              try{console.warn(`[V10.2.31] Clamping persisted stopLossDeltaCents ${_v}¢ → 50¢ (max). Wide stops are dangerous; recommend 13¢ (Hunter) or 10¢ (Sniper).`);}catch(_){}
+              try{console.warn(`[V10.2.31] Clamping persisted stopLossDeltaCents ${_v}¢ → 50¢ (max). Wide stops are dangerous; 0 (off) is the measured-correct default.`);}catch(_){}
               _v=50;
             }
           }catch(_){}
@@ -35590,7 +35661,8 @@ function TaraApp(){
         tccSmartBypass:true,skipMarginalCaution:true,
         blockUrgencyApplied:false,lockStabilitySec:0,
         // Hunter exits
-        autoExitOffer:0,autoExitSecLeft:20,   // V13.4.253: fixed TP off by default
+        autoExitOffer:0,   // V13.4.253: fixed TP off by default. V13.4.292: autoExitSecLeft
+                           //   removed here too -- the executor no longer reads it.
         stopLossDeltaCents:0,timeExitSecLeft:0,   // V13.4.253: fixed stop off by default
         // Hunter cooldown
         cooldownLossStreak:3,cooldownMinutes:30,
@@ -41559,23 +41631,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
   // V10.2.31 — HUNTER DRIFT CHECK + RE-APPLY console hooks.
   //   Purpose: catch silent drift from preset values. After applying Hunter,
-  //   users sometimes manually tweak a setting and forget — most dangerous
-  //   when stopLossDeltaCents gets widened (turns "stop" into "ride to zero").
+  //   users sometimes manually tweak a setting and forget.
   //   __taraHunterCheck() compares current autoExec values vs the Hunter spec.
-  //   __taraHunterReapply() resets all 14 Hunter-touched fields to spec values.
+  //   __taraHunterReapply() resets all Hunter-touched fields to spec values.
   useEffect(()=>{
     if(typeof window==='undefined')return;
     // Hunter spec from V10.2.25 preset
+    // V13.4.292: autoExitOffer:82/stopLossDeltaCents:13 REMOVED from this spec.
+    //   Both were stripped from the live HUNTER preset button itself (they are
+    //   measured losers, and 82c disabled the trailing stop). Leaving them here
+    //   meant __taraHunterCheck flagged the correct, safe 0/0 state as "DRIFT"
+    //   and told the user to run __taraHunterReapply() to "fix" it — which
+    //   would silently re-arm both losing rules. minQualityScore was also stale
+    //   (40 here vs the live button's 30, loosened in V10.6.5); corrected to match.
     const HUNTER_SPEC={
       minTier:'tape',
-      minQualityScore:40,
+      minQualityScore:30,
       maxEdgePt:8,
       tradeTimingMode:'advisory',
       skipTimeCapCommit:true,
       tccSmartBypass:true,
       skipMarginalCaution:true,
-      autoExitOffer:82,
-      stopLossDeltaCents:13,
       maxAutoTradesPerDay:8,
       maxAutoTradesPerWindow:1,
       maxBetPerTrade:2.5,
@@ -41619,7 +41695,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         localStorage.setItem('taraKalshiAgreeMode','live');
         if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
       }catch(_){}
-      console.info('[V10.2.31] Hunter spec re-applied across 14 fields + Kalshi-agree live');
+      console.info('[V10.2.31] Hunter spec re-applied across '+Object.keys(HUNTER_SPEC).length+' fields + Kalshi-agree live');
       return{applied:true,fields:Object.keys(HUNTER_SPEC).length+1};
     };
   },[autoExecSettings,setKalshiAgreeMode]);
@@ -45997,7 +46073,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
   //   1. ENTRY  — when lockedCallRef transitions to a new committed lock
   //   2. POLL   — while an order is working, check status every 2s
-  //   3. EXIT   — when offer ≥ autoExitOffer OR seconds-left ≤ autoExitSecLeft, sell out
+  //   3. EXIT   — when offer ≥ autoExitOffer OR seconds-left ≤ timeExitSecLeft, sell out
   // ───────────────────────────────────────────────────────────────────────────
 
   // V9.17.18: MANUAL PLACE-ORDER on Tara's call.
@@ -46224,7 +46300,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // fire wins, which is how the settings panel has always described it:
   //
   //   take-profit  exit value >= autoExitOffer
-  //   time         seconds left <= autoExitSecLeft
+  //   time         seconds left <= timeExitSecLeft
   //   stop-loss    exit value <= fill - stopLossDeltaCents   (0 disables)
   //
   // Prices come from _exitValueCents, the mirror of the entry helper: getting
@@ -46317,7 +46393,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const fill=Number(st.filledAtCents);
       const slDelta=Math.max(0,Number(s.stopLossDeltaCents)||0);
       const tp=Number(s.autoExitOffer)>0?Number(s.autoExitOffer):null;
-      const tExit=Number(s.autoExitSecLeft)>0?Number(s.autoExitSecLeft):null;
+      // V13.4.292: was `s.autoExitSecLeft`, a key nothing in the file ever wrote --
+      //   every UI control, preset, and mode button write `timeExitSecLeft`
+      //   instead. `autoExitSecLeft` therefore always evaluated to its own
+      //   hardcoded fallback, permanently forcing a 20s time exit on every
+      //   position regardless of what the "Time exit" control showed (0 = "no
+      //   time exit," the believed and actual default for everyone). Now reads
+      //   the key every surface actually writes, so 0 genuinely means off.
+      const tExit=Number(s.timeExitSecLeft)>0?Number(s.timeExitSecLeft):null;
 
       // V13.4.253: TRAILING stop, the only exit rule that measured positive.
       //   Arm once the position is worth TRAIL_ARM_C, then exit if it gives
