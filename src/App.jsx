@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.297-dashboard-risk-chip-and-mobile-dup-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.297';
+const BASELINE_VERSION='2026.09.07-v13.4.298-dashboard-column-height-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.298';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -53712,14 +53712,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
         <>
-        <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
+        {/* V13.4.298: lg:auto-rows-fr + the grid default (stretch) forced every
+            column to the height of the tallest one, showing as 400-600px of
+            blank space under the shorter columns' last card once all 3 columns
+            were filled with real content (measured live: center column ~24%
+            blank, right column ~22%, on a 2011px-tall left column). lg:items-start
+            lets each column size to its own content instead -- the tradeoff is
+            the columns' bottom edges no longer line up. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:items-start min-w-0 pb-16 lg:pb-0">
           
           {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
               the first and largest thing on screen, because it is the only card that
               answers "what is happening with my money right now". It was sitting in
               the middle column under the strike, depth and tape chrome.
-              The wrapper is the grid child now, so the column count and auto-rows-fr
-              height matching are unchanged -- same pattern as the middle column. */}
+              The wrapper is the grid child now, so the column count is unchanged --
+              same pattern as the middle column. (V13.4.298: columns no longer
+              height-match; each sizes to its own content.) */}
           <div className="flex flex-col gap-3 min-w-0">
           {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
               numbered stages, always present. Replaces the scattered TARA'S CALL
@@ -53996,9 +54004,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
             {/* V9.10.2: PerformanceCard removed — consolidated into UnifiedTodayCard
                 above. The mt-auto + pt-3 wrapper that pinned it to column bottom no
-                longer has content; left empty to preserve the layout's auto-rows-fr
-                column height behavior. If the prediction column ever needs a bottom
-                element again, this is the spot. */}
+                longer has content; left empty in case the prediction column ever
+                needs a bottom element again. (V13.4.298: mt-auto no longer has
+                anything to push against now that columns aren't stretched.) */}
             <div className="mt-auto pt-3 min-w-0"/>
           </div>
           </div>
@@ -54006,7 +54014,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ──
               v13.4.153: wrapped so News + Live Feeds can sit directly beneath
               Tara's Call. The wrapper is the grid child now, so the column
-              count is unchanged and auto-rows-fr still matches heights. */}
+              count is unchanged. (V13.4.298: columns no longer height-match.) */}
           <div className="flex flex-col gap-3 min-w-0">
           {/* V13.4.263: stages 2 and 3 of the trade -- how it is going, and what
               the auto-exec did about it. Returns null with no open position, so it
