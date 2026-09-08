@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.313-autoexec-card-simplify';
-const TARA_VERSION_DISPLAY='Tara 13.4.313';
+const BASELINE_VERSION='2026.09.08-v13.4.314-autoexec-card-merge';
+const TARA_VERSION_DISPLAY='Tara 13.4.314';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15297,13 +15297,19 @@ function PredictionContent(props){
 
   return(
     <div className="flex flex-col flex-1 gap-3">
-      {/* V9.17.2: When scalperPanelEl is provided, it REPLACES the engine
-          prediction hero (DOWN-CONFIRMED big text, WHAT TARA SEES, score chips,
-          Send LOCK button, forming progress, TARA vs KLSH edge comparison).
-          Quality gate, entry checklist, sync buttons, and the position-exit
-          TaraAdvisorPanel below remain. The scalper panel becomes the user's
-          primary engine view in this column. */}
-      {scalperPanelEl?scalperPanelEl:(
+      {/* V13.4.314: the scalper/auto-exec panel that used to mount here (via
+          the scalperPanelEl prop) now renders inside ThisTradeCard itself, in
+          the left column, so the two read as one card instead of two side by
+          side ("literally combine [auto-exec] with Tara's call"). This branch
+          permanently takes the null side -- the old inline "engine prediction
+          hero" JSX below (DOWN-CONFIRMED big text, WHAT TARA SEES, score
+          chips, Send LOCK button) was already dead/unreachable at this call
+          site before this version (scalperPanelEl was always truthy), so
+          nothing that was actually on screen changes here. Quality gate,
+          entry checklist, sync buttons, and the position-exit TaraAdvisorPanel
+          below are untouched -- they were always siblings of this branch, not
+          part of it. */}
+      {true?null:(
       <div className="flex flex-col items-center text-center pt-1">
         {/* V114: Macro event banner - shows when in BLACKOUT/OBSERVE/ENHANCED state */}
         {(()=>{
@@ -19510,7 +19516,7 @@ function BestPracticesModal({open,onClose}){
 function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYesPrice,
                         autoOrderState,userPosition,trailPeakCents,autoExecSettings,timeFormat,
                         tickHistoryRef,targetMargin,currentPrice,manualKalshiEntry,
-                        killSwitchEngaged,setShowTradingSettings}){
+                        killSwitchEngaged,setShowTradingSettings,children}){
   // Declared BEFORE the early return: hooks must run in the same order on every
   //   render, and this component can return null on the very first one.
   const[whyOpen,setWhyOpen]=React.useState(false);
@@ -19867,6 +19873,16 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
               : <>Sells itself {TRAIL_GIVEBACK_C}¢ off the high. No fixed target.</>}
         </div>
       </Stage>
+
+      {/* V13.4.314: "literally combine [auto-exec] with Tara's call" -- the
+          AUTO-EXEC/scalper panel used to render in a separate card, in a
+          separate grid column (PredictionContent, middle column), so on
+          desktop the two only ever sat side by side, never stacked. It now
+          renders as a slot inside THIS card's own border, right after stage 3,
+          so there is exactly one bordered box instead of two. Nothing about
+          ScalperAdvisorPanel's own logic changed -- only where its JSX
+          mounts. */}
+      {children}
     </div>
   );
 }
@@ -33584,8 +33600,11 @@ function ScalperAdvisorPanel({
     const _sideLabel=showEntryPrompt==='LONG_YES'?'long yes':'long no';
     const _sideColor=showEntryPrompt==='LONG_YES'?'rgb(35,185,129)':'#E8455E';
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #24242E'},
+      // V13.4.314: was its own bordered/backgrounded card shell -- now nests
+      //   inside ThisTradeCard's own border (see the "literally combine" note
+      //   at ThisTradeCard's closing tag), so it takes a plain top hairline
+      //   instead of a second card outline.
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
@@ -33627,8 +33646,10 @@ function ScalperAdvisorPanel({
   // ── EXIT PROMPT ───────────────────────────────────────────────────────
   if(showExitPrompt&&scalperPosition){
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid rgba(35,185,129,0.30)'},
+      // V13.4.314: nests inside ThisTradeCard's own border now -- plain top
+      //   hairline instead of a second card outline (see the "literally
+      //   combine" note at ThisTradeCard's closing tag).
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
@@ -33686,8 +33707,10 @@ function ScalperAdvisorPanel({
       _recColor='#23B981';
     }
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid '+_recColor.replace('0.92','0.25').replace('0.85','0.25').replace('rgb(','rgba(').replace(')',',0.25)')},
+      // V13.4.314: nests inside ThisTradeCard's own border now -- plain top
+      //   hairline instead of a second card outline (see the "literally
+      //   combine" note at ThisTradeCard's closing tag).
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       _topEl,
@@ -33730,8 +33753,10 @@ function ScalperAdvisorPanel({
     const _sideColor=_suggestedSide==='LONG_YES'?'rgb(35,185,129)':'#E8455E';
     const _sideLabel=_suggestedSide==='LONG_YES'?'long yes':'long no';
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid '+_sideColor.replace('rgb(','rgba(').replace(')',',0.30)').replace('0.92','0.30')},
+      // V13.4.314: nests inside ThisTradeCard's own border now -- plain top
+      //   hairline instead of a second card outline (see the "literally
+      //   combine" note at ThisTradeCard's closing tag).
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       _topEl,
@@ -33788,8 +33813,10 @@ function ScalperAdvisorPanel({
       );
     }
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid '+_taraDirColor.replace('rgb(','rgba(').replace(')',',0.25)').replace('0.92','0.25')},
+      // V13.4.314: nests inside ThisTradeCard's own border now -- plain top
+      //   hairline instead of a second card outline (see the "literally
+      //   combine" note at ThisTradeCard's closing tag).
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       // Header: "this round" + window label + LOCKED badge
@@ -34637,8 +34664,11 @@ ${_d.responseBody||'(empty)'}`;
   // ── STATE: BLOCKED ─────────────────────────────────────────────────────
   if(_state==='BLOCKED'){
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #24242E'},
+      // V13.4.314: was its own bordered/backgrounded card shell -- now nests
+      //   inside ThisTradeCard's own border (see the "literally combine" note
+      //   at ThisTradeCard's closing tag), so it takes a plain top hairline
+      //   instead of a second card outline.
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       _topEl,
@@ -34656,8 +34686,11 @@ ${_d.responseBody||'(empty)'}`;
   // ── STATE: DISABLED ────────────────────────────────────────────────────
   if(_state==='DISABLED'){
     return React.createElement('div',{
-      className:'p-4 rounded-lg',
-      style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #24242E'},
+      // V13.4.314: was its own bordered/backgrounded card shell -- now nests
+      //   inside ThisTradeCard's own border (see the "literally combine" note
+      //   at ThisTradeCard's closing tag), so it takes a plain top hairline
+      //   instead of a second card outline.
+      className:'pt-3 mt-3 border-t border-[#16161c]',
     },
       _renderPredictorHeader(),
       _topEl,
@@ -34677,8 +34710,10 @@ ${_d.responseBody||'(empty)'}`;
 
   // ── STATE: IDLE ────────────────────────────────────────────────────────
   return React.createElement('div',{
-    className:'p-4 rounded-lg',
-    style:{background:'var(--tara-bg-card,#121218)',border:'1px solid #24242E'},
+    // V13.4.314: nests inside ThisTradeCard's own border now -- plain top
+    //   hairline instead of a second card outline (see the "literally
+    //   combine" note at ThisTradeCard's closing tag).
+    className:'pt-3 mt-3 border-t border-[#16161c]',
   },
     _renderPredictorHeader(),
     _topEl,
@@ -53854,7 +53889,51 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             timeFormat={timeFormat}
             killSwitchEngaged={killSwitchEngaged}
             setShowTradingSettings={setShowTradingSettings}
-          />
+          >
+            <ScalperAdvisorPanel
+              scalperRead={scalperRead}
+              scalperSettings={scalperSettings}
+              scalperPosition={scalperPosition}
+              setScalperPosition={setScalperPosition}
+              scalperLog={scalperLog}
+              setScalperLog={setScalperLog}
+              scalperSuggestionsRef={scalperSuggestionsRef}
+              scalperDismissedRef={scalperDismissedRef}
+              kalshiYesPrice={kalshiYesPrice}
+              kalshiActiveMarket={kalshiActiveMarket}
+              currentAsset={currentAsset}
+              tiltLockUntil={tiltLockUntil}
+              autoExecSettings={autoExecSettings}
+              setShowTradingSettings={setShowTradingSettings}
+              setTradingSettings={setTradingSettings}
+              setAutoExecSettings={setAutoExecSettings}
+              ticketEntryOverrideRef={ticketEntryOverrideRef}
+              taraCall={taraCall}
+              analysis={analysis}
+              tradingSettings={tradingSettings}
+              autoOrderState={autoOrderState}
+              userPosition={userPosition}
+              manualKalshiEntry={manualKalshiEntry}
+              windowType={windowType}
+              timeState={timeState}
+              useLocalTime={useLocalTime}
+              timeFormat={timeFormat}
+              onPlaceOrderOnTaraCall={_handlePlaceOrderOnTaraCall}
+              manualOrderFeedback={_manualOrderFeedback}
+              killSwitchEngaged={killSwitchEngaged}
+              onClearKillSwitch={()=>setKillSwitchEngaged(false)}
+              onClearAutoOrder={()=>setAutoOrderState(null)}
+              taraCallLog={taraCallLog}
+              kalshiBalance={kalshiBalance}
+              taraSnapshotForTicket={taraCallSnapshotRef.current?{
+                call:taraCallSnapshotRef.current.call,
+                direction:taraCallSnapshotRef.current.direction,
+                tier:taraCallSnapshotRef.current.tier,
+                confidence:taraCallSnapshotRef.current.confidence,
+                caution:taraCallSnapshotRef.current.caution,
+              }:null}
+            />
+          </ThisTradeCard>
           {/* V13.4.294: Conviction + Entry Pricing, matching the mockup's left
               column order (This Trade -> Conviction -> Entry Pricing). Both
               extracted from TaraCallCard, which skips them here on desktop
@@ -54060,51 +54139,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} positionReconciliation={positionReconciliation} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} brtiApprox={brtiApprox} scalperPanelEl={
-              <ScalperAdvisorPanel
-                scalperRead={scalperRead}
-                scalperSettings={scalperSettings}
-                scalperPosition={scalperPosition}
-                setScalperPosition={setScalperPosition}
-                scalperLog={scalperLog}
-                setScalperLog={setScalperLog}
-                scalperSuggestionsRef={scalperSuggestionsRef}
-                scalperDismissedRef={scalperDismissedRef}
-                kalshiYesPrice={kalshiYesPrice}
-                kalshiActiveMarket={kalshiActiveMarket}
-                currentAsset={currentAsset}
-                tiltLockUntil={tiltLockUntil}
-                autoExecSettings={autoExecSettings}
-                setShowTradingSettings={setShowTradingSettings}
-                setTradingSettings={setTradingSettings}
-                setAutoExecSettings={setAutoExecSettings}
-                ticketEntryOverrideRef={ticketEntryOverrideRef}
-                taraCall={taraCall}
-                analysis={analysis}
-                tradingSettings={tradingSettings}
-                autoOrderState={autoOrderState}
-                userPosition={userPosition}
-                manualKalshiEntry={manualKalshiEntry}
-                windowType={windowType}
-                timeState={timeState}
-                useLocalTime={useLocalTime}
-                timeFormat={timeFormat}
-                onPlaceOrderOnTaraCall={_handlePlaceOrderOnTaraCall}
-                manualOrderFeedback={_manualOrderFeedback}
-                killSwitchEngaged={killSwitchEngaged}
-                onClearKillSwitch={()=>setKillSwitchEngaged(false)}
-                onClearAutoOrder={()=>setAutoOrderState(null)}
-                taraCallLog={taraCallLog}
-                kalshiBalance={kalshiBalance}
-                taraSnapshotForTicket={taraCallSnapshotRef.current?{
-                  call:taraCallSnapshotRef.current.call,
-                  direction:taraCallSnapshotRef.current.direction,
-                  tier:taraCallSnapshotRef.current.tier,
-                  confidence:taraCallSnapshotRef.current.confidence,
-                  caution:taraCallSnapshotRef.current.caution,
-                }:null}
-              />
-            }/>
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} positionReconciliation={positionReconciliation} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} brtiApprox={brtiApprox}/>
 
 
             {/* V9.10.2: PerformanceCard removed — consolidated into UnifiedTodayCard
