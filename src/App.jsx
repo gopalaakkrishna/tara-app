@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.317-trading-settings-declutter';
-const TARA_VERSION_DISPLAY='Tara 13.4.317';
+const BASELINE_VERSION='2026.09.08-v13.4.318-bet-size-autosync';
+const TARA_VERSION_DISPLAY='Tara 13.4.318';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20685,6 +20685,12 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
       //   payouts depend on kalshiAtLock entry price, not a fixed 2:1 ratio.
       //   The fields stay (used for P&L stats display + Kelly sizing math) but
       //   the misleading subtitle is replaced with a clarifying note.
+      //   V13.4.318: Bet size now auto-mirrors Max bet/trade (see the sync
+      //   effect on autoExecSettings.maxBetPerTrade near its declaration) so
+      //   moving a dollar preset updates this too instead of silently going
+      //   stale. Still an editable, independent field for the rare case where
+      //   real orders use entry-mode "contracts" (a variable dollar cost) and
+      //   this stat needs a manual number instead.
       React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#050508] border border-[#24242E]'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'Position Sizing — Stats Display'),
         React.createElement('div',{className:'grid grid-cols-2 gap-3'},
@@ -20712,7 +20718,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
         ),
         React.createElement('div',{className:'mt-2 text-[10px] text-[#23B981]/70'},
-          '⚠ Actual Kalshi payouts vary by entry price. Real bet sizing is set under "Max bet/trade" in Risk Guardrails below.',
+          '✓ Bet size follows "Max bet/trade" in Risk Guardrails automatically. Win payout is an estimate — actual Kalshi payouts vary by entry price.',
         ),
       ),
       // V9.17.4: ADVANCED SETTINGS — collapsed by default. User said the modal
@@ -34888,6 +34894,31 @@ function TaraApp(){
     }
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
+  // V13.4.318: "Bet size ($)" under Position Sizing -- Stats Display (used only
+  //   for the flat-rate "today" P&L estimate in todayData, tradingBetSize -- see
+  //   tradingSettings.betSize's other read sites) had no link to Max bet/trade,
+  //   the field the dollar-preset buttons and the real auto-exec sizing path
+  //   (_resolveStakeDollars) actually use. Clicking a preset changed real order
+  //   sizing but silently left this stats-only number stale, understating or
+  //   overstating "today"'s P&L estimate by however far the two had drifted.
+  //   Auto-mirror betSize to maxBetPerTrade on every change (preset click,
+  //   Advanced free-text edit, mission math, anything); rescale winPayout by
+  //   the same ratio so whatever avg-cost-per-contract assumption was implied
+  //   by the PRIOR betSize/winPayout pair is preserved rather than reset to an
+  //   arbitrary default. Skipped when maxBetPerTrade isn't a positive number
+  //   (e.g. contracts entry mode, where a single dollar figure isn't
+  //   meaningful) -- betSize keeps whatever value it last had.
+  useEffect(()=>{
+    const _cap=Number(autoExecSettings?.maxBetPerTrade);
+    if(!(_cap>0))return;
+    setTradingSettings(prev=>{
+      const _prevBet=Number(prev?.betSize)||10;
+      if(Math.abs(_prevBet-_cap)<0.005)return prev; // already in sync
+      const _prevPayout=Number(prev?.winPayout)||8.5;
+      const _ratio=_prevBet>0?(_prevPayout/_prevBet):0.85;
+      return{...prev,betSize:_cap,winPayout:Math.round(_cap*_ratio*100)/100};
+    });
+  },[autoExecSettings?.maxBetPerTrade]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
   // Bankroll-target trading. User configures a starting amount, target, end
   // date, and drawdown floor. Tara sizes each trade using fractional Kelly
