@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.312-hourly-egress-guard';
-const TARA_VERSION_DISPLAY='Tara 13.4.312';
+const BASELINE_VERSION='2026.09.08-v13.4.313-autoexec-card-simplify';
+const TARA_VERSION_DISPLAY='Tara 13.4.313';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33362,40 +33362,33 @@ function ScalperAdvisorPanel({
   const _yes=Number(kalshiYesPrice);
   const _isYesLive=Number.isFinite(_yes);
   const _entryCents=_isYesLive&&_taraDir?(_taraDir==='UP'?Math.round(_yes):Math.round(100-_yes)):null;
-  // V9.19.18: ticket preview uses the SAME central sizing function as the fire path.
-  //   Inputs mirror what the entry effect at L27750ish passes in. The preview's
-  //   sole job is to show: "this is exactly what will fire when Tara locks."
-  //   If decision is 'sit-out-cap' / 'sit-out-tiny' / 'sit-out-bad', the ticket
-  //   surfaces that as a warning instead of pretending the trade will fire.
-  //   Mission mode preview is best-effort: mission's bet depends on cluster-WR
-  //   lookup that the panel doesn't have; we omit missionResult here and the
-  //   function falls back to tradingSettings.betSize for mission.
-  const _previewConviction=Math.abs((Number(analysis?.rawProbAbove)||50)-50);
-  const _previewSize=_entryCents&&_taraDir?computeAutoExecSize({
-    sizingMode:autoExecSettings?.sizingMode||'fixed',
-    entryMode:autoExecSettings?.entryMode||'dollars',
-    tradingBetSize:Number(tradingSettings?.betSize)||0,
-    confidenceLowBet:Number(autoExecSettings?.confidenceLowBet)||5,
-    confidenceHighBet:Number(autoExecSettings?.confidenceHighBet)||25,
-    kellyBlend:Number(autoExecSettings?.kellyBlend)||0,
-    entryContracts:Number(autoExecSettings?.entryContracts)||5,
-    entryPercentBalance:Number(autoExecSettings?.entryPercentBalance)||10,
-    maxBetPerTrade:Number(autoExecSettings?.maxBetPerTrade)||25,
-    costPerContractCents:_entryCents,
-    rawProbAbove:Number(analysis?.rawProbAbove)||50,
-    dir:_taraDir,
-    conviction:_previewConviction,
-    kalshiBalance:Number(kalshiBalance?.balance)||0,
-    missionResult:null, // preview doesn't have mission cluster context
-    tier:'single', // preview shows the default-tier outcome
-    manualBypass:false,
-  }):null;
-  const _betSize=_previewSize?_previewSize.intendedDollars:(Number(tradingSettings?.betSize)||10);
-  const _contracts=_previewSize?_previewSize.intendedContracts:(_entryCents?Math.max(1,Math.floor(_betSize/(_entryCents*0.01))):1);
-  // V9.19.18: surfaces sit-out reasons so the ticket can warn the user before they
-  //   trust the displayed numbers. e.g. "would sit out: $3.55 > cap $1.00"
-  const _previewWillFire=_previewSize?(_previewSize.decision==='fire'||_previewSize.decision==='fire-bypass-cap'):true;
-  const _previewSitOutReason=(_previewSize&&!_previewWillFire)?_previewSize.reason:null;
+  // V13.4.313: this used to run computeAutoExecSize -- its own sizing simulation,
+  //   defaulting to sizingMode 'fixed', which bases the number on
+  //   tradingSettings.betSize and only used maxBetPerTrade as a ceiling. That is
+  //   a DIFFERENT function from the one that actually sizes real orders,
+  //   _resolveStakeDollars, which in the non-mission/non-contracts case just
+  //   returns maxBetPerTrade directly. So moving a dollar-preset button changed
+  //   the real order size but usually left this on-screen number unchanged,
+  //   since betSize was still comfortably under the old cap.
+  //   Mirrors _resolveStakeDollars's own non-mission branches exactly instead,
+  //   so this figure is always what would actually fire. Mission-mode sizing
+  //   needs `mission`/`regimeDirCalibration`/the live engine lock, none of
+  //   which this panel receives -- while a mission is active this still shows
+  //   the flat cap, the same honest fallback _resolveStakeDollars itself falls
+  //   back to when mission math comes back invalid, and dollar presets are
+  //   hidden in Mission Mode anyway so this case doesn't reach the user's ask.
+  const _stakeCap=Math.max(0,Number(autoExecSettings?.maxBetPerTrade)||0);
+  const _betSize=(autoExecSettings?.entryMode==='contracts'&&_entryCents>0)
+    ?Math.min(_stakeCap,(Math.max(1,Math.floor(Number(autoExecSettings?.entryContracts)||0))*_entryCents)/100)
+    :_stakeCap;
+  const _contracts=_entryCents?Math.max(1,Math.floor(_betSize/(_entryCents*0.01))):1;
+  // A real order only fails to fire on size when no max bet is configured at
+  //   all (_resolveStakeDollars returns 0 and _runEntry's stake>0 check stops
+  //   it there) -- the old 'sit-out-cap'/'sit-out-tiny'/'sit-out-bad' reasons
+  //   came from computeAutoExecSize's own sizing-mode framework, which never
+  //   governed a real order in the first place.
+  const _previewWillFire=_stakeCap>0;
+  const _previewSitOutReason=_previewWillFire?null:'No max bet configured — set one in Trading Settings before this can fire.';
   const _maxPayout=_contracts*1.0; // dollars (each contract pays $1 at settle if right)
   const _maxProfit=_maxPayout-_betSize;
   // V13.4.292: was `||85`, fabricating a fixed cash-out price for this
@@ -33504,225 +33497,31 @@ function ScalperAdvisorPanel({
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // V9.19.5 — PREDICTOR HEADER (extracted helper, rendered in every state).
-  //   Was inline in the LOCKED render path only (V9.19.0-V9.19.4). User
-  //   wanted AUTO/MANUAL + signal source + mode toggles to be reachable
-  //   regardless of Tara's state — to toggle BEFORE a trade fires (when
-  //   she's scanning), not just after she locks. Now defined here and
-  //   called at the top of every return path.
-  // ─────────────────────────────────────────────────────────────────────────
-  const _renderPredictorHeader=()=>React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#24242E]'},
-    // Title row: "Predictor"
-    // V13.4.266: was the bare word 'predictor'. It predicts nothing -- it is the
-    //   auto-exec control surface, which is how he describes it himself. Named for
-    //   what it does, with the state it is actually in, read live off the settings
-    //   so it cannot drift from behaviour the way static copy does.
-    (()=>{
-      const _armed=!!autoExecSettings?.enabled;
-      const _dry=autoExecSettings?.dryRun!==false;
-      const _killed=!!killSwitchEngaged;
-      const _tone=_killed?'#E8455E':(_armed&&!_dry)?'#23B981':'#D4A03A';
-      const _chip=_killed?'stopped':_armed?(_dry?'practice':'live'):'off';
-      const _line=_killed?'Stopped. The kill switch is on, nothing will be placed.'
-        :!_armed?'Calling only. Tara picks a side, you place the order yourself.'
-        :_dry?'Practising. Orders are simulated, never sent to Kalshi.'
-        :'Placing real orders on Kalshi when Tara locks.';
-      return React.createElement('div',{key:'ax-head',className:'mb-2.5'},
-        React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-1.5'},
-          React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:_tone}},'auto-exec'),
-          React.createElement('span',{
-            className:'text-[9px] uppercase font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-md',
-            style:{color:_tone,border:'1px solid '+_tone+'47',background:_tone+'1A'},
-          },_chip),
-        ),
-        React.createElement('div',{className:'text-[11px] leading-snug',style:{color:'rgba(237,237,237,0.62)'}},_line),
-      );
-    })(),
-    // Row 1: AUTO / MANUAL toggle
-    React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #24242E'}},
-      (()=>{
-        const _isAuto=!!autoExecSettings?.enabled;
-        const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
-        return [
-          React.createElement('button',{
-            key:'auto',
-            className:_btnBase,
-            style:_isAuto
-              ?{background:'rgba(35,185,129,0.16)',color:'rgb(35,185,129)',borderRight:'1px solid rgba(35,185,129,0.30)'}
-              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #24242E'},
-            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:true}));},
-            title:'auto-exec ON: place orders automatically when Tara locks',
-          },'auto'),
-          React.createElement('button',{
-            key:'manual',
-            className:_btnBase,
-            style:!_isAuto
-              ?{background:'rgba(35,185,129,0.16)',color:'#23B981'}
-              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)'},
-            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:false}));},
-            title:'manual only: Tara still locks but no orders fire automatically',
-          },'manual'),
-        ];
-      })(),
+  // V13.4.313: SIMPLIFIED per user request ("extremely simple, match the
+  //   theme"). This used to render 3 rows of settings toggles (AUTO/MANUAL,
+  //   Tara's Call/Trade, Mode Patient/Fast) plus a Phase-4 badge and a full
+  //   restatement of the exit rule -- every one of them either duplicating a
+  //   control that already lives in Trading Settings, or (Tara's Call/Trade)
+  //   never touching a real order in the first place: _runEntry always
+  //   resolves direction straight off lockedCallRef.current, never off
+  //   autoExecSettings.signalSource, no matter which side of that toggle was
+  //   picked -- its own tooltip admitted "real Tara's Trade model is phase 4
+  //   work." Down to the one status word (via computeAutoExecReadout, the
+  //   same helper ThisTradeCard's own chip uses, so the two can't drift) and
+  //   the one figure this card owns that nothing else on the page shows:
+  //   today's aggregate P&L across every resolved trade, auto or manual.
+  const _renderPredictorHeader=()=>{
+    const _exec=computeAutoExecReadout(autoExecSettings,killSwitchEngaged);
+    return React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#24242E]'},
+    React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-2.5'},
+      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em] text-[#EDEDED]/40'},'auto-exec'),
+      React.createElement('span',{
+        className:'text-[10px] uppercase font-bold tracking-[0.12em] cursor-pointer hover:opacity-75 transition-opacity',
+        style:{color:_exec.tone},
+        onClick:()=>{if(typeof setShowTradingSettings==='function')setShowTradingSettings(true);},
+        title:'Open Trading Settings',
+      },_exec.word),
     ),
-    // Row 2: Tara's Call / Tara's Trade toggle
-    React.createElement('div',{className:'flex gap-0 mb-2 rounded-lg overflow-hidden',style:{border:'1px solid #24242E'}},
-      (()=>{
-        const _src=autoExecSettings?.signalSource||'snapshot';
-        const _isCall=_src==='snapshot';
-        const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
-        return [
-          React.createElement('button',{
-            key:'call',
-            className:_btnBase,
-            style:_isCall
-              ?{background:'rgba(35,185,129,0.16)',color:'#23B981',borderRight:'1px solid rgba(35,185,129,0.30)'}
-              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #24242E'},
-            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'snapshot'}));},
-            title:"use Tara's settled call (snapshot) — public read, 67% WR baseline",
-          },"tara's call"),
-          React.createElement('button',{
-            key:'trade',
-            className:_btnBase,
-            style:!_isCall
-              ?{background:'rgba(35,185,129,0.16)',color:'rgb(35,185,129)'}
-              :{background:'#0E0E12',color:'rgba(237,237,237,0.45)'},
-            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'lock'}));},
-            title:"use Tara's engine lock — fires earlier, may diverge from snapshot. real 'Tara's Trade' model is phase 4 work.",
-          },[
-            "tara's trade",
-            React.createElement('span',{key:'lbl',className:'ml-1 normal-case opacity-50',style:{fontSize:'8px'}},'(engine lock)'),
-          ]),
-        ];
-      })(),
-    ),
-    // V10.2.0: Phase 4 status badge. Subscribes to the module-level pub/sub so it
-    //   updates live as Phase 4 evaluates each lock. Hidden when mode is 'off'.
-    React.createElement(_Phase4Badge,{key:'phase4-badge',mode:autoExecSettings?.tradeTimingMode}),
-    // Row 3: Mode preset buttons (Patient A / Fast B)
-    React.createElement('div',{className:'flex items-center gap-1.5'},
-      React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'rgba(237,237,237,0.40)'}},'mode'),
-      (()=>{
-        // V9.19.23: PRESETS REFINED based on real-market exit fill behavior.
-        //
-        // Patient (A) — "let winners run, kill losers tight"
-        //   • Patient entry waits for cheaper fills (≤45¢, up to 90s)
-        //   • Stop 15¢: cut losses quick; patient is about waiting for the
-        //     RIGHT entry, not riding bad trades.
-        //   • Target 88¢: a hair below 90¢ — most 90¢ targets miss as the
-        //     offer pulls back 1-2¢ near the high. 88¢ has a much higher
-        //     real-fill rate while still capturing nearly all the win.
-        //   • Time exit 45s: leave settlement chaos to the impulsive.
-        //   • Lock stability 5s: wait a moment to filter whipsaws (these
-        //     bottom-of-quality locks are the ones that lose).
-        //   • Min tier 'any': we entered patiently; no need for extra filter.
-        //
-        // Fast (B) — "scalp, book early, cut faster"
-        //   • Patient entry OFF, +2¢ slippage to ensure immediate fill.
-        //   • Stop 20¢: tighter than old 25¢. Fast = high WR small wins;
-        //     don't ride losses far.
-        //   • Target 78¢: book profits before they fade. Fast windows can
-        //     reverse hard in the final third.
-        //   • Time exit 60s: exit even earlier — fast mode's edge is small
-        //     wins; time decay near close erodes them.
-        //   • Lock stability 0s: speed is the point of fast.
-        //   • Min tier 'structural': stricter — fast mode without quality
-        //     filter is gambling.
-        //
-        // Both modes: smart-exits ON, min-profit 5¢ — be willing to take
-        //   small wins when Tara's read flips instead of watching them
-        //   evaporate.
-        // V13.4.266: stopLossDeltaCents:15 and autoExitOffer:88 REMOVED. Both were
-        //   measured-losing rules that v253/v261 deliberately cleared, and this
-        //   button wrote them straight back. The 88c target also sat below
-        //   TRAIL_ARM_C (90), so it fired before the trailing stop could arm --
-        //   one click silently disabled the only exit rule that measured as working.
-        //   The entry and timing half of the preset is untouched; it was never the
-        //   problem, and patient entry is what the mode is actually for.
-        const _PATIENT={
-          patientEntryEnabled:true,
-          patientEntryMaxCents:45,
-          patientEntryMaxWaitSec:90,
-          entryLadderEnabled:false,
-          slippageCents:0,
-          timeExitSecLeft:45,
-          smartExitsEnabled:true,
-          smartExitMinProfitCents:5,
-          lockStabilitySec:5,
-          minTier:'any',
-        };
-        const _FAST={
-          patientEntryEnabled:false,
-          entryLadderEnabled:false,
-          slippageCents:2,
-          // V13.4.266: stopLossDeltaCents:20 / autoExitOffer:78 removed, same
-          //   reason as patient above -- and 78c is further under the 90c trail arm.
-          timeExitSecLeft:60,
-          smartExitsEnabled:true,
-          smartExitMinProfitCents:5,
-          lockStabilitySec:0,
-          minTier:'structural',
-        };
-        // V13.4.266: these keyed off the two fields the presets no longer write,
-        //   so both buttons would have read as permanently inactive. Rebased onto
-        //   what each preset still actually sets, which is what distinguishes them.
-        const _isPatientActive=
-          autoExecSettings?.patientEntryEnabled===true
-          &&Number(autoExecSettings?.slippageCents||0)===0
-          &&Number(autoExecSettings?.timeExitSecLeft)===45;
-        const _isFastActive=
-          autoExecSettings?.patientEntryEnabled===false
-          &&Number(autoExecSettings?.slippageCents)===2
-          &&autoExecSettings?.minTier==='structural';
-        const _applyMode=(preset)=>{
-          if(typeof setAutoExecSettings!=='function')return;
-          setAutoExecSettings(prev=>({...prev,...preset}));
-        };
-        const _btnStyleActive={background:'rgba(35,185,129,0.14)',color:'rgb(35,185,129)',border:'1px solid rgba(35,185,129,0.32)'};
-        const _btnStyleIdle={background:'rgba(237,237,237,0.04)',color:'rgba(237,237,237,0.55)',border:'1px solid #24242E'};
-        return React.createElement('div',{className:'flex gap-1 flex-1'},
-          React.createElement('button',{
-            key:'patient',
-            className:'flex-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-colors cursor-pointer',
-            style:_isPatientActive?_btnStyleActive:_btnStyleIdle,
-            onClick:()=>_applyMode(_PATIENT),
-            title:'patient (A): waits for a cheaper entry (≤45¢, up to 90s), rests instead of crossing the spread, exits 45s before the close, and takes a small profit if Tara flips. Lower fire rate, better entry price. Does not touch how the trade exits on price — that is the trailing stop.',
-          },[
-            React.createElement('span',{key:'a',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'A'),
-            'patient',
-          ]),
-          React.createElement('button',{
-            key:'fast',
-            className:'flex-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-colors cursor-pointer',
-            style:_isFastActive?_btnStyleActive:_btnStyleIdle,
-            onClick:()=>_applyMode(_FAST),
-            title:'fast (B): fires immediately at offer+2¢, exits 60s before the close, structural-tier locks only. Higher fire rate, worse entry price. Does not touch how the trade exits on price — that is the trailing stop.',
-          },[
-            React.createElement('span',{key:'b',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'B'),
-            'fast',
-          ]),
-        );
-      })(),
-    ),
-    // V13.4.266: how the trade GETS OUT, stated where the mode buttons are --
-    //   because until this version those buttons quietly wrote a fixed take-profit
-    //   BELOW the trailing arm, so picking a mode disabled the trail without
-    //   saying so anywhere. Read live from the settings, not hardcoded.
-    (()=>{
-      const _tp=Number(autoExecSettings?.autoExitOffer)||0;
-      const _sl=Number(autoExecSettings?.stopLossDeltaCents)||0;
-      const _trailKilled=_tp>0&&_tp<=TRAIL_ARM_C;
-      const _txt=_trailKilled
-        ?'Exit: fixed take-profit at '+_tp+'\u00a2, which fires before the trailing stop can arm at '+TRAIL_ARM_C+'\u00a2.'
-        :(_tp>0||_sl>0)
-          ?'Exit: trailing stop, plus a fixed rule you set'+(_tp>0?' (take '+_tp+'\u00a2)':'')+(_sl>0?' (cut '+_sl+'\u00a2)':'')+'.'
-          :'Exit: trailing stop only \u2014 sells '+TRAIL_GIVEBACK_C+'\u00a2 off its high once the contract is worth '+TRAIL_ARM_C+'\u00a2.';
-      return React.createElement('div',{
-        key:'exit-line',
-        className:'mt-2 text-[10px] leading-snug',
-        style:{color:_trailKilled?'#E8455E':'rgba(237,237,237,0.42)'},
-      },_txt);
-    })(),
     // P&L strip
     // V10.2.9 — was filtered to autoExec=true only, which left the pill blank
     //   forever for users who hadn't run auto-exec yet (the 814 historical
@@ -33778,6 +33577,7 @@ function ScalperAdvisorPanel({
       );
     })(),
   );
+  };
 
   // ── ENTRY PROMPT ──────────────────────────────────────────────────────
   if(showEntryPrompt){
