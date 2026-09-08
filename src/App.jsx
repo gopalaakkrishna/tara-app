@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.319-drift-dryrun-falsepositive';
-const TARA_VERSION_DISPLAY='Tara 13.4.319';
+const BASELINE_VERSION='2026.09.08-v13.4.320-fold-legacy-prediction-card';
+const TARA_VERSION_DISPLAY='Tara 13.4.320';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15212,7 +15212,6 @@ function PredictionContent(props){
     isLoading,analysis,currentPrice,
     qualityGate,userPosition,timeState,streakData,
     manualKalshiEntry,setManualKalshiEntry, // V10.2.9: manual fill recorder
-    positionReconciliation, // V10.2.10: portfolio reconciliation banner data
     handleManualSync,getMarketSessions,executeAction,
     broadcastSignalManual,discordWebhook,regimeDirWR,
     kalshiYesPrice,
@@ -15884,12 +15883,13 @@ function PredictionContent(props){
       </div>
       )}
 
-      {/* V10.2.10 — POSITION RECONCILIATION DRIFT BANNER
-          Shows ONLY when the 30s poll detected drift between Tara's tracked
-          state and the actual Kalshi book. Each drift item rendered as its own
-          line with a clear action hint. Banner is dismissable but reappears
-          on the next poll if drift persists. */}
-      <PositionReconciliationBanner positionReconciliation={positionReconciliation}/>
+      {/* V13.4.320: POSITION RECONCILIATION DRIFT BANNER moved out of here --
+          this whole legacy "prediction card" (progress bar, quality gate,
+          entry checklist, manual ENTERED UP/DOWN) is now hidden on desktop
+          (see its wrapper's className), but the drift banner is a real
+          safety check for auto-exec and needs to stay visible regardless.
+          It now renders once, always-visible, next to THIS TRADE at the top
+          of the column. See its new call site near <ThisTradeCard. */}
 
       {analysis.lockInfo&&(
         <QualityGateCard qualityGate={qualityGate} regime={analysis.regime} session={getMarketSessions().dominant}/>
@@ -53064,6 +53064,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               same pattern as the middle column. (V13.4.298: columns no longer
               height-match; each sizes to its own content.) */}
           <div className="flex flex-col gap-3 min-w-0">
+          {/* V13.4.320 — POSITION RECONCILIATION DRIFT BANNER, relocated here from
+              inside the legacy "prediction card" (now hidden on desktop, see its
+              wrapper below) so it stays visible regardless. Real safety check for
+              auto-exec: flags when Tara's tracked position doesn't match Kalshi's
+              actual book. Shows ONLY when the 30s poll detects drift (v13.4.319
+              fixed a false-positive on dry-run fills). */}
+          <PositionReconciliationBanner positionReconciliation={positionReconciliation}/>
           {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
               numbered stages, always present. Replaces the scattered TARA'S CALL
               headline + TRADE COACH + auto-exec status that all described the same
@@ -53144,7 +53151,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           <EntryPricingCard taraCall={taraCall}/>
           </div>
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          {/* V13.4.320: hidden on desktop (auto-exec only, per direct answer --
+              "fold the whole lower card away, keep only what auto-exec needs").
+              This card's countdown/progress-bar/quality-read duplicated THIS
+              TRADE above it, and its actionable content (Quality Gate detail,
+              Entry Checklist, "ENTERED UP/DOWN" manual-sync buttons,
+              ManualKalshiEntryInput) is the MANUAL trading path -- not used.
+              The one real safety piece it held, Position Reconciliation Drift,
+              was relocated above THIS TRADE so it stays visible. Mobile is
+              untouched: this remains the "signal" tab's primary content there,
+              same as before -- only lg:hidden is new. */}
+          <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab==='signal'?'flex':'hidden'} lg:hidden`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
@@ -53336,7 +53353,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} positionReconciliation={positionReconciliation} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} brtiApprox={brtiApprox}/>
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} brtiApprox={brtiApprox}/>
 
 
             {/* V9.10.2: PerformanceCard removed — consolidated into UnifiedTodayCard
