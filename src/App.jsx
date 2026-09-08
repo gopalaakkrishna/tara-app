@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.318-bet-size-autosync';
-const TARA_VERSION_DISPLAY='Tara 13.4.318';
+const BASELINE_VERSION='2026.09.08-v13.4.319-drift-dryrun-falsepositive';
+const TARA_VERSION_DISPLAY='Tara 13.4.319';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -45981,7 +45981,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // V10.7.32: also reconcile when status='exit-pending' (V10.7.26 exit
       //   limit placed but not yet filled — we want to verify the position
       //   is still open on Kalshi until fill completes).
-      if(_aos&&(_aos.status==='filled'||_aos.status==='exiting'||_aos.status==='exit-pending')&&_aos.ticker){
+      // V13.4.319: exclude dry-run fills. A dry-run "filled" order never
+      //   reaches the real Kalshi API (kalshiPlaceOrder short-circuits to a
+      //   synthetic response), so positions.find() can never match it --
+      //   this fired 'phantom-auto' on EVERY dry-run auto-exec trade,
+      //   unconditionally, framed as "likely closed manually or order
+      //   errored" when nothing had gone wrong at all. Reported live: the
+      //   banner was constantly up while testing in the recommended
+      //   dry-run-with-real-credentials setup (Trading Settings' own
+      //   walkthrough Step 2/4). Real-money drift detection is untouched --
+      //   this only skips the comparison when there is provably no real
+      //   order to compare against.
+      if(_aos&&!_aos.dryRun&&(_aos.status==='filled'||_aos.status==='exiting'||_aos.status==='exit-pending')&&_aos.ticker){
         const _match=positions.find(p=>p.ticker===_aos.ticker);
         // V13.4.291: this read _aos.count, a name the writer never sets, so
         //   Number(_aos.count) was NaN at every one of these five call sites.
