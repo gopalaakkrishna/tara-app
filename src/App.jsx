@@ -4750,10 +4750,26 @@ const kalshiPlaceOrder=async({apiKeyId,privateKeyPem,ticker,dir,limitCents,betDo
   const built=kalshiBuildOrder({ticker,dir,limitCents,betDollars});
   if(!built.ok)return{ok:false,reason:built.reason,dryRun:!!dryRun};
   if(dryRun){
+    // V13.4.311 FIX: was status:'resting'. kalshiRunEntryLadder gives a
+    //   takesSpread rung zero wait time (deadline=Date.now()+0, "it either
+    //   fills or it does not") and only ever learns of a fill by polling
+    //   kalshiGetOrder -- but a zero-length deadline means that poll loop
+    //   never runs even once, so a 'resting' placement response can NEVER
+    //   become 'filled' for the single rung entryLadderEnabled:false (the
+    //   common case) ever produces. Confirmed live: every dry-run entry
+    //   attempt failed with reason:'no-fill', 100% of the time, regardless
+    //   of settings -- dry-run mode was silently non-functional for its
+    //   one stated purpose ("verify one sandbox order end-to-end" before
+    //   arming real money). kalshiExitPosition's own dry-run branch already
+    //   hardcodes status:'filled' (line ~4899) and kalshiGetOrder's dry-run
+    //   branch does too -- this was the one place that still said
+    //   'resting', and the file's own comment history above
+    //   kalshiNormalizeOrder ("Dry-run worked because dry-run hardcoded
+    //   'filled'") confirms 'filled' was the original, correct intent.
     return{ok:true,dryRun:true,order:{
       order_id:`DRY_${built.client_order_id}`,client_order_id:built.client_order_id,
       ticker,side:built.side,v2Side:built.v2Side,action:'buy',type:'limit',count:built.count,
-      price:built.body.price,status:'resting',
+      price:built.body.price,status:'filled',
       created_time:new Date().toISOString(),
       _simulated:true,
     }};
@@ -5655,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.310-mission-kelly-sizing-live';
-const TARA_VERSION_DISPLAY='Tara 13.4.310';
+const BASELINE_VERSION='2026.09.07-v13.4.311-dryrun-fill-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.311';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
