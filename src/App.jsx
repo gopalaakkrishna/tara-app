@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.314-autoexec-card-merge';
-const TARA_VERSION_DISPLAY='Tara 13.4.314';
+const BASELINE_VERSION='2026.09.08-v13.4.315-autoexec-pnl-tagging-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.315';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33548,7 +33548,7 @@ function ScalperAdvisorPanel({
       const _today=_dayKey(new Date(),timeFormat); // V10.2.x: honors header TZ
       const _todayAll=_log.filter(e=>e
         &&(e.result==='WIN'||e.result==='LOSS')
-        &&_dayKey(e.resolvedTimestampISO||e.timestampISO||0,timeFormat)===_today);
+        &&_dayKey(e.resolvedAt||e.time||0,timeFormat)===_today);
       const _todayAuto=_todayAll.filter(e=>e.autoExec===true);
       const _todayManual=_todayAll.filter(e=>e.autoExec!==true);
       const _n=_todayAll.length;
@@ -42455,6 +42455,38 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       entryPriceEstimate:_autoEntry, // keep for backwards compat
                       entrySource:_autoEntry!=null?'kalshi-at-lock':'unknown',
                     };
+                  })(),
+                  // V13.4.315: tag with the SAME real settlement-ledger data the
+                  //   Mission-bankroll effect already reads (v13.4.309,
+                  //   _execSettlementLedgerRef, keyed 'BTC|'+windowId at fill
+                  //   time). Before this, NOTHING ever wrote autoExec:true or
+                  //   realizedPnLDollars onto a taraCallLog entry for the real
+                  //   Kalshi engine -- only handleManualSync's separate opts.autoExec
+                  //   path could set them, and nothing ever calls it with
+                  //   autoExec:true. Confirmed live: a dry-run trade fired through
+                  //   the real entry effect, held to a real WIN, and its log entry
+                  //   carried neither field -- the auto-exec P&L strip
+                  //   (ScalperAdvisorPanel's _renderPredictorHeader) counted it as
+                  //   "manual" and could never show a dollar figure, no matter how
+                  //   many real trades fired. Mirrors the mission effect's exact
+                  //   ledger lookup + hold-to-settlement math (lines ~46655-46674)
+                  //   so the two can never disagree about the same trade.
+                  ...(()=>{
+                    const _ledgerKey=(idx.e.asset||'BTC')+'|'+idx.e.windowId;
+                    const _ledger=(typeof _execSettlementLedgerRef!=='undefined')?_execSettlementLedgerRef.current[_ledgerKey]:null;
+                    if(!_ledger)return{};
+                    let _realized=null;
+                    if(_ledger.exitedAt!=null&&_ledger.realizedPnLDollars!=null){
+                      // Closed early (trailing stop / take-profit / cut-loss / time
+                      //   exit) -- the real exit fill, not settlement math.
+                      _realized=_ledger.realizedPnLDollars;
+                    } else if(_ledger.stakeDollars!=null&&_ledger.filledCount!=null){
+                      // Held to natural settlement -- standard win/lose-max-payout
+                      //   math on the REAL stake/count this window actually filled.
+                      const _maxPayout=Number(_ledger.filledCount)*1.0;
+                      _realized=_resolvedResult==='WIN'?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
+                    }
+                    return{autoExec:true,realizedPnLDollars:_realized};
                   })(),
                   // V9.10.5: prefer closure-captured timeSeries + releaseSignalsHistory
                   //   from before the rollover clear. lockedCallRef.current is null by now
