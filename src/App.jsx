@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.309-mission-bankroll-settlement';
-const TARA_VERSION_DISPLAY='Tara 13.4.309';
+const BASELINE_VERSION='2026.09.07-v13.4.310-mission-kelly-sizing-live';
+const TARA_VERSION_DISPLAY='Tara 13.4.310';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7554,6 +7554,41 @@ const _missionComputeBet=({bankroll,target,daysRemaining,floor,p,limitCents,frac
     fractionOfBankroll:_fracOfBankroll,
     reason:`Kelly ${(_kellyFrac*100).toFixed(0)}% × ${fractionalKellyMult}× = ${(_fracOfBankroll*100).toFixed(1)}% of $${bankroll.toFixed(0)}`,
   };
+};
+
+// V13.4.310: wires Mission Mode's real fractional-Kelly math into actual
+//   order sizing. _missionGetClusterWR and _missionComputeBet above have
+//   been fully built since Mission Mode shipped but had zero callers --
+//   this is the first. A pure function, everything passed in explicitly,
+//   nothing closed over -- so it can be (and was) sanity-tested standalone
+//   across a bankroll/WR/cost/days-remaining grid before it ever touched a
+//   live credential (see project_tara_autoexec_simplify memory).
+// `fallbackDollars` does double duty: it's both (a) what gets returned
+//   whenever Mission math declines to size at all -- no edge, thin sample,
+//   bankroll at/under floor, resulting size under $1 -- so a Mission veto
+//   never means "no rail at all," and (b) the maxBetCap fed into
+//   _missionComputeBet, so the existing max-bet-per-trade ceiling stays the
+//   hard backstop in Mission Mode exactly as it already is outside it.
+const _missionResolveStakeDollars=({mission,regimeDirCal,lock,costCents,fallbackDollars})=>{
+  if(!mission||!mission.active||mission.status!=='active')return fallbackDollars;
+  if(!lock||(lock.dir!=='UP'&&lock.dir!=='DOWN'))return fallbackDollars;
+  const tier=_calTierCanon(lock.tier);
+  const{wr}=_missionGetClusterWR({regime:lock.lockedRegime,dir:lock.dir,tier,regimeDirCal});
+  const _daysRemaining=mission.endDate
+    ?Math.max(0,(new Date(mission.endDate).getTime()-Date.now())/86400000):0;
+  const _result=_missionComputeBet({
+    bankroll:mission.currentBankroll,
+    target:mission.target,
+    daysRemaining:_daysRemaining,
+    floor:mission.floor,
+    p:wr,
+    limitCents:costCents,
+    fractionalKellyMult:mission.kellyMult,
+    maxBetFraction:mission.maxBetFraction,
+    maxBetCap:fallbackDollars,
+  });
+  if(!(Number(_result&&_result.betDollars)>0))return fallbackDollars;
+  return _result.betDollars;
 };
 
 // Estimate probability of hitting target by deadline given current state.
@@ -46409,6 +46444,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
   // Stake, always clamped to the per-trade cap. 'percent' has no balance in
   // scope here, so it falls back to the cap rather than guessing large.
+  // V13.4.310: Mission Mode sizes off real fractional-Kelly math instead of
+  //   the flat cap, when active. 'contracts' entry mode above still always
+  //   wins -- unchanged, existing convention: an explicit contract count
+  //   overrides any sizing mode. lockedCallRef is a ref (stable identity,
+  //   correctly omitted from deps below) read directly rather than added as
+  //   a new parameter, so this call site is untouched.
   const _resolveStakeDollars=useCallback((s,costCents)=>{
     const cap=Math.max(0,Number(s?.maxBetPerTrade)||0);
     if(!(cap>0))return 0;
@@ -46416,8 +46457,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const n=Math.max(1,Math.floor(Number(s.entryContracts)||0));
       return Math.min(cap,(n*costCents)/100);
     }
+    if(mission&&mission.active&&mission.status==='active'){
+      return _missionResolveStakeDollars({
+        mission,regimeDirCal:regimeDirCalibration,lock:lockedCallRef.current,
+        costCents,fallbackDollars:cap,
+      });
+    }
     return cap;
-  },[]);
+  },[mission,regimeDirCalibration]);
 
   const _runEntry=useCallback(async({manual=false}={})=>{
     if(_entryBusyRef.current)return{ok:false,reason:'busy'};
