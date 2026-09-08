@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.316-signal-source-and-pnl-sign-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.316';
+const BASELINE_VERSION='2026.09.08-v13.4.317-trading-settings-declutter';
+const TARA_VERSION_DISPLAY='Tara 13.4.317';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20755,15 +20755,21 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
       //   neutral baseline, letting the tier ladder / V10.9.0 agreement gate /
       //   V10.8.2 cushion history / V9.8.0 ULP drive timing from actual signals.
       // Anti-tilt cooldown — V10.4.1a: REMOVED, merged into auto-exec cooldown
-      //   below to eliminate duplicate cooldown systems. The auto-exec
-      //   cooldownLossStreak / cooldownMinutes fields (Risk Guardrails section)
-      //   are now the single source of truth. antiTiltEnabled/antiTiltStreakLen/
-      //   antiTiltMinutes settings are kept in localStorage for backward compat
-      //   but no longer wired to any active code path or surfaced in UI.
+      //   to eliminate duplicate cooldown systems. antiTiltEnabled/
+      //   antiTiltStreakLen/antiTiltMinutes settings are kept in localStorage
+      //   for backward compat but no longer wired to any active code path.
+      // V13.4.317: the auto-exec cooldown it was merged into (Kalshi
+      //   Auto-Execution > Cooldown after losses) was ITSELF removed this
+      //   version -- cooldownLossStreak/cooldownMinutes drove
+      //   autoExecCooldownUntil, which is compared against nothing anywhere
+      //   in this file (same NO_RISK_RAILS finding as the other Risk
+      //   guardrails removals). So there is currently no cooldown mechanism
+      //   that blocks a new auto-exec order after a losing streak, from
+      //   either system.
       React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0B0B0F] border border-[#24242E]'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/35 mb-1'},'Anti-tilt cooldown'),
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 leading-snug'},
-          'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Cooldown after losses'),' in Kalshi Auto-Execution settings below. Single source of truth, no more duplicates.',
+          'Retired. Neither this nor the auto-exec cooldown it was merged into ever blocked a real order -- both were UI-only. Use the kill switch to pause manually after a losing streak.',
         ),
       ),
       // High-edge Discord filter
@@ -20788,16 +20794,20 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
         ),
       ),
-      // Auto exit suggestions — V10.4.1a: REMOVED, merged into Kalshi Auto-Execution
-      //   "Exit thresholds" below (takeProfitAtOffer / stopLossDeltaCents). The
-      //   suggest layer was duplicating the auto-exit layer with weaker math
-      //   (suggested $0.19 exits on $0.84-expected positions per real-world test).
-      //   takeProfitEnabled/Offer/cutLossEnabled/Minutes preserved in localStorage
-      //   for backward compat, no longer surfaced.
+      // Auto exit suggestions — V10.4.1a: REMOVED, merged into the real
+      //   auto-exit layer (autoExitOffer / stopLossDeltaCents). The suggest
+      //   layer was duplicating it with weaker math (suggested $0.19 exits
+      //   on $0.84-expected positions per real-world test).
+      //   takeProfitEnabled/Offer/cutLossEnabled/Minutes preserved in
+      //   localStorage for backward compat, no longer surfaced.
+      // V13.4.317: the duplicate "Exit thresholds" dials this pointed at
+      //   inside Kalshi Auto-Execution > Risk guardrails were removed (same
+      //   fields already live in Auto-exec — simple above) -- updated to
+      //   point there instead of a heading that no longer exists.
       React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0B0B0F] border border-[#24242E]'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/35 mb-1'},'Auto exit suggestions'),
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 leading-snug'},
-          'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Exit thresholds'),' in Kalshi Auto-Execution below. The auto-exit layer (88¢/13¢) is the active system — single source of truth.',
+          'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Take-profit / Cut-loss'),' in Auto-exec — simple above. Single source of truth, no more duplicates.',
         ),
       ),
       // ── V9.7.0: MISSION MODE ──────────────────────────────────────────
@@ -20852,7 +20862,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             // Step 3
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#23B981'}},'3. Configure guardrails'),
-              React.createElement('p',null,'Default: $25 per trade, $50 daily loss cap, 3-loss cooldown. Adjust to your size. The defaults are deliberately small — meant to verify the plumbing works end-to-end before you increase anything.'),
+              React.createElement('p',null,'Default: $25 per trade — the one hard cap that actually blocks an order (see ',React.createElement('strong',{className:'text-white'},'Max bet / trade'),' in Risk guardrails below). Adjust to your size. The default is deliberately small — meant to verify the plumbing works end-to-end before you increase anything.'),
             ),
             // Step 4
             React.createElement('div',null,
@@ -20871,8 +20881,8 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             ),
             // Step 7
             React.createElement('div',null,
-              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#23B981'}},'7. Tune entry filters'),
-              React.createElement('p',null,'See ',React.createElement('strong',{className:'text-white'},'Advanced entry filters'),' below. Conservative play: set ',React.createElement('strong',{className:'text-white'},'Minimum tier'),' to ',React.createElement('code',{className:'text-[10px] bg-[#050508] px-1'},'super-confluence'),' and turn on ',React.createElement('strong',{className:'text-white'},'Skip marginal-zone caution'),'. This trades way less often but with much higher conviction.'),
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#23B981'}},'7. Fine-tune execution'),
+              React.createElement('p',null,'See ',React.createElement('strong',{className:'text-white'},'Smart entry ladder'),' below to rest limit orders instead of crossing the spread — measured worth +2-4¢/contract on fills. ',React.createElement('strong',{className:'text-white'},'Signal source'),' (Master toggles above) controls whether orders fire on Tara\'s settled call or the raw engine lock.'),
             ),
           ),
         ),
@@ -21096,411 +21106,34 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.dryRun,onChange:(e)=>setAutoExecSettings(prev=>({...prev,dryRun:e.target.checked})),className:'ml-2'}),
           ),
         ),
-        // V10.2.5 — RISK GUARDRAILS REORGANIZED into 6 logical subsections
-        //   1. Position size & fills    — Max bet, Slippage
-        //   2. Daily caps                — Max trades/day, Max daily loss
-        //   3. Per-window cap            — Max trades/window
-        //   4. Exit thresholds           — Take-profit, Stop-loss (PROMOTED from Advanced)
-        //   5. Cooldown after losses     — N losses, Duration
-        //   6. Entry filters             — Edge cap, Skip time-cap-commit
-        //   7. Decision routing          — Phase 4 mode
-        //   Each field's wiring is unchanged; only the wrapping divs reorder them.
+        // V13.4.317: PROFILE PRESETS removed in full (Sniper/Hunter/Hawk/
+        //   Bargain Hunter/Surgeon/Balanced/Volume -- ~400 lines, 7 buttons).
+        //   Every differentiating field these buttons set is confirmed dead:
+        //   minTier/minQualityScore/maxEdgePt (Advanced entry filters, removed
+        //   above), tradeTimingMode (Decision routing, removed below),
+        //   skipTimeCapCommit/skipMarginalCaution/patientEntry*/smartCashout*
+        //   -- none of these gate or alter a real order (see removal notes at
+        //   their own former sections). maxAutoTradesPerDay/maxDailyLoss/
+        //   cooldownLossStreak/cooldownMinutes are compared against nothing
+        //   anywhere in this file (see the file-level comment above
+        //   NO_RISK_RAILS). maxAutoTradesPerWindow is hard-floored to 1
+        //   regardless of input. So each preset's own confirm() dialog
+        //   promised a specific win rate via a specific filter combination
+        //   (e.g. Sniper: "confluence+ tier, qScore>=55, edge cap 6pt ->
+        //   78%+ WR") that could never actually occur -- clicking any preset
+        //   only ever really changed maxBetPerTrade, the entry-ladder fields
+        //   (Hawk/Bargain Hunter), and the Kalshi-agree-live flag. Removed
+        //   rather than fixed: rebuilding 7 presets' worth of real gating
+        //   logic is a separate, much larger project than a settings-panel
+        //   declutter. The two fields that ARE real (max bet, entry ladder)
+        //   are still directly editable below / in Smart entry ladder.
         React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#050508]'},
           React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-1'},'Risk guardrails'),
           React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mb-3 leading-relaxed'},'Hard discipline guards. Block or exit trades automatically — no opinions, just rules.'),
-          //
-          // ── V10.2.8 / V10.2.25 — PROFILE PRESETS ──────────────────────────────
-          //   Five one-click setups. Sniper + Hunter are V10.2.25 additions, tuned
-          //   for the current market (heavy TRENDING DOWN + SHORT SQUEEZE momentum
-          //   regimes) which exposed the weaknesses the May 14 audit hadn't fully
-          //   addressed. Surgeon/Balanced/Volume preserved from V10.2.8 but no
-          //   longer recommended for current market — kept for users who want
-          //   the original audit-derived behavior.
-          //
-          //   - SNIPER:    NEW V10.2.25. Pure WR play. Uses every V10.2.x lever:
-          //                Phase 4 pregate + Kalshi-agree live + qScoreV2 ≥55 +
-          //                Min tier confluence + tight edge cap. Targets 78%+ WR.
-          //                Expected ~2-4 trades/day.
-          //   - SURGEON:   V10.2.8 legacy. Confluence-tier-only.
-          //                ~72-75% WR target (BUT — pre-momentum-market calibration).
-          //   - HUNTER:    NEW V10.2.25. "Win ideally + take volume" balance.
-          //                Phase 4 advisory + Kalshi-agree live + qScoreV2 ≥40 +
-          //                Min tier tape + skip time-cap. Targets 70-72% WR
-          //                with ~6-10 trades/day.
-          //   - BALANCED:  V10.2.8 legacy audit-optimal. Mid both.
-          //                ~70-72% WR · ~8-12/day (May 14 baseline).
-          //   - VOLUME:    V10.2.8 legacy higher turnover. Accept lower WR.
-          //                ~66-68% WR · ~15-25/day.
-          //
-          //   All presets set maxAutoTradesPerWindow:1 (hard floor since V10.2.24).
-          //   Manual overrides still work after.
-          //
-          React.createElement('div',{className:'mb-3'},
-            React.createElement('div',{className:'flex items-baseline justify-between mb-1.5'},
-              React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Profile presets'),
-              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V10.2.25'),
-            ),
-            React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mb-2 leading-relaxed'},'One-tap setup. Sniper/Hunter tuned for current market (momentum regimes).'),
-            // ROW 1: SNIPER + HUNTER + HAWK — the V10.2.25 / V10.2.35 current-market presets
-            React.createElement('div',{className:'grid grid-cols-3 gap-1.5 mb-1.5'},
-              // SNIPER — V10.2.25, max-WR play stacking every lever
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply SNIPER preset?\\n\\nMax-WR play. Stacks ALL V10.2.x filters:\\n• Min tier: confluence+ (top WR tier)\\n• Min qScoreV2: 55 (V2 60+ shows 90%+ WR)\\n• Edge cap: 6pt (tightest)\\n• Phase 4: PREGATE (blocks wait/abort)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Max trades/day: 4\\n• Max bet: $2\\n• Cooldown: 2 losses → 45 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 78%+ WR, ~2-4 trades/day.\\nFew trades, mostly wins.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    minTier:'confluence',
-                    minQualityScore:55,
-                    maxEdgePt:6,
-                    tradeTimingMode:'pregate',
-                    skipTimeCapCommit:true,
-                    tccSmartBypass:true,
-                    skipMarginalCaution:true,
-                    // V13.4.292: autoExitOffer:80/stopLossDeltaCents:10 REMOVED, same
-                    //   reason as the V13.4.266 Patient/Fast fix -- both are measured
-                    //   losers (fixed TP negative at 8/9 levels, fixed SL negative at
-                    //   all 7 levels tested), and 80c sits under TRAIL_ARM_C (90), so
-                    //   it fired before the trailing stop -- the only rule that
-                    //   measured positive -- could ever arm.
-                    maxAutoTradesPerDay:4,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:2,
-                    maxDailyLoss:4,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:45,
-                  }));
-                  // Also enable Kalshi-agree live since this is the max-WR preset
-                  try{
-                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
-                    if(_cur!=='live'){
-                      localStorage.setItem('taraKalshiAgreeMode','live');
-                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
-                    }
-                  }catch(_){}
-                  try{console.info('[V10.2.25] SNIPER preset applied — Phase 4 pregate, Kalshi-agree live, qScoreV2≥55, confluence-only');}catch(_){}
-                },
-                className:'text-[10px] py-2.5 px-1 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(232,69,94,0.10)',
-                  border:'1px solid rgba(232,69,94,0.35)',
-                  color:'rgb(232,69,94)',
-                },
-                title:'Max WR play. Every V10.2.x filter stacked aggressive. Few trades, mostly wins.',
-              },
-                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Sniper'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'strictest filters · ~2-4 trades a day'),
-              ),
-              // HUNTER — V10.2.25, win-ideally + take-volume sweet spot
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply HUNTER preset?\\n\\nWin-ideally + take volume balance:\\n• Min tier: tape+ (skips raw single-tier)\\n• Min qScoreV2: 40\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY (badge only, no block)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 70-72% WR, ~6-10 trades/day.\\nThe "win and earn" sweet spot.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    minTier:'tape',
-                    minQualityScore:30, // V10.6.5: loosened from 40
-                    maxEdgePt:8,
-                    tradeTimingMode:'advisory',
-                    skipTimeCapCommit:true,
-                    tccSmartBypass:true,
-                    skipMarginalCaution:true,
-                    // V13.4.292: autoExitOffer:82/stopLossDeltaCents:13 REMOVED, same
-                    //   reason as the V13.4.266 Patient/Fast fix and the Sniper preset
-                    //   above -- both measured losers, and 82c sits under TRAIL_ARM_C
-                    //   (90), disabling the only rule that measured positive.
-                    maxAutoTradesPerDay:8,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:2.5,
-                    maxDailyLoss:6,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:30,
-                  }));
-                  try{
-                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
-                    if(_cur!=='live'){
-                      localStorage.setItem('taraKalshiAgreeMode','live');
-                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
-                    }
-                  }catch(_){}
-                  try{console.info('[V10.2.25] HUNTER preset applied — tape+, qScoreV2≥40, Kalshi-agree live, advisory Phase 4');}catch(_){}
-                },
-                className:'text-[10px] py-2.5 px-1 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(96,165,250,0.10)',
-                  border:'1px solid rgba(96,165,250,0.35)',
-                  color:'rgb(96,165,250)',
-                },
-                title:'Win-ideally AND take meaningful volume. The recommended preset for daily auto-exec.',
-              },
-                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hunter'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'balanced · ~6-10 trades a day'),
-              ),
-              // HAWK — V10.2.35, "confident lock + cheap entry" play.
-              //   Stacks Hunter base + patient entry @ ≤70¢ + tighter qScore.
-              //   Targets the "patient" tier which won 80% over last 60 trades
-              //   and 66% lifetime — and the Kalshi-in-dir 55-70 subset which
-              //   won 83% recent / 69% lifetime.
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply HAWK preset?\\n\\n"Confident lock + cheap entry" — for sure-shot trades:\\n\\n• Min tier: tape+ (Hunter base)\\n• Min qScoreV2: 50 (tighter than Hunter\'s 40)\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY\\n• Skip time-cap-commit: ON (with smart bypass V10.2.34)\\n• Skip marginal-caution: ON\\n\\n• PATIENT ENTRY: ON (max 70¢, wait 60s)\\n  → Tara locks, then waits for offer to drop to ≤70¢ before buying\\n  → If 60s passes without hitting threshold → sit out\\n  → "Patient" tier trades won 80% over last 60 / 66% lifetime\\n\\n• ENTRY LADDER: ON (rest 3¢ inside, 2 tries, then take)\n  → resting instead of crossing is worth +2.8¢ a contract on your own record\n\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE.\\n\\nExpected: 72-76% WR, ~4-7 trades/day.\\nThe disciplined-entry preset.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    minTier:'tape',
-                    minQualityScore:40, // V10.6.5: loosened from 50
-                    maxEdgePt:7,
-                    tradeTimingMode:'advisory',
-                    skipTimeCapCommit:true,
-                    tccSmartBypass:true,
-                    skipMarginalCaution:true,
-                    // PATIENT ENTRY — the defining HAWK feature
-                    patientEntryEnabled:true,
-                    patientEntryMaxCents:70,
-                    patientEntryMaxWaitSec:60,
-                    // V13.4.231: REST BEFORE TAKING. Hawk had the right price cap and
-                    //   then crossed the spread to fill, which is the single thing the
-                    //   record says loses. Measured over 446 settled calls, capped at
-                    //   70c: crossing runs -0.24c per contract, resting a cent inside
-                    //   runs +2.76c. The execution swing is larger than the edge, and
-                    //   Kalshi charges no maker fee. A preset that takes automates the
-                    //   losing version of its own strategy.
-                    entryLadderEnabled:true,
-                    entryLadderUndercutCents:3,
-                    entryLadderStepSec:12,
-                    entryLadderMaxSteps:2,
-                    // V13.4.292: autoExitOffer:88/stopLossDeltaCents:13 REMOVED, same
-                    //   reason as Sniper/Hunter above -- 88c also sits under
-                    //   TRAIL_ARM_C (90), disabling the only rule that measured
-                    //   positive.
-                    // Caps + cooldown — match Hunter
-                    maxAutoTradesPerDay:8,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:2.5,
-                    maxDailyLoss:6,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:30,
-                  }));
-                  try{
-                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
-                    if(_cur!=='live'){
-                      localStorage.setItem('taraKalshiAgreeMode','live');
-                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
-                    }
-                  }catch(_){}
-                  try{console.info('[V10.2.35] HAWK preset applied — patient entry @≤70¢, tape+, qScoreV2≥50, Kalshi-agree live');}catch(_){}
-                },
-                className:'text-[10px] py-2.5 px-1 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(35,185,129,0.10)',
-                  border:'1px solid rgba(35,185,129,0.45)',
-                  color:'rgb(35,185,129)',
-                },
-                title:'Confident lock + cheap entry. Waits for price to drop to ≤70¢ before firing. Patient tier wins 80% recent / 66% lifetime.',
-              },
-                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hawk'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'middle ground · ~4-7 trades a day'),
-              ),
-            ),
-            // ── V10.7.18: BARGAIN HUNTER — "deep value + smart cashout" preset ──
-            // Targets sub-55¢ entries only. Higher quality bar than HAWK. Pairs with
-            //   V10.7.9 smart cashout (trailing stop + asymmetric loss cut) so we
-            //   capture maximum upside when right + cut early when wrong.
-            React.createElement('div',{className:'grid grid-cols-1 gap-1.5 mt-1.5'},
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply BARGAIN HUNTER preset?\\n\\n"Deep value entries + smart cashout":\\n\\n• PATIENT ENTRY: max 55¢ (vs Hawk\'s 70¢)\\n  → Waits up to 90s for offer to drop to ≤55¢\\n  → If 90s passes → sit out (no expensive entries)\\n\\n• ENTRY LADDER (V10.7.16): ON\\n  → Submits limit 4¢ below offer, waits 15s\\n  → If unfilled, retry 2¢ below, wait 15s more\\n  → Then takes market (saves 2-4¢/contract avg)\\n\\n• Min tier: tape+\\n• Min qScoreV2: 55 (higher bar than Hawk)\\n• Edge cap: 6pt (tightest)\\n• Skip marginal-caution + time-cap: ON\\n\\n• SMART CASHOUT V10.7.9: ENABLED\\n  → Peak trigger: 12¢ (arms earlier)\\n  → Trail floor: 45% (locks more of peak)\\n  → Loss cut: 18¢ (cut faster)\\n  → Late-window profit lock: 4¢ in last 60s\\n  → Late-window loss cut: 10¢ in last 60s\\n\\n• Max trades/day: 10\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-75% WR, 3-6 trades/day.\\nFew trades, cheap entries, max upside captured.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    minTier:'tape',
-                    minQualityScore:55,
-                    maxEdgePt:6,
-                    tradeTimingMode:'advisory',
-                    skipTimeCapCommit:true,
-                    tccSmartBypass:true,
-                    skipMarginalCaution:true,
-                    // PATIENT ENTRY — defining BARGAIN HUNTER feature
-                    patientEntryEnabled:true,
-                    patientEntryMaxCents:55, // 15¢ cheaper than Hawk
-                    patientEntryMaxWaitSec:90, // 30s more patient than Hawk
-                    // SMART CASHOUT V10.7.9 — aggressive profit-locking
-                    smartCashoutEnabled:true,
-                    smartCashoutPeakTrigger:12, // arms 3¢ earlier than default
-                    smartCashoutTrailFloorPct:45, // locks 5pp more of peak
-                    smartCashoutLossCutCents:18, // 7¢ tighter than default
-                    smartCashoutLateWindowSecs:60,
-                    smartCashoutLateProfitCents:4, // 1¢ tighter than default
-                    smartCashoutLateLossCents:10, // 5¢ tighter than default
-                    // V10.7.16 — ENTRY LADDER for cheaper fills
-                    //   Submits limit 4¢ below current offer, waits 15s, retries
-                    //   2¢ below offer for 10s more, then takes market.
-                    //   Average savings: 2-4¢ per entry on fills.
-                    entryLadderEnabled:true,
-                    entryLadderUndercutCents:4, // start 4¢ below offer
-                    entryLadderStepSec:15, // wait 15s per rung
-                    entryLadderMaxSteps:2, // 2 attempts (4¢, then 2¢) before market
-                    // V13.4.292: autoExitOffer:92/stopLossDeltaCents:12 REMOVED. 92c
-                    //   was the one preset value above TRAIL_ARM_C (90), but that only
-                    //   leaves a degenerate ~2c arming window before the fixed target
-                    //   closes it -- essentially no room for the 8c giveback the trail
-                    //   needs, and stopLossDeltaCents:12 is still a measured loser at
-                    //   every level tested (10-40c). Smart cashout (below) is this
-                    //   preset's advertised profit-lock mechanism; the fixed pair was
-                    //   redundant with it even before being wrong.
-                    // Caps
-                    maxAutoTradesPerDay:10,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:2.5,
-                    maxDailyLoss:6,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:30,
-                  }));
-                  try{
-                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
-                    if(_cur!=='live'){
-                      localStorage.setItem('taraKalshiAgreeMode','live');
-                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
-                    }
-                  }catch(_){}
-                  try{console.info('[V10.7.18] BARGAIN HUNTER preset applied — patient entry @≤55¢, qScore≥55, smart cashout aggressive');}catch(_){}
-                },
-                className:'text-[10px] py-2.5 px-2 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(35,185,129,0.10)',
-                  border:'1px solid rgba(35,185,129,0.50)',
-                  color:'rgb(35,185,129)',
-                },
-                title:'Bargain Hunter: max 55¢ entries + smart trail-stop cashout + early loss cuts. Few trades, best risk/reward per trade.',
-              },
-                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Bargain Hunter'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'only entries at 55c or under · ~3-6 a day · rests before it takes'),
-              ),
-            ),
-            // V10.4.1a: legacy presets hidden by default. Click to reveal.
-            React.createElement('button',{
-              type:'button',
-              onClick:()=>_setShowLegacyPresets(v=>!v),
-              className:'w-full text-[8px] uppercase tracking-[0.10em] text-[#EDEDED]/30 hover:text-[#EDEDED]/50 my-1.5 flex items-center justify-between',
-            },
-              React.createElement('span',null,'Legacy presets (May 14 baseline)'),
-              React.createElement('span',null,_showLegacyPresets?'▼ hide':'▶ show'),
-            ),
-            // ROW 2: Surgeon + Balanced + Volume — V10.2.8 legacy
-            _showLegacyPresets&&React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
-              // SURGEON preset — highest WR, lowest volume
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply SURGEON preset?\\n\\n• Edge cap 8pt (tightest)\\n• Min tier: confluence+ (top 2 only)\\n• Skip time-cap commits: ON\\n• Max trades/day: 3\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 72-75% WR, ~3-5 trades/day.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    // V13.4.292: autoExitOffer:80/stopLossDeltaCents:12 REMOVED, same
-                    //   reason as Sniper/Hunter/Hawk above.
-                    maxEdgePt:8,
-                    minTier:'confluence',
-                    skipTimeCapCommit:true,
-                    tccSmartBypass:true,
-                    maxAutoTradesPerDay:3,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:2,
-                    maxDailyLoss:5,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:30,
-                  }));
-                  try{console.info('[V10.2.8] SURGEON preset applied');}catch(_){}
-                },
-                className:'text-[10px] py-2 px-1 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(35,185,129,0.06)',
-                  border:'1px solid rgba(35,185,129,0.20)',
-                  color:'#23B981',
-                },
-                title:'Highest WR, lowest volume. Confluence+ trades only. ~72-75% WR target. PRE-V10.2.x calibration.',
-              },
-                React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Surgeon'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'picky · ~3-5 trades a day'),
-              ),
-              // BALANCED preset — audit-optimal
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply BALANCED preset?\\n\\n• Edge cap 10pt\\n• Min tier: any\\n• Skip time-cap commits: ON\\n• Max trades/day: 5\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-72% WR, ~8-12 trades/day. Audit-optimal.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    // V13.4.292: autoExitOffer:82/stopLossDeltaCents:15 REMOVED, same
-                    //   reason as the presets above.
-                    maxEdgePt:10,
-                    minTier:'any',
-                    skipTimeCapCommit:true,
-                    tccSmartBypass:true,
-                    maxAutoTradesPerDay:5,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:2,
-                    maxDailyLoss:5,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:30,
-                  }));
-                  try{console.info('[V10.2.8] BALANCED preset applied');}catch(_){}
-                },
-                className:'text-[10px] py-2 px-1 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(35,185,129,0.06)',
-                  border:'1px solid rgba(35,185,129,0.20)',
-                  color:'rgba(35,185,129,0.80)',
-                },
-                title:'Audit-optimal. Mid WR, mid volume. PRE-V10.2.x calibration.',
-              },
-                React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Balanced'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'moderate · ~8-12 trades a day'),
-              ),
-              // VOLUME preset — higher turnover, lower WR
-              React.createElement('button',{
-                type:'button',
-                onClick:()=>{
-                  if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply VOLUME preset?\\n\\n• Edge cap 15pt\\n• Min tier: any\\n• Skip time-cap commits: OFF (includes lower-WR cluster)\\n• Max trades/day: 10\\n• Max bet: $3\\n• Cooldown: 3 losses → 20 min\\n\\nExpected: 66-68% WR, ~15-25 trades/day. Higher turnover.'))return;
-                  setAutoExecSettings(prev=>({
-                    ...prev,
-                    // V13.4.292: autoExitOffer:85/stopLossDeltaCents:18 REMOVED, same
-                    //   reason as the presets above.
-                    maxEdgePt:15,
-                    minTier:'any',
-                    skipTimeCapCommit:false,
-                    maxAutoTradesPerDay:10,
-                    maxAutoTradesPerWindow:1,
-                    maxBetPerTrade:3,
-                    maxDailyLoss:8,
-                    cooldownLossStreak:3,
-                    cooldownMinutes:20,
-                  }));
-                  try{console.info('[V10.2.8] VOLUME preset applied');}catch(_){}
-                },
-                className:'text-[10px] py-2 px-1 rounded-lg transition-colors',
-                style:{
-                  background:'rgba(35,185,129,0.06)',
-                  border:'1px solid rgba(35,185,129,0.20)',
-                  color:'rgba(35,185,129,0.80)',
-                },
-                title:'More trades, lower per-trade WR. PRE-V10.2.x calibration.',
-              },
-                React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Volume'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'loosest · ~15-25 trades a day'),
-              ),
-            ),
-            React.createElement('div',{className:'text-[9px] text-[#EDEDED]/35 mt-1.5 leading-relaxed'},'Sniper & Hunter also enable Kalshi-agree LIVE. Presets overwrite ~12 fields (sizing mode, signal source, dryRun, API stay as-is).'),
-          ),
-          //
-          // ── 1. Position size & fills ─────────────────────────────────────────
-          //
+        // ── Position size & fills ─────────────────────────────────────────────
+        //
           React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45 mb-1.5'},'Position size & fills'),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
+          React.createElement('div',{className:'mb-3'},
             React.createElement('label',{className:'block'},
               _labelTip('max-bet','Max bet / trade ($)','HARD WALL. Auto-exec will SIT OUT (not downsize) if the intended bet exceeds this. The single most important safety knob — it caps your worst-case loss on any one trade. Bypass: only super-confluence tier OR manual click can override (and even then it clamps to this cap). Lower = safer, smaller positions. Higher = more capital at risk per trade.'),
               React.createElement('input',{
@@ -21513,353 +21146,36 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               ),
               _tipBox('max-bet','HARD WALL. Auto-exec will SIT OUT (not downsize) if the intended bet exceeds this. The single most important safety knob — it caps your worst-case loss on any one trade. Bypass: only super-confluence tier OR manual click can override (and even then it clamps to this cap). Lower = safer, smaller positions. Higher = more capital at risk per trade.'),
             ),
-            React.createElement('label',{className:'block'},
-              _labelTip('slippage','Slippage (¢ over offer)','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
-              React.createElement('input',{
-                type:'number',min:0,max:10,step:1,value:autoExecSettings?.slippageCents||0,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,slippageCents:Math.max(0,Math.min(10,_num(e.target.value,2)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                `= bid +${autoExecSettings?.slippageCents||0}¢ above market to improve fill (each ¢ = 1% of $1 contract)`,
-              ),
-              _tipBox('slippage','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
-            ),
           ),
-          //
-          // ── 2. Daily caps ────────────────────────────────────────────────────
-          //
-          // V13.4.254: the "Daily caps" section was removed from this modal.
-          //   It rendered two inputs both labelled HARD CAP -- max trades/day and
-          //   max daily loss -- describing enforcement that does not exist:
-          //   maxAutoTradesPerDay and maxDailyLoss are compared against nothing
-          //   anywhere in this file, and _runEntry references neither. A control
-          //   that looks authoritative and enforces nothing is worse than no
-          //   control, so the UI is gone. The settings keys are still hydrated,
-          //   so wiring them later needs only the check, not the form.
-          //
-          // ── 3. Per-window cap ────────────────────────────────────────────────
-          //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #24242E'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Per-window cap'),
-          ),
-          React.createElement('div',{className:'mb-3'},
-            React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('max-trades-window','Max trades / window','HARD FLOOR at 1 since V10.2.24. Maximum auto-exec entries on the same window across ALL subsystems (Tara auto-exec + scalper auto-exec share this slot). Setting capped at 1 — was 1-5 in V10.2.4 but V10.2.24 enforces the floor because cross-system collisions could place 2+ trades per window when both subsystems were active.'),
-                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V10.2.24'),
-              ),
-              React.createElement('input',{
-                // V10.2.24: max raised to 1 (was 5). Hard floor; cannot exceed.
-                type:'number',min:1,max:1,step:1,value:1,disabled:true,
-                onChange:()=>{}, // no-op — value is hardcoded
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white/50 text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1 cursor-not-allowed',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                '= 1 auto-exec entry per window across ALL subsystems (hard floor since V10.2.24; Tara + scalper share this slot, manual click bypasses)'
-              ),
-              _tipBox('max-trades-window','HARD FLOOR at 1 since V10.2.24. Maximum auto-exec entries on the same window across ALL subsystems (Tara auto-exec + scalper auto-exec share this slot). Setting capped at 1 — was 1-5 in V10.2.4 but V10.2.24 enforces the floor because cross-system collisions could place 2+ trades per window when both subsystems were active.'),
-            ),
-          ),
-          //
-          // ── 4. Exit thresholds (Take-profit + Stop-loss) ─────────────────────
-          //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #24242E'}},
-            React.createElement('div',{className:'flex items-baseline justify-between'},
-              React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Exit thresholds'),
-              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V10.2.5'),
-            ),
-          ),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
-            React.createElement('label',{className:'block'},
-              _labelTip('take-profit','Take-profit at offer ¢','Auto-sell when the Kalshi offer on your side reaches this. Measured negative at 8 of 9 levels tested (70-95¢) over 454 replayed calls: 99% of wins touch 80¢+ at some point vs 34% of losses, so a fixed target truncates nearly every winner to spare a third of the losers. 0 = disabled (recommended) — the trailing stop below replaces it. Any value at or under 90¢ fires before the trailing stop can arm, disabling it.'),
-              React.createElement('input',{
-                // V13.4.292: was min:60 with a `||85` fallback, so this control could
-                //   never express "off" and displayed a fabricated 85 when the real
-                //   setting was the safe, measured-correct 0 -- matching the same
-                //   `??` pattern the stop-loss field beside it already used correctly.
-                type:'number',min:0,max:99,step:1,value:autoExecSettings?.autoExitOffer??0,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(0,Math.min(99,_num(e.target.value,0)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
-                const _c=Number(autoExecSettings?.autoExitOffer)||0;
-                if(_c===0)return '#23B981';
-                if(_c<=TRAIL_ARM_C)return '#E8455E';
-                return 'rgba(237,237,237,0.40)';
-              })()}},(()=>{
-                const _c=Number(autoExecSettings?.autoExitOffer)||0;
-                if(_c===0)return '✓ DISABLED (recommended) — trailing stop only, sells 8¢ off its high once worth 90¢.';
-                if(_c<=TRAIL_ARM_C)return `⚠ FIRES BEFORE THE TRAIL CAN ARM — ${_c}¢ closes the position before it can reach the ${TRAIL_ARM_C}¢ trailing-stop arm point. This disables the only exit rule measured to work.`;
-                return `= sell when our-side offer ≥ ${_c}¢ on a 100¢ contract (locks in ${_c}% of max payout)`;
-              })()),
-              _tipBox('take-profit','Auto-sell when the Kalshi offer on your side reaches this. Measured negative at 8 of 9 levels tested (70-95¢). 0 = disabled (recommended) — the trailing stop replaces it.'),
-            ),
-            React.createElement('label',{className:'block'},
-              _labelTip('stop-loss','Stop-loss drawdown (¢)','Auto-sell when our-side offer drops by this many cents below your fill price. Measured negative at all 7 levels tested (10-40¢) over 454 replayed calls. 0 = disabled (recommended) — position holds to Kalshi settlement, capped at the stake you sized the trade for.'),
-              React.createElement('input',{
-                // V10.2.31 — max lowered 90 → 50. 75¢ stop on a typical 50-85¢ entry
-                //   means exit at -25¢ to 10¢, i.e. effectively at zero. Useful
-                //   range is 8-30¢; everything above is "no stop" with extra steps.
-                type:'number',min:0,max:50,step:1,value:autoExecSettings?.stopLossDeltaCents??0,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
-                const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
-                if(_c===0)return '#23B981';
-                if(_c>=30)return '#E8455E';
-                return 'rgba(237,237,237,0.40)';
-              })()}},(()=>{
-                const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
-                if(_c===0)return '✓ DISABLED (recommended) — measured negative at every level tested; holds to Kalshi settlement instead.';
-                if(_c>=30)return `⚠ WIDE STOP — ${_c}¢ delta means exit only after losing ${_c}¢/contract. On a typical 50-85¢ fill, this is too late.`;
-                return `⚠ measured negative at all 7 levels tested (10-40¢) — exits if our-side offer drops ${_c}¢ below fill (e.g. filled at 87¢, exit at ${87-_c}¢)`;
-              })()),
-              _tipBox('stop-loss','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. V10.2.31 capped at 50¢ — values above 30¢ are dangerous.'),
-            ),
-          ),
-          //
-          // ── 5. Cooldown after losses ─────────────────────────────────────────
-          //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #24242E'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Cooldown after losses'),
-          ),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
-            React.createElement('label',{className:'block'},
-              _labelTip('cooldown-n','Cooldown after N losses','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
-              React.createElement('input',{
-                type:'number',min:2,max:10,step:1,value:autoExecSettings?.cooldownLossStreak||3,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownLossStreak:Math.max(2,Math.min(10,_num(e.target.value,3)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                `= ${autoExecSettings?.cooldownLossStreak||3} consecutive losses triggers a cooldown`,
-              ),
-              _tipBox('cooldown-n','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
-            ),
-            React.createElement('label',{className:'block'},
-              _labelTip('cooldown-dur','Cooldown duration (min)','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
-              React.createElement('input',{
-                type:'number',min:1,max:240,step:1,value:autoExecSettings?.cooldownMinutes||20,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownMinutes:Math.max(1,Math.min(240,_num(e.target.value,20)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                `= ${autoExecSettings?.cooldownMinutes||20} minutes of no new auto-trades after streak`,
-              ),
-              _tipBox('cooldown-dur','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
-            ),
-          ),
-          //
-          // ── 6. Entry filters ─────────────────────────────────────────────────
-          //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #24242E'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Entry filters'),
-          ),
-          React.createElement('div',{className:'mb-2'},
-            React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('edge-cap','Edge cap — max Tara-vs-Kalshi gap (pt)','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
-                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V9.19.24'),
-              ),
-              React.createElement('input',{
-                type:'number',min:0,max:100,step:1,
-                value:Number.isFinite(Number(autoExecSettings?.maxEdgePt))?Number(autoExecSettings.maxEdgePt):15,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxEdgePt:Math.max(0,Math.min(100,_num(e.target.value,15)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
-                const _e=Number(autoExecSettings?.maxEdgePt);
-                const _eff=Number.isFinite(_e)&&_e>=0?_e:15;
-                if(_eff===0)return '= filter DISABLED (was the May 14 audit\'s root cause — recommend 15)';
-                return `= sit out if Tara is more than ${_eff}pt above Kalshi on her direction. Audit: edge >${_eff}pt trades won at 65% (would have lifted last week to ~70%). Manual click bypasses.`;
-              })()),
-              _tipBox('edge-cap','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
-            ),
-          ),
-          React.createElement('div',{className:'mb-2 mt-2'},
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-              React.createElement('div',{className:'flex-1 pr-2'},
-                React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
-                  _labelTip('skip-timecap','Skip time-cap-commit locks','When Tara hits her decision deadline without genuine conviction, she fires a "time-cap-commit" lock — basically "I had to pick something." May 14 audit of 642 trades: time-cap commits made up 50% of trades and won 62.4% (vs 78.5% for normal commits, 65.7% for early locks). Worst sub-band: 90-119s lock window won only 54.6% — pure coin flip. This filter blocks them at auto-exec gate. Manual click still fires them. Default OFF for A/B testing — turn ON to filter the lowest-WR cluster.'),
-                  React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#23B981'}},'V9.19.26'),
-                ),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 leading-relaxed mt-0.5'},
-                  autoExecSettings?.skipTimeCapCommit
-                    ? '= ON — auto-exec sits out on time-cap and timer commits (manual click still fires them)'
-                    : '= OFF — auto-exec fires on all lock types including time-cap (May 14 audit: time-cap WR was 62.4% vs 78.5% normal — consider turning ON to A/B test)',
-                ),
-                _tipBox('skip-timecap','When Tara hits her decision deadline without genuine conviction, she fires a "time-cap-commit" lock — basically "I had to pick something." May 14 audit of 642 trades: time-cap commits made up 50% of trades and won 62.4% (vs 78.5% for normal commits, 65.7% for early locks). Worst sub-band: 90-119s lock window won only 54.6% — pure coin flip. This filter blocks them at auto-exec gate. Manual click still fires them. Default OFF for A/B testing — turn ON to filter the lowest-WR cluster.'),
-              ),
-              React.createElement('input',{
-                type:'checkbox',
-                checked:!!autoExecSettings?.skipTimeCapCommit,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,skipTimeCapCommit:e.target.checked})),
-                className:'ml-2 mt-1',
-              }),
-            ),
-          ),
-          //
-          // ── 7. Decision routing (Phase 4) ────────────────────────────────────
-          //
-          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid #24242E'}},
-            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#EDEDED]/45'},'Decision routing'),
-          ),
-          React.createElement('div',{className:'mb-1'},
-            React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
-              _labelTip('timing-mode','Second opinion on timing','A separate check that grades every lock and says go now, hold on, or skip. It is not the thing that picks direction — it only judges whether this is a good moment to act on a call that has already been made. Start on Watch only, move to Show me once you want to see its verdict, and only let it veto after you have watched it be right.'),
-            ),
-            React.createElement('select',{
-              value:autoExecSettings?.tradeTimingMode||'shadow',
-              onChange:(e)=>setAutoExecSettings(prev=>({...prev,tradeTimingMode:e.target.value})),
-              className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm focus:border-[#23B981] focus:outline-none',
-              style:{background:'#121218',color:'#EDEDED'},
-            },
-              React.createElement('option',{value:'off',style:{background:'#121218',color:'#EDEDED'}},'Off — second opinion not running'),
-              React.createElement('option',{value:'shadow',style:{background:'#121218',color:'#EDEDED'}},'Watch only — records what it would have said (recommended)'),
-              React.createElement('option',{value:'advisory',style:{background:'#121218',color:'#EDEDED'}},'Show me — puts its verdict on screen, changes nothing'),
-              React.createElement('option',{value:'pregate',style:{background:'#121218',color:'#EDEDED'}},'Let it veto — stops auto-trades it disagrees with'),
-            ),
-            React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},(()=>{
-              const _m=autoExecSettings?.tradeTimingMode||'shadow';
-              if(_m==='off')return 'nothing is evaluated or logged';
-              if(_m==='shadow')return 'it grades every lock in the background so the calls can be checked later. Nothing on screen changes and no trade is affected.';
-              if(_m==='advisory')return 'you see its verdict — go now, hold on, or skip — next to the call. Trades still happen either way. Use this to see whether you agree with it before letting it block anything.';
-              if(_m==='pregate')return 'auto-trades are cancelled when it says hold on or skip. You can still place them by hand. Only turn this on once Show me has convinced you it is right.';
-            })()),
-            _tipBox('timing-mode','A separate check that grades every lock and says go now, hold on, or skip. It does not pick direction — it only judges whether this is a good moment to act on a call already made. Start on Watch only, move to Show me when you want its verdict on screen, and only let it veto once you have seen it be right.'),
-          ),
+        // V13.4.317: DAILY CAPS (already removed in v13.4.254 -- see comment
+        //   left in place below), PER-WINDOW CAP (hard-floored to 1, never
+        //   user-configurable), the DUPLICATE Take-profit/Stop-loss dials here
+        //   (identical fields already live in AutoExecSimplePanel), COOLDOWN
+        //   AFTER LOSSES (cooldownLossStreak/cooldownMinutes drive
+        //   autoExecCooldownUntil, which is compared against nothing --
+        //   confirmed via the same NO_RISK_RAILS comment cited above), ENTRY
+        //   FILTERS (maxEdgePt/skipTimeCapCommit -- decorative, same grep),
+        //   and DECISION ROUTING (tradeTimingMode -- backed by never-called
+        //   _setPhase4Decision/never-assigned _phase4DecisionRef) all removed.
+        //   State left alone in every case.
+        //
+        // V13.4.254: the "Daily caps" section was removed from this modal.
+        //   It rendered two inputs both labelled HARD CAP -- max trades/day and
+        //   max daily loss -- describing enforcement that does not exist:
+        //   maxAutoTradesPerDay and maxDailyLoss are compared against nothing
+        //   anywhere in this file, and _runEntry references neither. A control
+        //   that looks authoritative and enforces nothing is worse than no
+        //   control, so the UI is gone. The settings keys are still hydrated,
+        //   so wiring them later needs only the check, not the form.
         ),
-        // ── V9.6.0: ADVANCED ENTRY FILTERS ────────────────────────────────
-        React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(196,181,253,0.04)',border:'1px solid rgba(196,181,253,0.16)'}},
-          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#C4B5FD'}},
-            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Advanced entry filters'),
-            React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'when to fire'),
-          ),
-          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
-            // Per-asset toggles
-            React.createElement('div',null,
-              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#EDEDED]/60 mb-1.5'},'Trade these assets'),
-              React.createElement('div',{className:'flex gap-2'},
-                ['BTC'].map(a=>
-                  React.createElement('label',{key:a,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:autoExecSettings?.enabledAssets?.[a]!==false?'rgba(196,181,253,0.08)':'rgba(237,237,237,0.04)',border:autoExecSettings?.enabledAssets?.[a]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid #24242E'}},
-                    React.createElement('span',{className:'text-[11px] font-bold text-white'},a),
-                    React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledAssets?.[a]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledAssets:{...(prev.enabledAssets||{BTC:true}),[a]:e.target.checked}}))}),
-                  )
-                ),
-              ),
-            ),
-            // Per-window toggles
-            React.createElement('div',null,
-              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#EDEDED]/60 mb-1.5'},'Trade these windows'),
-              React.createElement('div',{className:'flex gap-2'},
-                ['15m','5m'].map(w=>
-                  React.createElement('label',{key:w,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:autoExecSettings?.enabledWindowTypes?.[w]!==false?'rgba(196,181,253,0.08)':'rgba(237,237,237,0.04)',border:autoExecSettings?.enabledWindowTypes?.[w]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid #24242E'}},
-                    React.createElement('span',{className:'text-[11px] font-bold text-white'},w),
-                    React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledWindowTypes?.[w]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledWindowTypes:{...(prev.enabledWindowTypes||{'15m':true,'5m':true}),[w]:e.target.checked}}))}),
-                  )
-                ),
-              ),
-            ),
-            // Minimum tier
-            React.createElement('div',null,
-              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#EDEDED]/60 mb-1'},'Minimum tier'),
-              React.createElement('select',{
-                value:autoExecSettings?.minTier||'any',
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,minTier:e.target.value})),
-                className:'w-full bg-[#050508] border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#23B981] focus:outline-none',
-              },
-                React.createElement('option',{value:'any'},'Any tier (default — fires most often)'),
-                React.createElement('option',{value:'tape'},'Tape-led or higher (skips single-tier)'),
-                React.createElement('option',{value:'structural'},'Structural-led or higher'),
-                React.createElement('option',{value:'confluence'},'Confluence or higher (more selective)'),
-                React.createElement('option',{value:'super'},'Super-confluence ONLY (highest conviction)'),
-              ),
-              // V9.17.22: replaced V9.4.0 audit guidance with USER'S OWN reconciled
-              //   data. Numbers are from their actual call history (memory panel).
-              //   Update these manually if the user reconciles fresh data later.
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1 leading-relaxed'},
-                'From your reconcile (BTC, 602 traded): Super 75% (n=8, small), Confluence 80% (n=5, tiny), Structural 60% (n=58, weakest), Tape-led 67% (n=55), Single 68% (n=462, bulk of volume). Single is where the edge lives — filtering it out cuts your sample massively. Default "any" recommended.',
-              ),
-            ),
-            // V13.4.316: SIGNAL SOURCE moved to the Master toggles section
-            //   (near "Auto-place orders on lock"), where a setting that
-            //   determines what real orders actually trade on belongs, rather
-            //   than buried in "Advanced entry filters". Single control now --
-            //   was previously duplicated here (a plain <select>) AND, until
-            //   tonight, non-functional everywhere, since _runEntry never read
-            //   signalSource at all before this version.
-            // Min quality / min conviction (grid)
-            React.createElement('div',{className:'grid grid-cols-2 gap-2'},
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Min quality (0=off)'),
-                React.createElement('input',{
-                  type:'number',min:0,max:100,step:5,value:autoExecSettings?.minQualityScore||0,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,minQualityScore:Math.max(0,Math.min(100,_num(e.target.value,0)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                // V9.17.20: unit hint
-                // V10.2.2: WARNING about qScore inversion. 755-trade audit showed qScore
-                //   is anti-correlated with WR (q 0-19: 73.9% / q 60-79: 60.6%). v2 shadow
-                //   addresses this but has <50 entries — not yet graduated. Keep at 0.
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                  const _v=autoExecSettings?.minQualityScore||0;
-                  if(_v===0)return '= no quality filter (recommended default — qScore V2 is now live and monotonic with WR but most live trades happen at qScore >= 30 anyway, so a hard filter is rarely useful)';
-                  return `${_v}/100 — V2 formula live since V10.2.8 (was inverted in V1; fixed). Raising this only filters when q-score is below ${_v}; verify ${_v}+ trades actually have meaningfully higher WR before relying on it.`;
-                })()),
-              ),
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Min conviction pt (0=off)'),
-                React.createElement('input',{
-                  type:'number',min:0,max:50,step:1,value:autoExecSettings?.minConviction||0,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,minConviction:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                // V9.17.20: unit hint
-                // V10.2.2: same inversion warning as minQualityScore. Conviction =
-                //   |posterior-50|, which is the dominant input to qScore's `ps` term.
-                //   Audit's edge-bucket data: edge 0-10pt (low conv) won 71.2%; edge
-                //   30+pt (high conv) won 61.6%. High conviction has LOWER WR.
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                  const _v=autoExecSettings?.minConviction||0;
-                  if(_v===0)return '= no conviction filter (RECOMMENDED — high conviction has LOWER WR in audit)';
-                  return `⚠ require posterior ≥${_v}pts from 50. Note: high conviction was anti-correlated with WR in 755-trade audit (edge 30+pt: 61.6% / edge 0-10pt: 71.2%). Same root cause as qScore inversion.`;
-                })()),
-              ),
-            ),
-            // Lock stability + skip marginal
-            React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Wait N seconds after lock before placing (0=fire immediately)'),
-              React.createElement('input',{
-                type:'number',min:0,max:60,step:1,value:autoExecSettings?.lockStabilitySec||0,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,lockStabilitySec:Math.max(0,Math.min(60,_num(e.target.value,0)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-              }),
-              // V9.17.20: unit hint (replaces the prior generic description)
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                const _v=autoExecSettings?.lockStabilitySec||0;
-                return _v===0?'= fire the moment Tara locks (no stability check)':`= wait ${_v} seconds after lock to confirm stability before placing`;
-              })()),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1'},'Filters out instant-flip locks. Try 5-10s if you see Tara locking and immediately re-evaluating.'),
-            ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg',style:{background:'rgba(237,237,237,0.04)'}},
-              React.createElement('div',null,
-                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Skip marginal-zone caution'),
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'Block when V9.4.0 attaches a marginal-zone caution chip (low ATR, low quality, single tier). Coin-flip zone — historically 59% WR.'),
-              ),
-              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.skipMarginalCaution,onChange:(e)=>setAutoExecSettings(prev=>({...prev,skipMarginalCaution:e.target.checked})),className:'ml-2'}),
-            ),
-            // V9.18.9: BLOCK URGENCY-APPLIED CALLS
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded-lg mt-1',style:{background:'rgba(232,69,94,0.04)',border:'1px solid rgba(232,69,94,0.14)'}},
-              React.createElement('div',null,
-                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Block urgency-applied calls'),
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'Block when V9.7.6 urgency floor-drop kicks in (late-window forced commits). From your reconcile: 2W/3L = 40% WR (n=5, low confidence). Default OFF — enable if you want to be conservative.'),
-              ),
-              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.blockUrgencyApplied,onChange:(e)=>setAutoExecSettings(prev=>({...prev,blockUrgencyApplied:e.target.checked})),className:'ml-2'}),
-            ),
-          ),
-        ),
+        // V13.4.317: ADVANCED ENTRY FILTERS removed in full. Confirmed by grep,
+        //   field by field: enabledAssets (BTC is hardcoded in _runEntry
+        //   regardless), enabledWindowTypes, minTier, minQualityScore,
+        //   minConviction (on autoExecSettings -- a same-named scalperSettings
+        //   field IS real, but this is not that one), lockStabilitySec,
+        //   skipMarginalCaution, blockUrgencyApplied -- every one of these is
+        //   read only in UI display/hydration/presets, never inside _runEntry
+        //   or its polling effect. State left alone.
         // ── V9.7.4: SMART ENTRY LADDER ────────────────────────────────────
         React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.16)'}},
           React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#23B981'}},
@@ -21920,56 +21236,10 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             ),
           ),
         ),
-        // ── V9.17.5: PATIENT ENTRY ────────────────────────────────────────
-        React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.16)'}},
-          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#23B981'}},
-            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Patient entry'),
-            React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'wait for value zone'),
-          ),
-          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
-            React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 leading-relaxed'},
-              'When Tara locks UP/DOWN but the offer is above your value zone, wait for price to come down before placing. If max wait expires or engine reverses, skip the trade. Different from smart entry ladder — patient entry can wait minutes, ladder waits seconds.',
-            ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-              React.createElement('div',null,
-                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Enable patient entry'),
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'Default OFF · waits for offer to drop into value zone before placing'),
-              ),
-              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.patientEntryEnabled,onChange:(e)=>setAutoExecSettings(prev=>({...prev,patientEntryEnabled:e.target.checked})),className:'ml-2'}),
-            ),
-            autoExecSettings?.patientEntryEnabled&&React.createElement('div',{className:'grid grid-cols-2 gap-2'},
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Max entry ¢ (zone ceiling)'),
-                React.createElement('input',{
-                  type:'number',min:5,max:95,step:1,value:autoExecSettings?.patientEntryMaxCents||55,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,patientEntryMaxCents:Math.max(5,Math.min(95,_num(e.target.value,55)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                // V9.17.20: unit hint
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                  const _c=autoExecSettings?.patientEntryMaxCents||55;
-                  return `= only fire when our-side offer ≤ ${_c}¢ on a $1 contract`;
-                })()),
-              ),
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Max wait seconds'),
-                React.createElement('input',{
-                  type:'number',min:10,max:600,step:5,value:autoExecSettings?.patientEntryMaxWaitSec||90,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,patientEntryMaxWaitSec:Math.max(10,Math.min(600,_num(e.target.value,90)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                // V9.17.20: unit hint
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                  const _s=autoExecSettings?.patientEntryMaxWaitSec||90;
-                  return `= wait up to ${_s}s for price to drop, then give up and skip the trade`;
-                })()),
-              ),
-            ),
-            autoExecSettings?.patientEntryEnabled&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed'},
-              'Example: Tara locks UP, current offer is 70¢, your max is 55¢. Patient entry waits up to 90s. If price drops to ≤55¢, places at that price. If 90s elapses or engine flips to DOWN, skips the trade. Round Ticket Card shows live waiting status.',
-            ),
-          ),
-        ),
+        // V13.4.317: PATIENT ENTRY removed. Confirmed by grep: patientEntryEnabled/
+        //   patientEntryMaxCents/patientEntryMaxWaitSec are read only in UI
+        //   display, hydration, and preset-writing -- never inside _runEntry,
+        //   kalshiRunEntryLadder, or planEntryLadder. State left alone.
         // ── V9.6.0: ADVANCED EXIT LOGIC ───────────────────────────────────
         React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(232,69,94,0.04)',border:'1px solid rgba(232,69,94,0.16)'}},
           React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#E8455E'}},
@@ -21978,7 +21248,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
           React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 leading-relaxed'},
-              'Optional exit paths beyond the basic take-profit and stop-loss in Risk guardrails. Time exit closes before Kalshi settles. Smart exits (separate panel below) react to tape reversal.',
+              'Optional exit paths beyond the basic take-profit and stop-loss in Risk guardrails. Time exit closes before Kalshi settles.',
             ),
             // V10.2.5: Stop-loss moved to Risk guardrails > Exit thresholds. Was here.
             // Time exit
@@ -21998,318 +21268,53 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             ),
           ),
         ),
-        // ── V9.17.5: SMART EXITS ──────────────────────────────────────────
-        React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.16)'}},
-          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#23B981'}},
-            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Smart exits'),
-            React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'tape-aware'),
-          ),
-          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
-            React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 leading-relaxed'},
-              'Watches tape direction during the trade. Early-exits when tape reverses against your position with profit on the table. Optionally extends take-profit when tape is strong WITH your position.',
-            ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-              React.createElement('div',null,
-                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Enable smart exits'),
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'Default OFF · uses scalper engine tape read'),
-              ),
-              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.smartExitsEnabled,onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitsEnabled:e.target.checked})),className:'ml-2'}),
-            ),
-            autoExecSettings?.smartExitsEnabled&&React.createElement('div',{className:'grid grid-cols-2 gap-2'},
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Reversal conviction %'),
-                React.createElement('input',{
-                  type:'number',min:50,max:95,step:5,value:autoExecSettings?.smartExitReverseConviction||70,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitReverseConviction:Math.max(50,Math.min(95,_num(e.target.value,70)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                // V9.17.20: unit hint
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `= exit when tape conviction against position ≥ ${autoExecSettings?.smartExitReverseConviction||70}%`,
-                ),
-              ),
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Min profit ¢ to lock'),
-                React.createElement('input',{
-                  type:'number',min:0,max:50,step:1,value:autoExecSettings?.smartExitMinProfitCents??5,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitMinProfitCents:Math.max(0,Math.min(50,_num(e.target.value,5)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                // V9.17.20: unit hint
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                  const _v=autoExecSettings?.smartExitMinProfitCents??5;
-                  return _v===0?'= no minimum profit required to fire exit':`= only smart-exit when at least ${_v}¢ profit per contract is captured`;
-                })()),
-              ),
-            ),
-            autoExecSettings?.smartExitsEnabled&&React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#24242E]'},
-              React.createElement('div',null,
-                React.createElement('div',{className:'text-[11px] text-[#EDEDED]/85'},'Extend on momentum'),
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'When tape strong WITH position, raise target by N¢'),
-              ),
-              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.smartExitExtendOnStrength,onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitExtendOnStrength:e.target.checked})),className:'ml-2'}),
-            ),
-            autoExecSettings?.smartExitsEnabled&&autoExecSettings?.smartExitExtendOnStrength&&React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Extend by N ¢'),
-              React.createElement('input',{
-                type:'number',min:1,max:20,step:1,value:autoExecSettings?.smartExitExtendCents||5,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartExitExtendCents:Math.max(1,Math.min(20,_num(e.target.value,5)))})),
-                className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-              }),
-              // V9.17.20: unit hint
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},(()=>{
-                const _c=autoExecSettings?.smartExitExtendCents||5;
-                // V13.4.292: was `||85`, fabricating a base target when the real
-                //   take-profit is off (0) -- "raise target from 85 to 90" when no
-                //   fixed target exists to raise.
-                const _base=Number(autoExecSettings?.autoExitOffer)||0;
-                return _base>0
-                  ?`= raise take-profit target by ${_c}¢ when tape strong (${_base}¢ → ${_base+_c}¢)`
-                  :`= raise take-profit target by ${_c}¢ when tape strong (no fixed target is set — this has no effect until one is)`;
-              })()),
-            ),
-            autoExecSettings?.smartExitsEnabled&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed'},
-              'Example with reversal=70%, min-profit=5¢, extend=ON@5¢: filled at 50¢ → tape stays UP 80% → target rises 85→90¢. Filled at 50¢ → at 58¢, tape flips to DOWN at 75% → early exit locks +8¢/contract. Uses scalper engine signal data, independent of whether scalper advisor is enabled.',
-            ),
-          ),
-        ),
-        // ── V10.7.10: SMART CASHOUT (peak-tracking trailing stop + asymmetric loss cut) ──
-        React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.16)'}},
-          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#23B981'}},
-            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Smart cashout'),
-            React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'V10.7.10 · profit lock + loss cut'),
-          ),
-          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-2'},
-            React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 leading-relaxed'},
-              'Tracks peak unrealized profit. Locks profit on retrace, cuts losses faster than fixed stop-loss, force-exits in last seconds of window. Runs BEFORE fixed take-profit/stop-loss.',
-            ),
-            // Enable toggle
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-              React.createElement('div',null,
-                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Enable smart cashout'),
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55'},'Default ON · V10.7.9 logic'),
-              ),
-              React.createElement('input',{
-                type:'checkbox',
-                checked:autoExecSettings?.smartCashoutEnabled!==false,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutEnabled:e.target.checked})),
-                className:'ml-2',
-              }),
-            ),
-            // 6 threshold inputs in 2-col grid
-            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'grid grid-cols-2 gap-2 pt-2 border-t border-[#24242E]'},
-              // 1. Peak trigger
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Peak trigger ¢'),
-                React.createElement('input',{
-                  type:'number',min:5,max:50,step:1,
-                  value:autoExecSettings?.smartCashoutPeakTrigger??15,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutPeakTrigger:Math.max(5,Math.min(50,_num(e.target.value,15)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `peak must hit ${autoExecSettings?.smartCashoutPeakTrigger??15}¢ before trail arms`,
-                ),
-              ),
-              // 2. Trail floor %
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Trail floor %'),
-                React.createElement('input',{
-                  type:'number',min:25,max:90,step:5,
-                  value:autoExecSettings?.smartCashoutTrailFloorPct??50,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutTrailFloorPct:Math.max(25,Math.min(90,_num(e.target.value,50)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `exit if profit < peak × ${autoExecSettings?.smartCashoutTrailFloorPct??50}%`,
-                ),
-              ),
-              // 3. Loss cut
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Loss cut ¢'),
-                React.createElement('input',{
-                  type:'number',min:10,max:60,step:5,
-                  value:autoExecSettings?.smartCashoutLossCutCents??25,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLossCutCents:Math.max(10,Math.min(60,_num(e.target.value,25)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `exit if down ≥${autoExecSettings?.smartCashoutLossCutCents??25}¢ from entry`,
-                ),
-              ),
-              // 4. Late-window seconds
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Late window (s)'),
-                React.createElement('input',{
-                  type:'number',min:15,max:180,step:15,
-                  value:autoExecSettings?.smartCashoutLateWindowSecs??60,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateWindowSecs:Math.max(15,Math.min(180,_num(e.target.value,60)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `last ${autoExecSettings?.smartCashoutLateWindowSecs??60}s of window = late zone`,
-                ),
-              ),
-              // 5. Late profit lock
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Late profit lock ¢'),
-                React.createElement('input',{
-                  type:'number',min:1,max:30,step:1,
-                  value:autoExecSettings?.smartCashoutLateProfitCents??5,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateProfitCents:Math.max(1,Math.min(30,_num(e.target.value,5)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `in late zone, exit if profit ≥${autoExecSettings?.smartCashoutLateProfitCents??5}¢`,
-                ),
-              ),
-              // 6. Late loss cut
-              React.createElement('label',{className:'block'},
-                React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Late loss cut ¢'),
-                React.createElement('input',{
-                  type:'number',min:5,max:50,step:5,
-                  value:autoExecSettings?.smartCashoutLateLossCents??15,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateLossCents:Math.max(5,Math.min(50,_num(e.target.value,15)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `in late zone, exit if loss ≥${autoExecSettings?.smartCashoutLateLossCents??15}¢`,
-                ),
-              ),
-            ),
-            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed pt-2 border-t border-[#24242E]'},
-              `Example: filled at 58¢ → spikes to 88¢ peak (+30¢) → retraces to 72¢ (+14¢, below ${autoExecSettings?.smartCashoutTrailFloorPct??50}% of 30 = ${Math.floor((autoExecSettings?.smartCashoutTrailFloorPct??50)/100*30)}¢) → trail-stop exits at +14¢ instead of waiting for full retrace. Or: filled at 58¢ → drops to 33¢ (-25¢) → loss-cut at -${autoExecSettings?.smartCashoutLossCutCents??25}¢ before going further.`,
-            ),
-          ),
-        ),
+        // V13.4.317: SMART EXITS and SMART CASHOUT removed. Confirmed by direct
+        //   grep across the whole file: every field in both sections
+        //   (smartExitsEnabled, smartExitReverseConviction, smartExitMinProfitCents,
+        //   smartExitExtendOnStrength/Cents, smartCashoutEnabled and its 6
+        //   threshold fields) was read ONLY inside ScalperAdvisorPanel's own
+        //   descriptive "exits when" / "show monitoring" TEXT -- never inside
+        //   _runExit or the real exit-check effect (trailing-stop/take-profit/
+        //   stop-loss/time-exit, confirmed by reading that effect in full
+        //   earlier this session). Both sections looked like real, detailed
+        //   exit engines (specific thresholds, worked examples) but never fired
+        //   a real order regardless of what was set here. State fields are left
+        //   alone in case a future version wires them up for real; only the
+        //   misleading UI is gone.
         // ── V9.6.0: POSITION SIZING ───────────────────────────────────────
+        // V13.4.317: Sizing strategy (fixed/confidence/kelly), Low/High bet,
+        //   and Kelly blend removed -- confirmed by grep that the only
+        //   non-UI/non-hydration read of sizingMode/confidenceLowBet/
+        //   confidenceHighBet/kellyBlend anywhere in the file is inside
+        //   computeAutoExecSize's own definition, and computeAutoExecSize's
+        //   one real call site was removed in v13.4.313 -- since then these
+        //   fields have not affected even a preview, let alone a real order.
+        //   Entry mode's "% of Kalshi balance" option removed the same way:
+        //   the real sizing function (_resolveStakeDollars) only special-cases
+        //   entryMode==='contracts'; 'percent' silently falls through to the
+        //   flat max-bet cap, same as 'dollars', so the option never did what
+        //   it claimed. Dollars and Contracts are the only two entry modes
+        //   that produce genuinely different real behavior -- both kept.
         React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(35,185,129,0.04)',border:'1px solid rgba(35,185,129,0.16)'}},
           React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#23B981'}},
             React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Position sizing'),
             React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'how much to bet'),
           ),
           React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
-            // V9.19.20: ACTIVE-RULE summary — shows exactly which mode will
-            //   compute the bet, so the user never has to guess again. The two-
-            //   source-of-truth confusion that lost user money on V9.19.15 lived
-            //   in this gap between sizing-mode and entry-mode. Now it's surfaced.
-            (()=>{
-              const _em=autoExecSettings?.entryMode||'dollars';
-              const _sm=autoExecSettings?.sizingMode||'fixed';
-              const _overridden=_em==='contracts'||_em==='percent';
-              const _activeRule=
-                _em==='contracts'?`${Number(autoExecSettings?.entryContracts)||5} contracts × current cost-per-contract`:
-                _em==='percent'?`${Number(autoExecSettings?.entryPercentBalance)||10}% of Kalshi balance`:
-                _sm==='fixed'?'fixed bet ($) from Trading Settings':
-                _sm==='confidence'?'scaled by conviction (low ↔ high bet)':
-                _sm==='kelly'?'Kelly fraction blended with fixed bet':'(unknown)';
-              return React.createElement('div',{
-                className:'px-2 py-2 rounded-lg',
-                style:{background:'rgba(35,185,129,0.06)',border:'1px solid rgba(35,185,129,0.25)'},
-              },
-                React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-wider mb-0.5',style:{color:'#23B981'}},'active rule'),
-                React.createElement('div',{className:'text-[11px]',style:{color:'rgba(237,237,237,0.95)'}},_activeRule),
-                _overridden&&React.createElement('div',{className:'text-[9px] mt-1 italic',style:{color:'rgba(237,237,237,0.55)'}},
-                  `Sizing strategy is overridden by entry mode = ${_em}.`,
-                ),
-                React.createElement('div',{className:'text-[9px] mt-1',style:{color:'rgba(237,237,237,0.55)'}},
-                  `cap: $${Number(autoExecSettings?.maxBetPerTrade)||25}/trade · if intended > cap → sit out (super-confluence/manual click can bypass)`,
-                ),
-              );
-            })(),
             React.createElement('div',null,
-              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('sizing-mode','Sizing strategy','How Tara computes the dollar amount per trade. THREE OPTIONS: (1) Fixed — always uses the manual bet-size from Trading Settings. Predictable, no surprises. Best for paper trading. (2) Scale with conviction — bigger bets on stronger calls, smaller on weaker ones. ⚠ Currently relies on the broken posterior calibration — Tier C item, pending recalibration. (3) Kelly fraction — math-optimal sizing based on edge. Mixed with fixed bet via the Kelly blend slider below. IMPORTANT: this strategy is OVERRIDDEN when Entry mode (below) is set to "contracts" or "%". Dollar mode uses this strategy as-written.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(237,237,237,0.60)'}),
-                (autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')&&React.createElement('div',{
-                  className:'text-[9px] italic',style:{color:'rgba(35,185,129,0.75)'},
-                },'(overridden by entry mode below)'),
-              ),
+              _labelTip('entry-mode','Entry mode','How the bet amount is EXPRESSED. Dollar cost (default) uses Max bet/trade above. Fixed contract count always buys exactly N contracts regardless of price -- simple, but the dollar cost varies with the Kalshi offer. Max bet/trade still caps the total either way.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(237,237,237,0.60)'}),
               React.createElement('select',{
-                value:autoExecSettings?.sizingMode||'fixed',
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,sizingMode:e.target.value})),
-                disabled:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent'),
-                className:'w-full bg-[#050508] border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#23B981] focus:outline-none',
-                style:{
-                  background:'#121218',
-                  color:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?'rgba(237,237,237,0.40)':'#EDEDED',
-                  cursor:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?'not-allowed':'pointer',
-                  opacity:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?0.55:1,
-                },
-              },
-                React.createElement('option',{value:'fixed',style:{background:'#121218',color:'#EDEDED'}},'Fixed (uses your bet-size, capped at max-bet)'),
-                React.createElement('option',{value:'confidence',style:{background:'#121218',color:'#EDEDED'}},'Scale with conviction (low/high range) — pending recalibration'),
-                React.createElement('option',{value:'kelly',style:{background:'#121218',color:'#EDEDED'}},'Kelly fraction blended with fixed bet'),
-              ),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1 leading-relaxed'},
-                autoExecSettings?.sizingMode==='confidence'?'Linear ramp: conviction 5pt → low bet, 35pt+ → high bet. ⚠ Inherits the broken posterior signal — pending Tier C recalibration (after 50+ post-V9.18.10 audited trades).':
-                autoExecSettings?.sizingMode==='kelly'?'Kelly = (b·p − q) ÷ b, where p=posterior, b=net odds. Mixed with fixed bet via blend slider below. Edge-only.':
-                'Always uses your manual bet-size from Trading Settings, capped at max-bet-per-trade.',
-              ),
-              _tipBox('sizing-mode','How Tara computes the dollar amount per trade. THREE OPTIONS: (1) Fixed — always uses the manual bet-size from Trading Settings. Predictable, no surprises. Best for paper trading. (2) Scale with conviction — bigger bets on stronger calls, smaller on weaker ones. ⚠ Currently relies on the broken posterior calibration — Tier C item, pending recalibration. (3) Kelly fraction — math-optimal sizing based on edge. Mixed with fixed bet via the Kelly blend slider below. IMPORTANT: this strategy is OVERRIDDEN when Entry mode (below) is set to "contracts" or "%". Dollar mode uses this strategy as-written.'),
-            ),
-            (autoExecSettings?.sizingMode==='confidence'||autoExecSettings?.sizingMode==='kelly')&&
-              React.createElement('div',{className:'grid grid-cols-2 gap-2'},
-                React.createElement('label',{className:'block'},
-                  _labelTip('low-bet','Low bet ($)','The smallest dollar stake used when Tara\'s conviction is weak (conviction ~5pt above 50% threshold). In Kelly mode this is the bet floor. Set this conservatively — it determines how much you lose on the weakest qualifying signals.'),
-                  React.createElement('input',{
-                    type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceLowBet||5,
-                    onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceLowBet:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
-                    className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-                  }),
-                  React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                    `= $${Number(autoExecSettings?.confidenceLowBet||5).toFixed(0)} dollars stake on weakest qualifying calls`,
-                  ),
-                  _tipBox('low-bet','The smallest dollar stake used when Tara\'s conviction is weak (conviction ~5pt above 50% threshold). In Kelly mode this is the bet floor. Set this conservatively — it determines how much you lose on the weakest qualifying signals.'),
-                ),
-                React.createElement('label',{className:'block'},
-                  _labelTip('high-bet','High bet ($)','The maximum dollar stake used when Tara\'s conviction is strong (conviction ≥35pt). Always still capped by Max bet/trade — that ceiling wins. Set this generously if you want to scale up on strong signals; conservatively for tighter risk control.'),
-                  React.createElement('input',{
-                    type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceHighBet||25,
-                    onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceHighBet:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
-                    className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-                  }),
-                  React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                    `= $${Number(autoExecSettings?.confidenceHighBet||25).toFixed(0)} dollars stake on strongest calls (capped by Max bet/trade)`,
-                  ),
-                  _tipBox('high-bet','The maximum dollar stake used when Tara\'s conviction is strong (conviction ≥35pt). Always still capped by Max bet/trade — that ceiling wins. Set this generously if you want to scale up on strong signals; conservatively for tighter risk control.'),
-                ),
-              ),
-            // V9.18.4: KELLY BLEND DIAL. Only shown when sizingMode='kelly'.
-            //   0 = pure fixed bet (your tradingSettings.betSize), 100 = pure Kelly math.
-            //   Always floored at fixed bet — you never bet less than your declared stake.
-            autoExecSettings?.sizingMode==='kelly'&&React.createElement('label',{className:'block pt-2 mt-2 border-t border-[#24242E]'},
-              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('kelly-blend','Kelly blend %','Slider controls how much Kelly math vs. fixed-bet drives the actual stake. 0% = always use your fixed bet, ignore Kelly entirely (safest, predictable). 100% = pure Kelly math, bet size varies wildly with edge (math-optimal but volatile). 50% = halfway between. CRITICAL: bet is always floored at your fixed bet — Kelly can scale UP but never below your declared stake. Start low (25-50%) until you trust Kelly\'s math.'),
-                React.createElement('span',{className:'text-[11px] tabular-nums font-bold',style:{color:'#23B981',fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
-                  `${Number(autoExecSettings?.kellyBlend||50)}%`,
-                ),
-              ),
-              React.createElement('input',{
-                type:'range',min:0,max:100,step:5,value:Number(autoExecSettings?.kellyBlend)||50,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,kellyBlend:Math.max(0,Math.min(100,Number(e.target.value)||0))})),
-                className:'w-full',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},
-                '0% = always bet your fixed stake (Kelly ignored) · 100% = pure Kelly math (variable bet) · 50% = halfway. Bet is always floored at your fixed Bet size from Trading Settings.',
-              ),
-              _tipBox('kelly-blend','Slider controls how much Kelly math vs. fixed-bet drives the actual stake. 0% = always use your fixed bet, ignore Kelly entirely (safest, predictable). 100% = pure Kelly math, bet size varies wildly with edge (math-optimal but volatile). 50% = halfway between. CRITICAL: bet is always floored at your fixed bet — Kelly can scale UP but never below your declared stake. Start low (25-50%) until you trust Kelly\'s math.'),
-            ),
-            // V9.18.4: ENTRY MODE SELECTOR. How to express the stake.
-            React.createElement('div',{className:'pt-2 mt-2 border-t border-[#24242E]'},
-              _labelTip('entry-mode','Entry mode','How the bet amount is EXPRESSED. THREE OPTIONS: (1) Dollar cost — uses the Sizing strategy above (fixed/conviction/Kelly). Most flexible. (2) Fixed contract count — always buy exactly N contracts regardless of price, regardless of sizing strategy. SIMPLE but the dollar cost varies with Kalshi offer price. (3) % of Kalshi balance — sizes as % of current Kalshi account balance. Scales with wins/losses naturally. CRITICAL: "contracts" and "%" modes OVERRIDE the Sizing strategy above — you\'ll see a gray-out indicator. Max bet/trade still caps everything.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(237,237,237,0.60)'}),
-              React.createElement('select',{
-                value:autoExecSettings?.entryMode||'dollars',
+                value:autoExecSettings?.entryMode==='contracts'?'contracts':'dollars',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryMode:e.target.value})),
                 className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#23B981] focus:outline-none mb-2 mt-1',
                 style:{background:'#121218',color:'#EDEDED'},
               },
-                React.createElement('option',{value:'dollars',style:{background:'#121218',color:'#EDEDED'}},'Dollar cost (use sizing strategy above)'),
+                React.createElement('option',{value:'dollars',style:{background:'#121218',color:'#EDEDED'}},'Dollar cost (uses Max bet/trade above)'),
                 React.createElement('option',{value:'contracts',style:{background:'#121218',color:'#EDEDED'}},'Fixed contract count'),
-                React.createElement('option',{value:'percent',style:{background:'#121218',color:'#EDEDED'}},'% of Kalshi balance'),
               ),
-              _tipBox('entry-mode','How the bet amount is EXPRESSED. THREE OPTIONS: (1) Dollar cost — uses the Sizing strategy above (fixed/conviction/Kelly). Most flexible. (2) Fixed contract count — always buy exactly N contracts regardless of price, regardless of sizing strategy. SIMPLE but the dollar cost varies with Kalshi offer price. (3) % of Kalshi balance — sizes as % of current Kalshi account balance. Scales with wins/losses naturally. CRITICAL: "contracts" and "%" modes OVERRIDE the Sizing strategy above — you\'ll see a gray-out indicator. Max bet/trade still caps everything.'),
+              _tipBox('entry-mode','How the bet amount is EXPRESSED. Dollar cost (default) uses Max bet/trade above. Fixed contract count always buys exactly N contracts regardless of price -- simple, but the dollar cost varies with the Kalshi offer. Max bet/trade still caps the total either way.'),
               autoExecSettings?.entryMode==='contracts'&&React.createElement('label',{className:'block mb-1'},
-                _labelTip('entry-contracts','Contracts per trade','Number of Kalshi contracts to buy each trade. Each contract pays $1 at settlement if right, $0 if wrong. Cost varies with current offer price — e.g., 5 contracts at 60¢ offer = $3.00 total cost. CAUTION: this multiplies the slippage cost too. Max bet/trade still caps the total — if 5 contracts × current price exceeds your cap, auto-exec sits out.'),
+                _labelTip('entry-contracts','Contracts per trade','Number of Kalshi contracts to buy each trade. Each contract pays $1 at settlement if right, $0 if wrong. Cost varies with current offer price — e.g., 5 contracts at 60¢ offer = $3.00 total cost. Max bet/trade still caps the total — if 5 contracts × current price exceeds your cap, auto-exec sits out.'),
                 React.createElement('input',{
                   type:'number',min:1,max:500,step:1,value:Number(autoExecSettings?.entryContracts)||5,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryContracts:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
@@ -22318,26 +21323,11 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
                   `= ${Number(autoExecSettings?.entryContracts)||5} contracts × current cost-per-contract ¢ = total $`,
                 ),
-                _tipBox('entry-contracts','Number of Kalshi contracts to buy each trade. Each contract pays $1 at settlement if right, $0 if wrong. Cost varies with current offer price — e.g., 5 contracts at 60¢ offer = $3.00 total cost. CAUTION: this multiplies the slippage cost too. Max bet/trade still caps the total — if 5 contracts × current price exceeds your cap, auto-exec sits out.'),
-              ),
-              autoExecSettings?.entryMode==='percent'&&React.createElement('label',{className:'block mb-1'},
-                _labelTip('entry-percent','% of Kalshi balance per trade','Risk this % of your live Kalshi balance per trade. 5% = conservative (you\'d need 20 losing trades in a row to wipe out). 10% = aggressive. 20%+ = high-risk. Naturally scales: as you win, bet sizes grow; as you lose, they shrink. Still capped by Max bet/trade.'),
-                React.createElement('input',{
-                  type:'number',min:1,max:100,step:1,value:Number(autoExecSettings?.entryPercentBalance)||10,
-                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryPercentBalance:Math.max(1,Math.min(100,_num(e.target.value,10)))})),
-                  className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-sm tabular-nums focus:border-[#23B981] focus:outline-none mt-1',
-                }),
-                React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1'},
-                  `= ${Number(autoExecSettings?.entryPercentBalance)||10}% of your live Kalshi balance per trade`,
-                ),
-                _tipBox('entry-percent','Risk this % of your live Kalshi balance per trade. 5% = conservative (you\'d need 20 losing trades in a row to wipe out). 10% = aggressive. 20%+ = high-risk. Naturally scales: as you win, bet sizes grow; as you lose, they shrink. Still capped by Max bet/trade.'),
-              ),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/40 mt-1 leading-relaxed'},
-                'Dollar mode uses the sizing strategy above. Contracts and % modes OVERRIDE the sizing strategy — they directly set the bet from contract count or balance %. Max bet / trade still caps everything.',
+                _tipBox('entry-contracts','Number of Kalshi contracts to buy each trade. Each contract pays $1 at settlement if right, $0 if wrong. Cost varies with current offer price — e.g., 5 contracts at 60¢ offer = $3.00 total cost. Max bet/trade still caps the total — if 5 contracts × current price exceeds your cap, auto-exec sits out.'),
               ),
             ),
             React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 leading-relaxed'},
-              React.createElement('strong',{className:'text-[#EDEDED]/70'},'Note:'),' max-bet-per-trade in basic guardrails always wins as the ceiling. Sizing strategy can only reduce, never exceed.',
+              React.createElement('strong',{className:'text-[#EDEDED]/70'},'Note:'),' Max bet/trade above always wins as the ceiling, in either mode.',
             ),
           ),
         ),
@@ -22366,9 +21356,18 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
       // (entry/exit, risk caps, cooldowns). Each group has a clear header and
       // generous spacing. The bracketed note frames it as a separate tool that
       // doesn't fight Tara's auto-exec.
-      scalperSettings&&typeof setScalperSettings==='function'&&React.createElement('section',{
+      // V13.4.317: was an always-visible <section>, unconditionally rendered
+      //   regardless of whether the auto-exec "advanced settings" details above
+      //   it was open or closed -- a major contributor to the modal feeling
+      //   cluttered on open. Now a closed-by-default <details>, same as every
+      //   other advanced sub-panel in this modal.
+      scalperSettings&&typeof setScalperSettings==='function'&&React.createElement('details',{
         className:'pt-4 mt-4 border-t border-[#24242E]',
       },
+        React.createElement('summary',{className:'cursor-pointer select-none flex items-baseline justify-between gap-2 pb-2'},
+          React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]',style:{color:'#C4B5FD'}},'Tara\'s Advisor (scalper)'),
+          React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45'},'advisory only · tap to expand'),
+        ),
         // V9.19.25: section header redesigned to make this VISUALLY DISTINCT from
         //   Kalshi Auto-Execution. Both used gold before, which made them feel like
         //   the same system. They are not — auto-exec places real orders, this is
@@ -22603,8 +21602,8 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
         ),
       ), // closes scalperSettings.enabled Fragment
-        ), // V10.4.1a closes the wrapping div inside details
-      ), // V10.4.1a closes the new details collapsible
+        ), // V10.4.1a closes the wrapping div inside the "Scalper config" details
+      ), // V13.4.317: closes the outer Tara's Advisor <details> (was a <section>)
       React.createElement('button',{
         onClick:onClose,
         className:'w-full px-4 py-2 rounded-lg text-[11px] uppercase font-bold tracking-wider transition-colors',
