@@ -5655,8 +5655,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.308-autoexec-callwindow-redesign';
-const TARA_VERSION_DISPLAY='Tara 13.4.308';
+const BASELINE_VERSION='2026.09.07-v13.4.309-mission-bankroll-settlement';
+const TARA_VERSION_DISPLAY='Tara 13.4.309';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35980,13 +35980,21 @@ function TaraApp(){
         lastBankrollUpdate:Number(v.lastBankrollUpdate)||0,
         // History of bankroll points for sparkline {t, b}[]
         bankrollHistory:Array.isArray(v.bankrollHistory)?v.bankrollHistory.slice(-200):[],
+        // V13.4.309: real dedup for the settlement effect below -- taraCallLog
+        //   entry ids already folded into currentBankroll, so a re-render (or a
+        //   reload, since this is part of the persisted mission blob, unlike
+        //   the useRef it replaces) never double-counts the same window.
+        settledWindowIds:Array.isArray(v.settledWindowIds)?v.settledWindowIds.slice(-500):[],
+        // Windows resolved WIN/LOSS with no matching settlement-ledger entry
+        //   (manual trade, pre-v13.4.309 trade, or a reload between fill and
+        //   settlement -- the ledger is a plain ref, not persisted). Counted
+        //   toward trades/WR but skipped for the bankroll delta; this number
+        //   is how that gap gets disclosed instead of silently misreported.
+        bankrollDataGaps:Number(v.bankrollDataGaps)||0,
       };
-    }catch(_){return{active:false,startBankroll:0,currentBankroll:0,target:0,startDate:null,endDate:null,floor:0,kellyMult:0.25,maxBetFraction:0.15,status:'inactive',tradesAttempted:0,tradesWon:0,tradesLost:0,lastBankrollUpdate:0,bankrollHistory:[]};}
+    }catch(_){return{active:false,startBankroll:0,currentBankroll:0,target:0,startDate:null,endDate:null,floor:0,kellyMult:0.25,maxBetFraction:0.15,status:'inactive',tradesAttempted:0,tradesWon:0,tradesLost:0,lastBankrollUpdate:0,bankrollHistory:[],settledWindowIds:[],bankrollDataGaps:0};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_mission_v1',JSON.stringify(mission));}catch(_){}},[mission]);
-  // Track which trade IDs we've already accounted for in mission bankroll —
-  // prevents double-counting if the trade-log effect re-runs.
-  const _missionLastSeenTradeIdRef=useRef(0);
   // Kill switch is in-memory + localStorage. When engaged, all auto-exec is gated off
   // INSTANTLY regardless of autoExecSettings.enabled. Survives reloads.
   const[killSwitchEngaged,setKillSwitchEngaged]=useState(()=>{
@@ -46388,6 +46396,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // switch engages mid-rest, so a reversal cancels rather than fills into it.
   const _entryFiredForRef=useRef(null);
   const _entryBusyRef=useRef(false);
+  // V13.4.309: bankroll-settlement ledger. Keyed by 'BTC|'+windowId. Written
+  //   by _runEntry (fill) and _runExit (early exit) below; read by the
+  //   mission settlement effect further down, which needs real fill/exit
+  //   data to price a window's WIN/LOSS correctly -- autoOrderState itself
+  //   gets overwritten by the next window, so this is the only place that
+  //   data survives long enough. A plain ref, not persisted: a reload
+  //   between fill and settlement loses that window's entry here, which the
+  //   settlement effect treats as an honest gap (mission.bankrollDataGaps),
+  //   never a silently wrong number.
+  const _execSettlementLedgerRef=useRef({});
 
   // Stake, always clamped to the per-trade cap. 'percent' has no balance in
   // scope here, so it falls back to the cap rather than guessing large.
@@ -46504,9 +46522,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         return res;
       }
       const filledAt=res.rung?res.rung.priceCents:costCents;
+      const _execFilledCount=(res.normalized&&res.normalized.filledCount)||Number(res.order&&res.order.count)||0;
       setAutoOrderState(prev=>Object.assign({},prev||{},{
         status:'filled',dryRun,order:res.order,
-        filledCount:(res.normalized&&res.normalized.filledCount)||Number(res.order&&res.order.count)||0,
+        filledCount:_execFilledCount,
         filledAtCents:filledAt,
         tookSpread:!!(res.rung&&res.rung.takesSpread),
         // Realised saving versus crossing — the number V13.4.228 says decides
@@ -46521,6 +46540,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           &&(Date.now()-_kalshiQuote.at)<=30000)?Number(_kalshiQuote.mid):null,
         at:Date.now(),
       }));
+      // V13.4.309: bankroll-settlement ledger entry -- real fill data, keyed
+      //   by this window's id so it survives past this position even after
+      //   autoOrderState is overwritten by the next window.
+      if(lock&&lock.windowId){
+        _execSettlementLedgerRef.current['BTC|'+lock.windowId]={
+          dir,filledCount:_execFilledCount,filledAtCents:filledAt,
+          stakeDollars:(filledAt*_execFilledCount)/100,
+          dryRun,enteredAt:Date.now(),
+        };
+      }
       return res;
     }catch(e){
       const msg=String((e&&e.message)||e);
@@ -46620,15 +46649,35 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         return res;
       }
       const exitVal=_exitValueCents(dir);
+      // Realised move per contract against the entry fill, so a session can
+      // be judged on what it actually got rather than on the signal. Uses
+      // st.filledAtCents (captured at the top of this function) rather than
+      // prev.filledAtCents -- same value, since nothing between them touches
+      // it, but hoisted so the settlement ledger below can reuse it too.
+      const _execPnlPerContract=(exitVal!=null&&Number.isFinite(Number(st.filledAtCents)))
+        ?(exitVal-Number(st.filledAtCents)):null;
       setAutoOrderState(prev=>Object.assign({},prev||{},{
         status:'exited',exitReason:why,exitOrder:res.order,
         exitAtCents:limitCents,
-        // Realised move per contract against the entry fill, so a session can
-        // be judged on what it actually got rather than on the signal.
-        pnlCentsPerContract:(exitVal!=null&&Number.isFinite(Number(prev&&prev.filledAtCents)))
-          ?(exitVal-Number(prev.filledAtCents)):null,
+        pnlCentsPerContract:_execPnlPerContract,
         at:Date.now(),
       }));
+      // V13.4.309: merge the real exit into this window's ledger entry
+      //   (written at fill time, above) so the settlement effect can price
+      //   an early exit (trailing stop / take-profit / cut-loss / time exit)
+      //   from real data instead of falling back to hold-to-settlement math.
+      if(st.windowId){
+        const _ledgerKey=(st.asset||'BTC')+'|'+st.windowId;
+        const _prevLedger=_execSettlementLedgerRef.current[_ledgerKey]||{};
+        _execSettlementLedgerRef.current[_ledgerKey]={
+          ..._prevLedger,
+          exitedAt:Date.now(),exitReason:why,exitAtCents:exitVal,
+          pnlCentsPerContract:_execPnlPerContract,
+          realizedPnLDollars:(_execPnlPerContract!=null&&Number.isFinite(Number(st.filledCount)))
+            ?Number(((_execPnlPerContract*Number(st.filledCount))/100).toFixed(2))
+            :null,
+        };
+      }
       return res;
     }catch(e){
       const msg=String((e&&e.message)||e);
@@ -46638,6 +46687,96 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       _exitBusyRef.current=false;
     }
   },[autoOrderState,kalshiCreds]);
+
+  // V13.4.309: MISSION BANKROLL SETTLEMENT. Order sizing is untouched by this
+  //   effect -- it only ever READS taraCallLog and the settlement ledger
+  //   above, and writes mission.currentBankroll/tradesWon/etc. A bug here can
+  //   misreport a dashboard number; it cannot mis-size a real order. That is
+  //   deliberate staging (see project_tara_autoexec_simplify memory) -- sizing
+  //   is wired to read this in a later version, once this has been watched.
+  //
+  //   All the actual bankroll math runs inside the setMission functional
+  //   updater against `prev`, never against the outer `mission` closure --
+  //   React guarantees `prev` is the latest state even if this effect fires
+  //   more than once before a re-render, so settledWindowIds can never be
+  //   read stale and double-count the same window twice.
+  useEffect(()=>{
+    if(!mission.active||mission.status!=='active')return;
+    const log=Array.isArray(taraCallLog)?taraCallLog:[];
+    if(!log.length)return;
+
+    setMission(prev=>{
+      // V13.4.309 FIX (caught live, before this ever shipped): filtering only
+      //   on settledWindowIds meant a mission started today would treat its
+      //   ENTIRE pre-existing taraCallLog history as "newly resolved" on its
+      //   very first render -- confirmed live, a fresh mission against a
+      //   470-trade history instantly stamped tradesAttempted:470,
+      //   bankrollDataGaps:470. `id` is a Date.now() timestamp (stamped at
+      //   lock time), so gating on prev.startDate keeps a mission scoped to
+      //   trades that happened during IT, not the app's whole lifetime.
+      const _startMs=prev.startDate?new Date(prev.startDate).getTime():0;
+      const _already=new Set(prev.settledWindowIds||[]);
+      // Directional only -- SIT_OUT and any other non-UP/DOWN call never had
+      //   a real position, so it can't move the bankroll either way.
+      const _fresh=log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN')
+        &&Number(e.id)>=_startMs&&!_already.has(e.id));
+      if(!_fresh.length)return prev; // nothing new -- bail without a state change
+
+      let _bankroll=prev.currentBankroll;
+      let _won=prev.tradesWon,_lost=prev.tradesLost,_attempted=prev.tradesAttempted;
+      let _gaps=prev.bankrollDataGaps||0;
+      const _newIds=[...(prev.settledWindowIds||[])];
+      const _historyAdds=[];
+
+      for(const e of _fresh){
+        _newIds.push(e.id);
+        _attempted++;
+        if(e.result==='WIN')_won++;else _lost++;
+
+        const _ledger=_execSettlementLedgerRef.current[(e.asset||'BTC')+'|'+e.windowId];
+        let _delta=null;
+        if(_ledger&&_ledger.exitedAt!=null&&_ledger.realizedPnLDollars!=null){
+          // Closed early (trailing stop / take-profit / cut-loss / time
+          //   exit) -- the real exit fill, not settlement math.
+          _delta=_ledger.realizedPnLDollars;
+        }else if(_ledger&&_ledger.stakeDollars!=null&&_ledger.filledCount!=null){
+          // Held to natural settlement -- standard win/lose-max-payout math,
+          //   on the REAL stake/count this window actually filled at (never
+          //   the settings-based betAmt/maxPay fields, which are dead --
+          //   always 0, see project_tara_autoexec_simplify memory).
+          const _maxPayout=Number(_ledger.filledCount)*1.0;
+          _delta=e.result==='WIN'?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
+        }else{
+          // No ledger entry -- manual trade, a trade from before this
+          //   version, or a reload between fill and settlement (the ledger
+          //   is a plain ref, not persisted). Count it, skip the bankroll
+          //   delta, disclose the gap rather than guess.
+          _gaps++;
+        }
+        if(_delta!=null){
+          _bankroll=Math.max(0,_bankroll+_delta);
+          _historyAdds.push({t:Date.now(),b:_bankroll});
+        }
+      }
+
+      const _status=(prev.target>0&&_bankroll>=prev.target)?'hit'
+        :(_bankroll<=prev.floor)?'busted'
+        :prev.status;
+
+      return{
+        ...prev,
+        currentBankroll:_bankroll,
+        tradesAttempted:_attempted,
+        tradesWon:_won,
+        tradesLost:_lost,
+        bankrollDataGaps:_gaps,
+        settledWindowIds:_newIds.slice(-500),
+        bankrollHistory:[...(prev.bankrollHistory||[]),..._historyAdds].slice(-200),
+        lastBankrollUpdate:Date.now(),
+        status:_status,
+      };
+    });
+  },[taraCallLog,mission.active,mission.status]);
 
   useEffect(()=>{
     const st=autoOrderState;
