@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.315-autoexec-pnl-tagging-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.315';
+const BASELINE_VERSION='2026.09.08-v13.4.316-signal-source-and-pnl-sign-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.316';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21040,6 +21040,50 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               className:'ml-2',
             }),
           ),
+          // V13.4.316: signal source, genuinely wired into _runEntry this
+          //   version (a prior toggle with this same choice existed in the
+          //   old AUTO-EXEC card but only ever changed a display label --
+          //   removed in v13.4.313 as dead). Consolidated here from a second,
+          //   older control (a plain <select> in "Advanced entry filters")
+          //   that already correctly documented the default -- V9.17.22:
+          //   "snapshot" is the recommended default because it's the same
+          //   signal your displayed win-rate is measured against; "lock" is
+          //   legacy pre-V9.17.22 behavior. Both controls wrote the same
+          //   autoExecSettings.signalSource field, so this is a real
+          //   consolidation onto one control, not a behavior change -- the
+          //   ONLY actual behavior change this version makes is that
+          //   _runEntry finally reads this field at all.
+          React.createElement('div',{className:'mt-2 pt-2 border-t border-[#16161c]'},
+            React.createElement('div',{className:'text-[11px] font-bold text-white mb-0.5'},'Signal source'),
+            React.createElement('div',{className:'text-[10px] text-[#EDEDED]/55 mb-1.5'},
+              "Which of Tara's two signals a real order fires on. Tara's call (default) is the same signal your win-rate above is measured against. Engine lock fires earlier but is the older, legacy behavior — real results on it won't necessarily match that win-rate."),
+            React.createElement('div',{className:'flex gap-0 rounded-lg overflow-hidden',style:{border:'1px solid #24242E'}},
+              (()=>{
+                const _src=autoExecSettings?.signalSource==='lock'?'lock':'snapshot';
+                const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
+                return[
+                  React.createElement('button',{
+                    key:'snapshot',
+                    className:_btnBase,
+                    style:_src==='snapshot'
+                      ?{background:'rgba(35,185,129,0.16)',color:'rgb(35,185,129)',borderRight:'1px solid rgba(35,185,129,0.30)'}
+                      :{background:'#0E0E12',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #24242E'},
+                    onClick:()=>setAutoExecSettings(prev=>({...prev,signalSource:'snapshot'})),
+                    title:"Tara's call (default, recommended) — waits for her committed, publicly-shown call before firing. Same signal your win-rate record is measured against. Can commit later in the window (or not at all), so this may fire late or sit out windows engine lock would have traded.",
+                  },"tara's call"),
+                  React.createElement('button',{
+                    key:'lock',
+                    className:_btnBase,
+                    style:_src==='lock'
+                      ?{background:'rgba(35,185,129,0.16)',color:'rgb(35,185,129)'}
+                      :{background:'#0E0E12',color:'rgba(237,237,237,0.45)'},
+                    onClick:()=>setAutoExecSettings(prev=>({...prev,signalSource:'lock'})),
+                    title:'Engine lock (legacy) — fires the instant the engine itself decides a side, earlier than Tara\'s call. Pre-V9.17.22 behavior. Can disagree with the settled call, so real results may not track your displayed win-rate.',
+                  },'engine lock'),
+                ];
+              })(),
+            ),
+          ),
           // V9.17.3: mutual exclusivity hint
           !!autoExecSettings?.enabled&&!!scalperSettings?.enabled&&React.createElement('div',{className:'text-[9px] text-amber-400/70 italic mb-2 -mt-1'},
             'scalper auto-exec disabled — tara auto-exec takes precedence',
@@ -21739,23 +21783,13 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
                 'From your reconcile (BTC, 602 traded): Super 75% (n=8, small), Confluence 80% (n=5, tiny), Structural 60% (n=58, weakest), Tape-led 67% (n=55), Single 68% (n=462, bulk of volume). Single is where the edge lives — filtering it out cuts your sample massively. Default "any" recommended.',
               ),
             ),
-            // V9.17.22: SIGNAL SOURCE toggle. Defaults to 'snapshot' (Tara's
-            //   public call — the distribution the WR is measured against).
-            //   'lock' uses the internal engine lock (legacy V9.6.0 behavior).
-            React.createElement('div',null,
-              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#EDEDED]/60 mb-1'},'Auto-exec signal source'),
-              React.createElement('select',{
-                value:autoExecSettings?.signalSource||'snapshot',
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,signalSource:e.target.value})),
-                className:'w-full bg-[#050508] border border-[#2A2A34] rounded-lg px-2 py-1.5 text-white text-sm focus:border-[#23B981] focus:outline-none',
-              },
-                React.createElement('option',{value:'snapshot'},'Tara\'s public call (recommended · matches your WR data)'),
-                React.createElement('option',{value:'lock'},'Internal engine lock (legacy · fires earlier, different distribution)'),
-              ),
-              React.createElement('div',{className:'text-[9px] text-[#EDEDED]/45 mt-1 leading-relaxed'},
-                'V9.17.22: "snapshot" trades the same signal that generates your 67% WR — includes time-cap-commit and forced calls. "lock" is the pre-V9.17.22 behavior (fires earlier on the internal lock, may diverge from public call).',
-              ),
-            ),
+            // V13.4.316: SIGNAL SOURCE moved to the Master toggles section
+            //   (near "Auto-place orders on lock"), where a setting that
+            //   determines what real orders actually trade on belongs, rather
+            //   than buried in "Advanced entry filters". Single control now --
+            //   was previously duplicated here (a plain <select>) AND, until
+            //   tonight, non-functional everywhere, since _runEntry never read
+            //   signalSource at all before this version.
             // Min quality / min conviction (grid)
             React.createElement('div',{className:'grid grid-cols-2 gap-2'},
               React.createElement('label',{className:'block'},
@@ -42483,10 +42517,38 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     } else if(_ledger.stakeDollars!=null&&_ledger.filledCount!=null){
                       // Held to natural settlement -- standard win/lose-max-payout
                       //   math on the REAL stake/count this window actually filled.
+                      // V13.4.316: _resolvedResult reflects whether TARA'S SETTLED
+                      //   CALL was right (idx.e.dir vs _outcomeDir) -- but the real
+                      //   position was entered on the ENGINE LOCK (_ledger.dir),
+                      //   which can differ from the settled call on the same
+                      //   window. Using _resolvedResult here silently computed the
+                      //   WRONG SIGN on exactly those disagreement windows: a real
+                      //   long-UP position that lost would be reported as a profit
+                      //   if the settled call later flipped to DOWN and DOWN won.
+                      //   Compare the REAL position's own direction against the
+                      //   real market outcome directly -- both are already on hand
+                      //   (_ledger.dir, _outcomeDir) -- so this can never disagree
+                      //   with what was actually bought. Falls back to
+                      //   _resolvedResult only on the rare entry with no recorded
+                      //   _outcomeDir at all, rather than computing nothing.
                       const _maxPayout=Number(_ledger.filledCount)*1.0;
-                      _realized=_resolvedResult==='WIN'?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
+                      const _ledgerWon=(_ledger.dir==='UP'||_ledger.dir==='DOWN')&&(_outcomeDir==='UP'||_outcomeDir==='DOWN')
+                        ?(_ledger.dir===_outcomeDir)
+                        :(_resolvedResult==='WIN');
+                      _realized=_ledgerWon?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
                     }
-                    return{autoExec:true,realizedPnLDollars:_realized};
+                    return{
+                      autoExec:true,realizedPnLDollars:_realized,
+                      // V13.4.316: persist what the ledger captured at entry
+                      //   time onto the PERSISTED log entry (the ledger itself
+                      //   is in-memory only and gone on the next reload) -- the
+                      //   first durable record of whether the engine lock and
+                      //   Tara's settled call agreed on this window, and which
+                      //   one the real order actually traded on.
+                      execSignalSource:_ledger.signalSource||null,
+                      execEngineLockDir:_ledger.engineLockDirAtEntry||null,
+                      execSnapshotDir:_ledger.snapshotDirAtEntry||null,
+                    };
                   })(),
                   // V9.10.5: prefer closure-captured timeSeries + releaseSignalsHistory
                   //   from before the rollover clear. lockedCallRef.current is null by now
@@ -46388,9 +46450,43 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const creds=kalshiCreds||{};
     if(!dryRun&&(!creds.apiKeyId||!creds.privateKeyPem))return{ok:false,reason:'no-credentials'};
 
-    const lock=lockedCallRef.current;
+    // V13.4.316: signal source, genuinely wired for the first time.
+    //   'snapshot' (default) waits for Tara's call to actually commit to a
+    //   tradeable side before firing -- routed through readLockState, the one
+    //   place in this file that correctly separates "committed" from
+    //   "tradeable" (see readLockState's own doc comment: three separate
+    //   panels each hand-rolled this wrong before that helper existed).
+    //   'lock' is the engine's own immediate internal lock -- fires earlier,
+    //   can diverge from the settled call. The default here matches the
+    //   ALREADY-DOCUMENTED default from the settings UI (V9.17.22: "snapshot"
+    //   because it's the same signal the displayed win-rate is measured
+    //   against; "lock" is legacy pre-V9.17.22 behavior) -- that setting has
+    //   simply never been read by a real order before this version. A
+    //   separate toggle existed in the old AUTO-EXEC card too, but only ever
+    //   changed a display label, never reaching here either.
+    const _signalSource=s.signalSource==='lock'?'lock':'snapshot';
+    let lock;
+    if(_signalSource==='snapshot'){
+      const _snapLock=readLockState(taraCallSnapshotRef.current);
+      lock=_snapLock.tradeable?{
+        dir:_snapLock.dir,
+        lockedAt:(taraCallSnapshotRef.current&&taraCallSnapshotRef.current._committedAt)||Date.now(),
+        windowId:computeWindowId(windowType),
+      }:null;
+    } else {
+      lock=lockedCallRef.current;
+    }
     const dir=lock&&lock.dir;
     if(dir!=='UP'&&dir!=='DOWN')return{ok:false,reason:'no-lock'};
+
+    // V13.4.316: capture BOTH signals at the moment of entry, regardless of
+    //   which one is actually being traded on -- this is the data the disagreement
+    //   question needed and never had: taraCallLog only ever persisted the settled
+    //   call's direction, never the engine lock's, so no historical comparison was
+    //   ever possible. Written onto the settlement ledger below so it survives
+    //   into analysis later without touching the hot path.
+    const _engineLockDirAtEntry=(lockedCallRef.current&&lockedCallRef.current.dir)||null;
+    const _snapshotDirAtEntry=readLockState(taraCallSnapshotRef.current).dir;
 
     const lockKey=String(lock.lockedAt||0)+':'+dir;
     if(_entryFiredForRef.current===lockKey)return{ok:false,reason:'already-fired'};
@@ -46453,6 +46549,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         ticker,dir,betDollars:stake,offerCents:costCents,
         settings:s,dryRun,
         shouldAbort:()=>{
+          // V13.4.316: abort against whichever signal this entry is actually
+          //   trading on -- aborting on the engine lock changing while trading
+          //   off Tara's settled call (or vice versa) would cancel a perfectly
+          //   good ladder over a signal this order was never using.
+          if(_signalSource==='snapshot'){
+            const _l=readLockState(taraCallSnapshotRef.current);
+            return !_l.tradeable||_l.dir!==dir;
+          }
           const l=lockedCallRef.current;
           return !l||l.dir!==dir;
         },
@@ -46499,6 +46603,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           dir,filledCount:_execFilledCount,filledAtCents:filledAt,
           stakeDollars:(filledAt*_execFilledCount)/100,
           dryRun,enteredAt:Date.now(),
+          // V13.4.316: which signal this entry actually traded on, plus what
+          //   BOTH signals said at the moment of entry -- so a future pass can
+          //   finally answer "how often do they disagree, and who wins when
+          //   they do" instead of guessing. Ledger is in-memory only (survives
+          //   a page reload no better than anything else here), but it's the
+          //   first version of this file that has ever recorded it at all.
+          signalSource:_signalSource,
+          engineLockDirAtEntry:_engineLockDirAtEntry,
+          snapshotDirAtEntry:_snapshotDirAtEntry,
         };
       }
       return res;
@@ -46509,7 +46622,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }finally{
       _entryBusyRef.current=false;
     }
-  },[autoExecSettings,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,_resolveStakeDollars]);
+  },[autoExecSettings,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,taraCallSnapshotRef,windowType,_resolveStakeDollars]);
 
   // V9.17.18: MANUAL PLACE-ORDER on Tara's call. Tara's snapshot paths commit
   //   without writing lockedCallRef, so the automatic path can sit out; this
@@ -46695,8 +46808,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   on the REAL stake/count this window actually filled at (never
           //   the settings-based betAmt/maxPay fields, which are dead --
           //   always 0, see project_tara_autoexec_simplify memory).
+          // V13.4.316: e.result reflects whether TARA'S SETTLED CALL was right,
+          //   but the real position was entered on the ENGINE LOCK (_ledger.dir),
+          //   which can differ from the settled call on the same window. Using
+          //   e.result here silently computed the wrong sign on exactly those
+          //   disagreement windows. Compare the real position's own direction
+          //   against the real market outcome (e.outcomeDir) directly instead --
+          //   this can never disagree with what was actually bought. Falls back
+          //   to e.result only when outcomeDir wasn't recorded at all.
           const _maxPayout=Number(_ledger.filledCount)*1.0;
-          _delta=e.result==='WIN'?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
+          const _ledgerWon=(_ledger.dir==='UP'||_ledger.dir==='DOWN')&&(e.outcomeDir==='UP'||e.outcomeDir==='DOWN')
+            ?(_ledger.dir===e.outcomeDir)
+            :(e.result==='WIN');
+          _delta=_ledgerWon?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
         }else{
           // No ledger entry -- manual trade, a trade from before this
           //   version, or a reload between fill and settlement (the ledger
