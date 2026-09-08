@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.07-v13.4.311-dryrun-fill-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.311';
+const BASELINE_VERSION='2026.09.08-v13.4.312-hourly-egress-guard';
+const TARA_VERSION_DISPLAY='Tara 13.4.312';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16176,6 +16176,18 @@ const _hrLoad=()=>{try{const j=JSON.parse(localStorage.getItem(_HR_KEY)||'{}');r
 const _HR_CLOUD_PATH='memory/hourlyRecord';
 const _HR_HISTORY_CAP=500;
 const _HR_PENDING_CAP=40;
+// V13.4.312 EGRESS: module-level singleton guard for the hydrate interval below.
+//   Found via query_logs: this single ~32KB doc was fetched ~28,900 times over
+//   24h from one browser session (dev + prod tabs combined) -- roughly once
+//   every 3 seconds, not once every 5 minutes as the interval is written to
+//   do. A fresh, short-lived session traces exactly as documented (one mount,
+//   one hydrate call, matching the 5-min interval) and cannot reproduce the
+//   high rate -- it only shows up after many hours in one long-lived tab,
+//   which points at intervals accumulating over time rather than a single
+//   always-wrong rate. Whatever the exact trigger, at most one interval
+//   should ever be alive for this doc in a given tab; this flag makes a
+//   second, orphaned one impossible regardless of why a remount happened.
+let _hrIntervalActive=false;
 const _hrSave=(r,urgent)=>{
   // V13.4.175 FIX: this used to be a blind pending.slice(-CAP) -- newest 40 kept,
   //   oldest silently dropped. settle() retries forever on a failed/void market with
@@ -16276,8 +16288,17 @@ function useHourlyRecord(){
   },[]);
   React.useEffect(()=>{
     _hrHydrate();
-    const iv=setInterval(_hrHydrate,5*60000); // V13.4.176: re-pull every 5 min, not just at mount
-    return()=>clearInterval(iv);
+    // V13.4.312 EGRESS: singleton guard (see comment at _hrIntervalActive's
+    //   declaration) -- at most one of these intervals runs per tab, ever,
+    //   no matter how many times this hook mounts. Also widened 5min -> 15min
+    //   as defense in depth regardless of the exact trigger.
+    if(_hrIntervalActive)return;
+    _hrIntervalActive=true;
+    const iv=setInterval(_hrHydrate,15*60000);
+    return()=>{
+      clearInterval(iv);
+      _hrIntervalActive=false;
+    };
   },[_hrHydrate]);
   // V13.4.236: CONTRADICTION RE-CHECK AGAINST FRESH CLOUD STATE.
   //
