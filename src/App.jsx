@@ -5671,8 +5671,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.320-fold-legacy-prediction-card';
-const TARA_VERSION_DISPLAY='Tara 13.4.320';
+const BASELINE_VERSION='2026.09.08-v13.4.321-remove-decision-clock';
+const TARA_VERSION_DISPLAY='Tara 13.4.321';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19039,105 +19039,27 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             _etaStr=_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
           }
           const _color='rgb(35,185,129)';
-          // ═══════════════════════════════════════════════════════════════
-          // V13.4.147 — DECISION CLOCK
-          //
-          // Lock ETA above is derived from the SAMPLE ACCUMULATION RATE, so it
-          // cannot name a time: it reads "stalled" whenever conviction is not
-          // building, which is most of a quiet window. That leaves no answer to
-          // the only question that matters when you are sitting in front of it --
-          // "when will she actually decide?" -- so the window gets entered on a
-          // guess instead.
-          //
-          // That guess is the single most expensive thing in the account.
-          // Kalshi settlements joined to Tara's log (n=1,996 matched windows):
-          //     traded WITH Tara's direction : n=1038  WR 73.9%  +4.48c/ct  +$5,791
-          //     traded AGAINST her direction : n= 529  WR 61.6%  -8.44c/ct  -$7,147
-          // Opposing her is over half the total loss, and it holds separately in
-          // both 15m (-$3,518) and hourly (-$3,493).
-          //
-          // So this is deliberately NOT another conviction estimate. It is a
-          // fixed, announced schedule, known the moment the window opens:
-          //     15m     decide T-10min -> final answer by T-7min
-          //     hourly  decide T-20min -> final answer by T-10min
-          // Those bounds are the measured best-EV entry zones on real fills
-          // (15m 7-10min +6.87c/ct n=235; hourly 10-20min +5.00 to +11.54c),
-          // not arbitrary. Entering earlier means paying up for a read the
-          // market has already priced -- at 1-2min left the win rate is the same
-          // 73% but the contract costs 75c instead of 64c, which is -14c/ct.
-          //
-          // States: WAIT (do not enter yet) -> DECIDING -> LOCKED or NO CALL.
-          // ═══════════════════════════════════════════════════════════════
-          // V13.4.159 CORRECTION: the V13.4.147 window (T-10 -> T-7) was a
-          //   PRESCRIPTION taken from best-EV entry buckets, but nothing makes the
-          //   engine obey it. Measured against 5 days of live locks it was simply
-          //   wrong about its own app:
-          //       locked BEFORE the promised window (>600s): 64%
-          //       locked INSIDE it                         : 19%
-          //       locked AFTER it (<=420s)                 : 18%
-          //   So it told the user to wait for a decision that had usually already
-          //   happened -- worse than showing nothing, because it was trusted.
-          //   Now describes what she ACTUALLY does: the observed inter-quartile
-          //   lock range (p25 516s, p50 686s, p75 793s on 15m). Labelled as
-          //   'typically', because it is a description, not a promise.
-          const _dcTotal=windowType==='15m'?900:3600;
-          const _dcLeft=_minsR*60+_secsR;
-          const _dcOpen=windowType==='15m'?793:1200;   // p75 - locks usually start here
-          const _dcClose=windowType==='15m'?516:600;   // p25 - usually decided by here
-          const _fmt=(s)=>{s=Math.max(0,Math.round(s));const m=Math.floor(s/60);return m>0?`${m}m ${String(s%60).padStart(2,'0')}s`:`${s}s`;};
-          const _clockAt=(secsFromNow)=>{
-            try{
-              const d=new Date(Date.now()+Math.max(0,secsFromNow)*1000);
-              return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-            }catch(_e){return '--';}
-          };
-          // V13.4.279: this read "taraCall has a direction", which is true on every
-          //   tick once a lean forms -- so the clock announced LOCKED, and told him
-          //   not to trade against a call, before anything was committed. Seen live
-          //   next to its own PHASE strip reading "LEANING · 33s to commit", and
-          //   next to THIS TRADE reading LEANING. Third panel this session to infer
-          //   a lock from the presence of a direction (see V13.4.275).
-          //   The committed snapshot decides, and the label reads from the snapshot
-          //   too, so the clock can never name a direction the commit did not make.
-          // V13.4.280: routed through readLockState. `tradeable` is the correct
-          //   gate for a panel that says "do not trade against it" -- a committed
-          //   sit-out is decided but has no side to trade against.
-          const _dcLock=readLockState(snap);
-          const _hasCall=_dcLock.tradeable;
-          let _dcState,_dcMain,_dcSub,_dcCol;
-          if(_hasCall){
-            _dcState='LOCKED';
-            _dcCol=_dcLock.dir==='UP'?'rgb(35,185,129)':'#E8455E';
-            _dcMain=`LOCKED ${_dcLock.dir}`;
-            _dcSub='call is in — do not trade against it';
-          }else if(_dcLeft>_dcOpen){
-            _dcState='EARLY';
-            _dcCol='rgba(212,162,76,0.95)';
-            _dcMain=`usually locks from ${_clockAt(_dcLeft-_dcOpen)}`;
-            _dcSub=`~${_fmt(_dcLeft-_dcOpen)} away · she can still lock sooner — this is her typical range, not a schedule`;
-          }else if(_dcLeft>_dcClose){
-            _dcState='LOCK WINDOW';
-            _dcCol='rgb(35,185,129)';
-            _dcMain=`in her usual lock range`;
-            _dcSub=`most locks land by ${_clockAt(_dcLeft-_dcClose)} · watch for the call now`;
-          }else{
-            _dcState='PAST USUAL';
-            _dcCol='rgba(237,237,237,0.45)';
-            _dcMain='past her usual lock range';
-            _dcSub='she can still lock late, but most windows are decided by now';
-          }
+          // V13.4.321: DECISION CLOCK removed. Direct user report: "never ever
+          //   locked on the time it says." Checked against real data before
+          //   removing rather than re-tuning a third time -- queried the last
+          //   7 days of real 15m locks from Supabase (193 of them): actual
+          //   p25/p75 was 492s/748s remaining vs the hardcoded 516s/793s used
+          //   here, well under a minute off. The quartiles were NOT stale.
+          //   The real problem: this rendered a precise wall-clock time
+          //   ("usually locks from 02:31:46 PM") for what is fundamentally a
+          //   50%-confidence, 4+ minute-wide band blended across every
+          //   quality tier at once -- a super-confluence setup can lock in
+          //   5s, a patient one can take 100+ -- so on any single window,
+          //   where the real lock falls relative to that band is close to a
+          //   coin flip. Second time this exact feature over-promised
+          //   precision it structurally can't deliver: the original
+          //   V13.4.147 design was a fixed schedule a later audit found
+          //   wrong 64%/19%/18% against its own promised window, and
+          //   V13.4.159's fix (this quartile-band version) measured
+          //   accurately but was still unsatisfying to actually watch. Lock
+          //   ETA below is the one number that's genuinely live for the
+          //   current window and is kept as-is, unchanged.
           return(
-            <>
-            <div className="border-t border-[#24242E] pt-2.5 mt-2.5">
-              <div className="px-2.5 py-2 rounded-lg" style={{background:'#0E0E12',border:`1px solid ${_dcCol.replace('rgb','rgba').replace(')',',0.35)').replace('rgba(','rgba(')}`}}>
-                <div className="flex items-baseline justify-between gap-2 mb-0.5">
-                  <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold">Decision Clock</span>
-                  <span className="text-[9px] uppercase tracking-wide tabular-nums" style={{color:_dcCol}}>{_dcState}</span>
-                </div>
-                <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_dcCol}}>{_dcMain}</div>
-                <div className="text-[9px] text-[#EDEDED]/50 mt-0.5 leading-snug">{_dcSub}</div>
-              </div>
-            </div>
             <div className="border-t border-[#24242E] pt-2.5 mt-2.5">
               <div className="px-2.5 py-2 rounded-lg" style={{background:'#0E0E12',border:'1px solid #24242E'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
@@ -19148,7 +19070,6 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 {_blockerLine&&<div className="text-[9px] text-[#EDEDED]/45 italic mt-0.5 tabular-nums">{_blockerLine}</div>}
               </div>
             </div>
-            </>
           );
         })()}
         {!isCommittedSnap&&(onSoftHint||onHardForce)&&(
