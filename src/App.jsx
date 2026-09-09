@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.09-v13.4.322-kalshi-fill-confirmation';
-const TARA_VERSION_DISPLAY='Tara 13.4.322';
+const BASELINE_VERSION='2026.09.09-v13.4.323-cutloss-warning-accuracy';
+const TARA_VERSION_DISPLAY='Tara 13.4.323';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -22061,9 +22061,17 @@ function AutoExecSimplePanel({autoExecSettings,setAutoExecSettings,mission,setMi
   const _tpColor=_tpVal===0?'#23B981':_tpVal<=TRAIL_ARM_C?'#E8455E':'rgba(237,237,237,0.55)';
 
   const _slVal=Number(autoExecSettings?.stopLossDeltaCents)||0;
+  // V13.4.323: was neutral gray for 1-29¢, implying that band was a safe
+  //   middle ground. It is not -- the V10.2.31 audit (724 historical trades)
+  //   found a fixed stop-loss measured negative at every level it tested,
+  //   10-40¢ included (13¢, the old "Hunter" preset, among them). Any
+  //   nonzero value now gets the same clear warning take-profit already
+  //   gets, instead of quietly looking fine at exactly the values that
+  //   measured worst.
   const _slCaption=_slVal===0?'off — recommended, holds to settlement'
-    :`exits ${_slVal}¢ below fill price`;
-  const _slColor=_slVal===0?'#23B981':_slVal>=30?'#E8455E':'rgba(237,237,237,0.55)';
+    :_slVal>=30?`exits ${_slVal}¢ below fill price — very wide, most of the stake is already lost by then`
+    :`exits ${_slVal}¢ below fill price — measured worse than holding to settlement at every level tested (10-40¢)`;
+  const _slColor=_slVal===0?'#23B981':'#E8455E';
 
   return React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#050508] border border-[#24242E]'},
     React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'Auto-Exec — Simple'),
