@@ -5000,14 +5000,58 @@ const kalshiRunEntryLadder=async({
       if(typeof shouldAbort==='function'&&shouldAbort())break;
       await new Promise(r=>setTimeout(r,pollMs));
       const look=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
-      if(!look.ok)break;
+      // V13.4.322: a failed POLL is not a failed ORDER. The old `if(!look.ok)
+      //   break;` here treated "we could not check this tick" identically to
+      //   "confirmed still resting" -- one transient network/API blip mid-wait
+      //   was enough to fall through to the cancel+no-fill path below even
+      //   when the order had genuinely filled moments earlier. Keep polling
+      //   until the deadline instead of giving up on the first bad read.
+      if(!look.ok)continue;
       normalized=kalshiNormalizeOrder(look.order);
     }
     if(normalized.status==='filled'){
       return{ok:true,order:placed.order,normalized,rung,attempts,plan};
     }
-    // Unfilled: cancel before stepping so two orders never rest at once.
-    if(orderId)await kalshiCancelOrder({apiKeyId,privateKeyPem,orderId,dryRun});
+    // V13.4.322: VERIFY BEFORE CANCEL. Reported live: a real fill happened on
+    //   Kalshi (user confirmed the fill on Kalshi's own side at the exact
+    //   price Tara had shown) while this ladder reported 'no-fill' with zero
+    //   contracts and no P&L tracking -- because the wait loop above can exit
+    //   on an unconfirmed read (every poll failing counts as "not yet
+    //   filled"), and the code then canceled the order and reported no-fill
+    //   without ever checking again. One direct status check, right before
+    //   touching the order, catches the common case.
+    const _final=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
+    if(_final.ok){
+      normalized=kalshiNormalizeOrder(_final.order);
+      if(normalized.status==='filled'){
+        return{ok:true,order:_final.order,normalized,rung,attempts,plan};
+      }
+    }
+    // Still not confirmed filled. Cancel it -- but a FAILED cancel is itself a
+    //   signal worth keeping: an order that already filled has nothing left
+    //   to cancel, and Kalshi's error response for that case says so. The old
+    //   code discarded this result entirely (`await kalshiCancelOrder(...)`
+    //   with the return value thrown away).
+    // V13.4.322: no order id at all (kalshiPlaceOrder claimed success but its
+    //   response carried none) means there is nothing to cancel and nothing
+    //   to re-check either -- that is NOT a safely-confirmed non-fill, so it
+    //   must not default to _cancelOk=true the way a merely-skipped cancel
+    //   attempt would read.
+    let _cancelOk=!orderId?false:true;
+    if(orderId){
+      const _cancelRes=await kalshiCancelOrder({apiKeyId,privateKeyPem,orderId,dryRun});
+      _cancelOk=!!_cancelRes.ok;
+    }
+    // V13.4.322: if the final direct check could not reach Kalshi AND the
+    //   cancel also failed, the true fill state is genuinely UNKNOWN -- not
+    //   "confirmed unfilled." Reporting this identically to a clean no-fill is
+    //   exactly the bug that produced a real, untracked position with no exit
+    //   protection. Distinct reason so the caller can show something that
+    //   says "go check Kalshi directly," not a normal-looking error.
+    if(!_final.ok&&!_cancelOk){
+      attempts.push({rung,status:'unknown',orderId});
+      return{ok:false,reason:'unknown-verify-kalshi-directly',attempts,plan,orderId};
+    }
     attempts.push({rung,status:normalized.status||'unfilled'});
   }
   return{ok:false,reason:'no-fill',attempts,plan};
@@ -5671,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.08-v13.4.321-remove-decision-clock';
-const TARA_VERSION_DISPLAY='Tara 13.4.321';
+const BASELINE_VERSION='2026.09.09-v13.4.322-kalshi-fill-confirmation';
+const TARA_VERSION_DISPLAY='Tara 13.4.322';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15144,13 +15188,19 @@ function PositionReconciliationBanner({positionReconciliation}){
   if(!_rec||_rec.status!=='drift'||!Array.isArray(_rec.driftDetails)||_rec.driftDetails.length===0)return null;
   // If user dismissed this poll's banner, suppress until next poll arrives
   if(dismissedAt>0&&dismissedAt>=(_rec.lastCheckAt||0))return null;
-  const _kindColor=(k)=>k==='unknown-to-tara'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
+  // V13.4.322: two new kinds for the self-healing 'unknown' fill-status check
+  //   (see _computeDrift below) -- resolved-nofill is genuinely good news
+  //   (green), resolved-filled means a real, unmanaged position was just
+  //   confirmed and needs the user's attention (red, same as phantom-auto).
+  const _kindColor=(k)=>k==='unknown-to-tara'||k==='unknown-resolved-nofill'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
   const _kindLabel=(k)=>{
     if(k==='phantom-auto')return 'phantom (auto)';
     if(k==='phantom-manual')return 'phantom (manual)';
     if(k==='count-mismatch-auto')return 'count mismatch (auto)';
     if(k==='count-mismatch-manual')return 'count mismatch (manual)';
     if(k==='unknown-to-tara')return 'kalshi-only';
+    if(k==='unknown-resolved-filled')return 'confirmed filled';
+    if(k==='unknown-resolved-nofill')return 'confirmed no fill';
     return k;
   };
   return (
@@ -20429,6 +20479,18 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
                 React.createElement('span',{className:'text-[#EDEDED]/45 text-[10px]'},'max $',_maxPayoutDollars),
               );
             }
+            // V13.4.322: UNKNOWN — kalshiRunEntryLadder/_runExit could not
+            //   confirm whether the order filled. Falling through to the
+            //   PLACING fallback below would render "0 contracts @ Xc" --
+            //   the exact misleading line reported live for a real fill that
+            //   Tara had lost track of. This must never look like a normal,
+            //   settled outcome.
+            if(_s==='unknown'){
+              return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap'},
+                React.createElement('span',{className:'text-rose-400 font-bold'},'⚠ FILL STATUS UNKNOWN'),
+                React.createElement('span',{className:'text-[#EDEDED]/65 text-[10px]'},_o.dir,' @ ',_entry,'¢ — check Kalshi directly'),
+              );
+            }
             // PLACING / SUBMITTED / RESTING / PARTIALLY_FILLED — order out, no fill yet
             return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap tabular-nums'},
               React.createElement('span',{className:'text-[#EDEDED]/65'},_o.dir,' · ',_oCount,' contracts @ ',_o.limitCents!=null?_o.limitCents:_entry,'¢'),
@@ -20436,7 +20498,12 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
               React.createElement('span',{className:'text-[#EDEDED]/45 text-[10px]'},'max $',_maxPayoutDollars),
             );
           })(),
-          autoOrderState.error&&React.createElement('span',{className:'text-rose-400 text-[10px]',style:{wordBreak:'break-word'}},'⚠ ',String(autoOrderState.error).slice(0,200)),
+          // V13.4.322: was autoOrderState.error -- a field nothing ever
+          //   writes (only .reason is set, in both _runEntry and _runExit's
+          //   failure paths). This line has never rendered real text; it was
+          //   always silently skipped, which is why the compact status pill
+          //   showed a bare "KALSHI ERROR" label with no reason underneath it.
+          autoOrderState.reason&&React.createElement('span',{className:'text-rose-400 text-[10px]',style:{wordBreak:'break-word'}},'⚠ ',String(autoOrderState.reason).slice(0,200)),
         ),
         // V9.17.23: clear-error button. Surfaces only when status='error' AND
         //   we have a clear handler. Lets the user dismiss the stuck error
@@ -32892,7 +32959,12 @@ ${_d.responseBody||'(empty)'}`;
         React.createElement('div',{
           className:'text-[11px] leading-snug',
           style:{color:'rgba(237,237,237,0.85)',wordBreak:'break-word',fontFamily:'IBM Plex Mono,ui-monospace,monospace'},
-        },String(autoOrderState.error||'unknown error')),
+          // V13.4.322: was autoOrderState.error -- a field nothing ever
+          //   writes (only .reason is set). This always rendered the literal
+          //   fallback string "unknown error" regardless of what actually
+          //   went wrong, on every real auto-exec failure this banner has
+          //   ever shown.
+        },String(autoOrderState.reason||'unknown error')),
         // V9.17.28: expandable diagnostic details. Renders the four key fields
         //   below the headline reason so the user can read or copy them.
         autoOrderState._diag&&React.createElement('details',{className:'mt-2'},
@@ -45524,7 +45596,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         })),
       });
       if(!res.ok){
-        setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:res.reason,at:Date.now()}));
+        // V13.4.322: kalshiRunEntryLadder now returns a distinct reason when
+        //   it genuinely cannot tell whether the order filled (every status
+        //   check failed, the cancel also failed) instead of folding that
+        //   into the same 'no-fill' every real non-fill also produces.
+        //   Surface it as its own status so the UI shows something that says
+        //   "go check Kalshi directly," not a normal-looking error banner
+        //   that reads as "nothing happened, 0 contracts."
+        const _statusUnknown=res.reason==='unknown-verify-kalshi-directly';
+        setAutoOrderState(prev=>Object.assign({},prev||{},{
+          status:_statusUnknown?'unknown':'error',
+          reason:res.reason,orderId:res.orderId||null,at:Date.now(),
+        }));
         return res;
       }
       const filledAt=res.rung?res.rung.priceCents:costCents;
@@ -45663,6 +45746,39 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:'exit failed: '+res.reason,exitReason:why,at:Date.now()}));
         return res;
       }
+      // V13.4.322: VERIFY THE EXIT ACTUALLY FILLED. This crosses the spread
+      //   deliberately (see "Exits are NOT laddered" above), so it should
+      //   resolve almost immediately -- but a successful POST only means
+      //   Kalshi ACCEPTED the order, not that it matched yet
+      //   (kalshiNormalizeOrder's own doc comment: current Kalshi statuses
+      //   are 'resting'|'canceled'|'executed', and a POST response can still
+      //   say 'resting' for an instant even on a crossing order). Before this
+      //   version, res.ok alone was treated as "the position is closed" --
+      //   the mirror image of the entry-side bug fixed the same version: an
+      //   exit that hadn't actually filled yet could get marked 'exited' and
+      //   stop being tracked while still open for real on Kalshi. Brief poll
+      //   only (this is time-sensitive risk management, not an entry ladder).
+      let _exitOrderObj=res.order;
+      let _exitNorm=kalshiNormalizeOrder(_exitOrderObj);
+      const _exitOrderId=_exitOrderObj?.order_id;
+      for(let _i=0;_i<3&&_exitNorm.status!=='filled';_i++){
+        await new Promise(r=>setTimeout(r,1000));
+        const _look=await kalshiGetOrder({apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,orderId:_exitOrderId,dryRun});
+        if(_look.ok){_exitOrderObj=_look.order;_exitNorm=kalshiNormalizeOrder(_look.order);}
+      }
+      if(_exitNorm.status!=='filled'){
+        // Could not confirm the exit actually closed the position. Leave the
+        //   resting exit order alone -- it is still the one thing trying to
+        //   get this position closed; canceling it here would remove that
+        //   with nothing left in its place. Surface as unknown rather than
+        //   silently reporting a clean 'exited' that may not be true.
+        setAutoOrderState(prev=>Object.assign({},prev||{},{
+          status:'unknown',reason:'exit-unconfirmed-verify-kalshi-directly',
+          exitReason:why,orderId:_exitOrderId||null,at:Date.now(),
+        }));
+        return{ok:false,reason:'exit-unconfirmed-verify-kalshi-directly',order:_exitOrderObj,orderId:_exitOrderId};
+      }
+      res.order=_exitOrderObj;
       const exitVal=_exitValueCents(dir);
       // Realised move per contract against the entry fill, so a session can
       // be judged on what it actually got rather than on the signal. Uses
@@ -45943,6 +46059,42 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             kalshiCount:_match.count,
             side:_match.side,
             note:`Auto-exec thinks ${_taraCount} contracts, Kalshi shows ${_match.count}`,
+          });
+        }
+      }
+      // V13.4.322: SELF-HEALING FOR 'unknown' fill status. kalshiRunEntryLadder
+      //   and _runExit now leave autoOrderState at status:'unknown' (instead
+      //   of guessing) when they genuinely could not confirm whether an order
+      //   filled -- see the verify-before-cancel / verify-before-exited fixes
+      //   in _runEntry/_runExit. This poll already has Kalshi's real book in
+      //   hand every 30s; use it to resolve the unknown definitively instead
+      //   of leaving the user staring at an ambiguous state indefinitely.
+      //   Deliberately does NOT auto-recover autoOrderState back to 'filled'
+      //   with a guessed entry price -- Kalshi's positions endpoint does not
+      //   expose average fill price in a field this file has verified, and a
+      //   wrong guessed price would corrupt stop-loss/take-profit math worse
+      //   than having no automated protection at all. Surfacing the confirmed
+      //   truth quickly is the safe half of this fix; recovering full exit
+      //   management from it is a separate, deliberately unstarted project.
+      if(_aos&&!_aos.dryRun&&_aos.status==='unknown'&&_aos.ticker){
+        const _match=positions.find(p=>p.ticker===_aos.ticker);
+        if(_match&&_match.count>0){
+          _details.push({
+            kind:'unknown-resolved-filled',
+            ticker:_aos.ticker,
+            taraCount:0,
+            kalshiCount:_match.count,
+            side:_match.side,
+            note:`Confirmed on Kalshi: this DID fill (${_match.count} contract(s) on ${_match.side.toUpperCase()}). Auto-exec lost track of the fill, so stop-loss/take-profit/trailing-stop will NOT manage this position. Manage the exit directly on Kalshi.`,
+          });
+        }else{
+          _details.push({
+            kind:'unknown-resolved-nofill',
+            ticker:_aos.ticker,
+            taraCount:0,
+            kalshiCount:0,
+            side:_aos.dir==='UP'?'yes':'no',
+            note:'Confirmed on Kalshi: this did not fill. Safe to ignore -- no real position exists for this window.',
           });
         }
       }
