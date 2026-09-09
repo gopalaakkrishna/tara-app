@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.09-v13.4.323-cutloss-warning-accuracy';
-const TARA_VERSION_DISPLAY='Tara 13.4.323';
+const BASELINE_VERSION='2026.09.09-v13.4.324-trend-at-lock-sitout';
+const TARA_VERSION_DISPLAY='Tara 13.4.324';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5795,6 +5795,16 @@ const LOCK_DEADLINE_SEC=420;
 const _SITOUT_KEEP=new Set([
   'kalshi-window-closed',
   'no-go-price-unavailable-sitout',
+  // V13.4.324: trend-at-lock-sitout is a DECISION gate, not a physical
+  //   impossibility like the two above -- added anyway because it is the
+  //   one candidate (of 18 fields tested the same way) that held up on a
+  //   proper train/test split of the real call log: time-cap-commit wins
+  //   46.4% when the market is trending at the moment of lock vs 71.7% when
+  //   it isn't (n=141, z=2.49), same direction and magnitude in both
+  //   halves. First quality gate reintroduced since V13.4.250 removed all
+  //   of them; kept narrow to this one validated condition, not a reopening
+  //   of the gates removed there.
+  'trend-at-lock-sitout',
 ]);
 // V13.4.250: the entry-cost band is read at 7+ call sites (entry quality, time-cap
 //   commit, the V11.2 odds ceiling, the hourly ladder, the band sit-outs). Rather
@@ -48961,6 +48971,42 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _persistLock();
           return;
         }
+        // V13.4.324: TREND-AT-LOCK SIT-OUT. Audit of 375 real-tier calls (train/test
+        //   split, both halves agree): when _isTrend is true at the moment of lock,
+        //   time-cap-commit wins 46.4% (n=141 total, n=28 in the true bucket) vs
+        //   71.7% when false -- a 25-point gap, z=2.49 on the pooled set. This is the
+        //   first quality-based sit-out reintroduced since V13.4.250 removed all of
+        //   them; it earns the exception by being the one signal that held up out of
+        //   18 candidate fields tested the same way (train/test consistency), unlike
+        //   the ideas that prompted this audit (a loss-streak cooldown, regime-
+        //   adaptive entry timing), both of which measured flat or reversed on the
+        //   same data. directional-lock is deliberately excluded -- its own logic
+        //   already requires _isTrend as a POSITIVE signal for one confirmation path.
+        if(analysis?.rawSignalScores?._isTrend===true){
+          const _talSnap={
+            call:'SIT_OUT',direction:null,confidence:0,
+            caution:null,reason:`[V13.4.324] trend-at-lock -- time-cap-commit measures 46.4% WR when trending vs 71.7% when not (n=141, z=2.49) -- sitting out instead`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'trend-at-lock-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            isNoGo:true,
+            noGoCategory:'trend-at-lock-sitout',
+            wouldHaveBeen:_commitDir,
+            wouldHaveBeenTier:'time-cap-commit',
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_applyNoSitout(_talSnap);
+          _logSnapshotEntry(taraCallSnapshotRef.current);
+          _persistLock();
+          return;
+        }
         const _cautionLevel=_commitConf>=70?'firm':_commitConf>=60?'leaning':_commitConf>=55?'tentative':'low-confidence';
         const _cautionNote=_commitConf>=70?null:`${_cautionLevel} call — confidence ${_commitConf}% (commit by time cap)`;
         const _capSnap={
@@ -49749,6 +49795,36 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           wouldHaveBeenTier:tierLabel,
         };
         taraCallSnapshotRef.current=_applyNoSitout(_t1Snap);
+        _logSnapshotEntry(taraCallSnapshotRef.current);
+        _persistLock();
+        return;
+      }
+      // V13.4.324: TREND-AT-LOCK SIT-OUT (patient/structural-led). Same audit as the
+      //   time-cap-commit gate above: 'patient' measures worse when _isTrend is true
+      //   at lock than when false; 'structural-led' shows the same direction on a
+      //   smaller sample. directional-lock is deliberately excluded (see the other
+      //   gate's comment for why). Snapshot shape follows tier-1-only-mode above.
+      if((tierLabel==='patient'||tierLabel==='structural-led')&&analysis?.rawSignalScores?._isTrend===true&&!_instantForceReady){
+        const _talSnap2={
+          call:'SIT_OUT',direction:null,confidence:0,
+          reason:`[V13.4.324] trend-at-lock -- '${tierLabel}' tier measures worse when the market is trending at the moment of lock -- sitting out instead`,
+          atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+          atPosterior:analysis?.rawProbAbove,
+          kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+          locked:true,earlyLock:false,
+          isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+          samples,needSamples:0,
+          tier:'trend-at-lock-sitout',
+          session:_session,
+          regime:analysis?.regime||'',
+          qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
+          fgt:analysis?.mtfAlignment,
+          isNoGo:true,
+          noGoCategory:'trend-at-lock-sitout',
+          wouldHaveBeen:_committedCall,
+          wouldHaveBeenTier:tierLabel,
+        };
+        taraCallSnapshotRef.current=_applyNoSitout(_talSnap2);
         _logSnapshotEntry(taraCallSnapshotRef.current);
         _persistLock();
         return;
