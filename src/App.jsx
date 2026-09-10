@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.335-rollover-timeformat-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.335';
+const BASELINE_VERSION='2026.09.10-v13.4.336-dead-proxy-layer-restored';
+const TARA_VERSION_DISPLAY='Tara 13.4.336';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41197,21 +41197,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _assetCfgS=ASSET_CONFIG[_pendingAsset]||ASSET_CONFIG.BTC;
           const _settlePath=`events?series_ticker=${_assetCfgS.kalshiSeriesTicker}15M&with_nested_markets=true&status=settled&limit=50`;
           const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/${_settlePath}`;
-          // V7.10.7: 3-tier fallback. Vercel rewrite (no CORS) → corsproxy.io → direct.
+          // V7.10.7: 3-tier fallback. Cloudflare proxy (no CORS) → corsproxy.io → direct.
           //   Settlement resolution is critical for confirmed wins/losses, so this gets the
           //   same resilience as the main strike fetch.
+          // V13.4.336: r.ok alone is not proof of a real answer -- a same-origin proxy
+          //   path that no longer exists server-side (e.g. the Vercel->Cloudflare move
+          //   silently orphaning /api/kalshi/*) 200s with the SPA's own index.html
+          //   instead of erroring, so this used to "succeed" tier 1 forever, never try
+          //   tiers 2/3, then silently die on the JSON.parse below every 20s. Same
+          //   HTML-body guard _wxJson already uses elsewhere in this file.
+          const _isHtml=(t)=>!t||t.trimStart().startsWith('<');
           let r=await fetch(`/api/kalshi/${_settlePath}`,{signal:AbortSignal.timeout(6000)}).catch(()=>null);
-          if(!r||!r.ok){
+          let _rt=(r&&r.ok)?await r.text().catch(()=>''):'';
+          if(_isHtml(_rt)){
             r=await fetch(
               `https://corsproxy.io/?url=${encodeURIComponent(_settleUrl)}`,
               {signal:AbortSignal.timeout(8000)}
             ).catch(()=>null);
+            _rt=(r&&r.ok)?await r.text().catch(()=>''):'';
           }
-          if(!r||!r.ok){
+          if(_isHtml(_rt)){
             r=await fetch(_settleUrl,{signal:AbortSignal.timeout(8000)}).catch(()=>null);
+            _rt=(r&&r.ok)?await r.text().catch(()=>''):'';
           }
-          if(!r||!r.ok)continue;
-          const d=await r.json();
+          if(_isHtml(_rt))continue;
+          const d=JSON.parse(_rt);
           // V4.4: Flatten nested markets from events response
           const events=d.events||[];
           const markets=[];
