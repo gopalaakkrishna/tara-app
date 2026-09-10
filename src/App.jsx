@@ -5085,11 +5085,37 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // Kalshi's response shape: data.market_positions = [{ticker, position, ...}] where
 // `position` is signed (positive = long YES, negative = long NO, 0 = closed).
 // We normalize to {ticker, count, side, raw} for easier consumption.
+// V13.4.331: PAGINATION. This fetched exactly one page (limit=100) and never
+//   looked at a `cursor` field -- despite this same file already implementing
+//   the correct cursor-loop pattern for two sibling Kalshi list endpoints,
+//   /portfolio/fills and /markets (see _fetchAllPages, ~L24241). Any open
+//   position past row 100 was silently invisible to every caller of this
+//   function, including the entire v322/v328/v329/v330 reconciliation chain --
+//   which would see a deterministically empty/incomplete `positions` array on
+//   EVERY poll, not just one, since the same first page comes back every time.
+//   Reported live: a real, open, same-side position on Kalshi that never
+//   appeared in this function's output for 60+ seconds (surviving the v329
+//   2-poll debounce, which only protects against a transient single-snapshot
+//   miss, not a deterministic truncation). This account has independently
+//   accumulated multiple orphaned open positions tonight from the v328/v330
+//   incidents this function itself exists to catch -- exactly the condition
+//   that pushes a real row past a single un-paginated page.
 const kalshiFetchPositions=async({apiKeyId,privateKeyPem})=>{
   if(!apiKeyId||!privateKeyPem)return{ok:false,reason:'no-credentials',positions:[]};
-  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'GET',path:'/portfolio/positions?status=open&limit=100',timeoutMs:8000});
-  if(!res.ok)return{ok:false,reason:res.reason||`http ${res.status}`,positions:[]};
-  const _mp=Array.isArray(res.data?.market_positions)?res.data.market_positions:[];
+  const _mp=[];
+  let _cursor=null;
+  let _lastRaw=null;
+  for(let _page=0;_page<20;_page++){
+    const _path=`/portfolio/positions?status=open&limit=100${_cursor?`&cursor=${encodeURIComponent(_cursor)}`:''}`;
+    const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'GET',path:_path,timeoutMs:8000});
+    if(!res.ok)return{ok:false,reason:res.reason||`http ${res.status}`,positions:[]};
+    _lastRaw=res.data;
+    const _items=Array.isArray(res.data?.market_positions)?res.data.market_positions:[];
+    if(!_items.length)break;
+    _mp.push(..._items);
+    _cursor=res.data?.cursor||null;
+    if(!_cursor)break;
+  }
   const _normalized=_mp
     .map(p=>{
       const _pos=Number(p?.position)||0;
@@ -5103,7 +5129,7 @@ const kalshiFetchPositions=async({apiKeyId,privateKeyPem})=>{
       };
     })
     .filter(Boolean);
-  return{ok:true,positions:_normalized,raw:res.data};
+  return{ok:true,positions:_normalized,raw:_lastRaw};
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5730,8 +5756,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.330-cancel-race-fill-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.330';
+const BASELINE_VERSION='2026.09.10-v13.4.331-positions-pagination-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.331';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
