@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.09-v13.4.325-kalshi-window-closed-converts';
-const TARA_VERSION_DISPLAY='Tara 13.4.325';
+const BASELINE_VERSION='2026.09.09-v13.4.326-free-reign-gate-cleanup';
+const TARA_VERSION_DISPLAY='Tara 13.4.326';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5774,12 +5774,21 @@ const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runwa
 //   window on signal quality. Set NO_SITOUT_MODE=false to restore the old
 //   behaviour in one line; nothing else needs touching.
 const NO_SITOUT_MODE=true;
-// Locks may only form while MORE than this many seconds remain. Past it the
-//   window is left alone. Replaces the old late-lock behaviour, which allowed
-//   locks until ~100s remained -- the file's own note at isVeryLateLock says
-//   "losses lock avg 777s vs wins 744s", so an earlier deadline is the same
-//   direction the existing evidence already pointed.
-const LOCK_DEADLINE_SEC=420;
+// V13.4.326: was 420s (7 minutes) -- an execution-timing floor is legitimate
+//   (a real order needs time to place and fill via the entry ladder before
+//   the window stops accepting orders), but 7 minutes was never justified as
+//   that: this constant's OWN prior comment cited "losses lock avg 777s vs
+//   wins 744s remaining" as its reasoning, i.e. historically, LATER locks
+//   (less time remaining) correlated with WINS, not losses -- the opposite
+//   of what a 7-minute-early cutoff would protect against. That evidence
+//   argued for allowing later locks, not restricting them. Reduced to a
+//   floor sized to the actual constraint: enough time for kalshiRunEntryLadder
+//   to place and fill an order (a full ladder with default settings takes
+//   well under 30s), not a disguised quality/timing gate. If a lock this
+//   late genuinely can't confirm its fill, V13.4.322's 'unknown' status
+//   handling now surfaces that clearly instead of silently mishandling it --
+//   that safety net is what makes a shorter floor safe today.
+const LOCK_DEADLINE_SEC=30;
 // V13.4.250 — NO GATES, per explicit instruction. Every price/EV/edge gate is
 //   gone; the only case left was meant to be a physical impossibility, not a
 //   decision:
@@ -5821,6 +5830,17 @@ const _SITOUT_KEEP=new Set([
   //   of them; kept narrow to this one validated condition, not a reopening
   //   of the gates removed there.
   'trend-at-lock-sitout',
+  // V13.4.326: tier1-only-skip is a deliberate, OPT-IN user preference
+  //   (tradingSettings.tier1OnlyMode, unchecked/off by default) -- not a
+  //   gate imposed on the engine, a constraint the user chooses for
+  //   themselves if they turn it on. It was never in this set, so it
+  //   already relied entirely on the old 420s deadline to ever actually
+  //   stick (routes through _applyNoSitout same as everything else). Now
+  //   that the deadline is 30s, it would have gone from "mostly broken"
+  //   to "completely broken" -- added here so the feature genuinely does
+  //   what its own UI says if a user ever turns it on. Zero effect while
+  //   it stays off, which is the default.
+  'tier1-only-skip',
 ]);
 // V13.4.250: the entry-cost band is read at 7+ call sites (entry quality, time-cap
 //   commit, the V11.2 odds ceiling, the hourly ladder, the band sit-outs). Rather
@@ -47071,15 +47091,54 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _logSnapshotEntry(taraCallSnapshotRef.current);
           return;
         }
-        taraCallSnapshotRef.current={
-          call:tc.call,direction:null,confidence:tc.confidence,reason:tc.reason,
+        // V13.4.326: this was the one sit-out branch in the whole commit
+        //   effect that never routed through _applyNoSitout -- every sibling
+        //   branch was rewired in V13.4.249/250 to convert like everything
+        //   else not explicitly kept; this one was missed, making it an
+        //   accidental, undocumented always-on gate (it also hardcoded the
+        //   log entry's dir:'SIT_OUT' below regardless of outcome, so even
+        //   wrapping the snapshot alone would have left the log entry lying
+        //   about what actually happened).
+        //   Can't just call _applyNoSitout here -- it's defined later in this
+        //   same effect (const, so calling it this early is a temporal-dead-
+        //   zone crash, not just a logic bug), and this branch's own early
+        //   `return` means it can't be moved down to after that definition
+        //   without risking the sample-accumulation logic between here and
+        //   there. So: mirror its exact logic inline, using only the
+        //   already-available top-level constants (_SITOUT_KEEP,
+        //   NO_SITOUT_MODE, LOCK_DEADLINE_SEC) it itself relies on.
+        let _sitFinal={
+          call:'SIT_OUT',direction:null,confidence:tc.confidence,reason:tc.reason,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:analysis.rawProbAbove,
           locked:true,
           earlyLock:false,
+          tier:'sitout',
+          isNoGo:true,
+          noGoCategory:'sitout',
         };
+        if(NO_SITOUT_MODE&&!_SITOUT_KEEP.has('sitout')&&
+           (timeState.minsRemaining*60+timeState.secsRemaining)>LOCK_DEADLINE_SEC){
+          const _sitPost=Number(analysis?.rawProbAbove);
+          const _sitDir=Number.isFinite(_sitPost)?(_sitPost>=50?'UP':'DOWN'):null;
+          if(_sitDir){
+            _sitFinal={
+              call:_sitDir,direction:_sitDir,dir:_sitDir,
+              confidence:Math.round(_sitDir==='UP'?_sitPost:(100-_sitPost)),
+              reason:tc.reason,
+              atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+              atPosterior:analysis.rawProbAbove,
+              locked:true,earlyLock:false,
+              wasOverriddenNoTrade:false,noGoCategory:null,isNoGo:false,
+              tier:'no-sitout-commit',
+              _noSitoutFrom:'sitout',
+              caution:'Committed on the lean — sit-outs are off (was: sitout)',
+            };
+          }
+        }
+        taraCallSnapshotRef.current=_sitFinal;
         _persistLock(); // V5.6: cloud-save SIT_OUT commit
-        // V5.6.1: log entry — committed SIT_OUT
+        // V5.6.1: log entry — committed SIT_OUT (or, post-conversion, a real commit)
         // V5.6.9: windowId for dedup
         const _sitWid=computeWindowId(windowType);
         const _sitSessionInfo=typeof getMarketSessions==='function'?getMarketSessions():null;
@@ -47088,15 +47147,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           id:Date.now(),time:Date.now(),windowType,
           windowId:_sitWid,
           regime:analysis?.regime||'',
-          dir:'SIT_OUT',confidence:tc.confidence,
+          // V13.4.326: was hardcoded 'SIT_OUT'/tc.confidence regardless of
+          //   what _applyNoSitout actually decided -- now reflects the real
+          //   outcome. `call` added alongside `dir` for the same reason
+          //   V10.8.6 added it elsewhere in this file: downstream analysis
+          //   reads `call`, not just `dir`.
+          call:_sitFinal.call,dir:_sitFinal.call,confidence:_sitFinal.confidence,
           posterior:analysis?.rawProbAbove,
           qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
           fgt:analysis?.mtfAlignment,
-          tier:'sitout',
+          tier:_sitFinal.tier||'sitout',
           session:_sitSession,
           // V7.10.6: market phase stamp
           phase:(typeof getPhaseKey==='function'?getPhaseKey(new Date().getUTCHours(),new Date().getUTCMinutes()):null),
-          reason:tc.reason,
+          reason:_sitFinal.reason,
           // V7.0.7: tag asset for SIT_OUT entries (was missing — defaulted to BTC on display).
           asset:currentAssetRef.current||currentAsset||'BTC',
           // V10.2.18 — Phase 4 + sessionTier stamps on SIT_OUT commit. SIT_OUT
@@ -48620,22 +48684,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       }
       if(_noGoReason){
-        // V8.9.3: TRUE COIN FLIP exception. When the no-go reason is the late-window
-        //   coin-flip case (posterior 47-53, ≤20s left, gap ≤2bps from strike), DON'T
-        //   commit a directional snapshot — there's no real signal to commit on.
-        //   Return early so Tara keeps sampling. The hard-cap commit at end-of-window
-        //   is the safety net if she's truly stuck. User mandate: when it's genuinely
-        //   a coin flip, sample more, don't fake conviction.
+        // V13.4.326 REMOVED: the V8.9.3 "true coin flip" exception used to
+        //   silently `return` here with no snapshot at all -- no log entry,
+        //   no tier name, invisible to every check in this file -- whenever
+        //   the late-window posterior sat at 47-53% with a near-zero gap.
+        //   That was a real, explicit decision gate ("sample more, don't fake
+        //   conviction"), just an unusually well-justified one at the time.
+        //   Per the current, explicit instruction to remove every gate and
+        //   let the engine take every window at whatever odds it actually
+        //   sees, this is superseded: removing the early return lets
+        //   execution fall through to the normal tier-ladder/sample-
+        //   accumulation logic below, same as any other tick -- it does not
+        //   force an immediate decision, it just stops hard-blocking this one
+        //   narrow case from ever reaching that logic at all.
         //
         //   Cases (a) edge-bad and (b) data-missing still commit per V8.9.2 — those
         //   have a clear directional read, just disadvantageous price or unreliable
         //   data. Surfaced as cautions.
-        if(_noGoTier==='no-go-coinflip-late'){
-          // Don't snapshot. Keep WATCHING — display will show "Coin flip — only Xpt off
-          //   neutral" reason text via the live IIFE return. User sees Tara is still
-          //   uncertain; can decide to skip externally or wait for hard-cap.
-          return;
-        }
         // V10.3.0 — NO-GO-EDGE IN CHOP → SIT_OUT, not warned-lock.
         //   Empirical data from May 16 batch: 10 no-go-edge trades in RANGE-CHOP
         //   resulted in 7W/3L = 70% WR, BUT -$0.128 per trade in real money because
@@ -48721,7 +48786,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   reason to trigger it". This path previously fell through to a BLIND
         //   commit (real direction, kalshiAtLock:null, no idea what it costs) any
         //   time the band check couldn't run. Match the established precedent.
-        if(_ngOn&&_ngCost==null&&_kPctNow==null){
+        // V13.4.326: dropped the _ngOn dependency here specifically. This is
+        //   the one genuine physical-impossibility case (no price at all, so
+        //   nothing can be sized or costed) -- it shouldn't be tied to the
+        //   taraEntryQuality toggle, an unrelated cost-band setting. If that
+        //   toggle is ever set to 'off', this null-price guard must still
+        //   fire; _ngOn stays governing the actual cost-band check below,
+        //   which is a real quality decision and correctly neutralized by it.
+        if(_ngCost==null&&_kPctNow==null){
           const _ngNoDataSnap={
             call:'SIT_OUT',direction:null,confidence:0,
             caution:null,
@@ -49227,20 +49299,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _lastBelowTs=_activeDir==='UP'?kalshiLastBelowThreshUpRef.current:kalshiLastBelowThreshDownRef.current;
       const _withinGrace=_lastBelowTs>0&&(Date.now()-_lastBelowTs)<=KALSHI_DIP_GRACE_MS;
 
-      // V10.7.80: MINIMUM ENTRY COST — block suspiciously cheap entries.
-      //   The entry floor (52¢) is a MAX gate (blocks expensive entries).
-      //   But cheap entries also lose money: 37¢ entry at 62% WR → -11¢/trade EV.
-      //   When Kalshi prices our direction at <35¢, the market says it's unlikely.
-      //   Going against market consensus at extreme cheap prices is adverse selection.
-      //   Data showed 7 entries <52¢ got through including several losses.
-      //   Note: this is the COST to us (kalshiForDir), not the YES price.
-      //   UP at 38¢ = YES costs 38¢ = market says 38% chance UP.
-      //   DOWN at 38¢ = YES is 62¢, NO costs 38¢ = market says 38% chance DOWN.
-      const _MIN_ENTRY_COST=35; // block if our side costs less than 35¢
-      if(_kalshiForDir!=null&&_kalshiForDir<_MIN_ENTRY_COST&&samples>0){
-        // Market strongly disagrees with our direction — sit out
-        return;
-      }
+      // V13.4.326 REMOVED: V10.7.80's MINIMUM ENTRY COST block (was: <35c on
+      //   our side silently aborted the tick with no snapshot, no log entry,
+      //   no tier name at all -- invisible to every log-based check in this
+      //   file, and not touched by NO_ENTRY_GATES despite that flag
+      //   supposedly opening the cost band everywhere). This was a real
+      //   EV/quality decision gate ("adverse selection"), not a physical
+      //   constraint, per the explicit instruction to remove all such gates
+      //   and let the engine take every window at whatever odds it actually
+      //   sees, then re-add only what data proves out.
       // Currently above threshold AND has been above all window so far AND not in grace → window closed.
       if(_kalshiForDir>KALSHI_ENTRY_THRESH&&_wasBelow&&!_withinGrace&&samples>0){
         // Was previously actionable, now isn't — entry window closed mid-flight
