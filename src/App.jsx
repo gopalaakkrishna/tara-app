@@ -5083,6 +5083,30 @@ const kalshiRunEntryLadder=async({
           return{ok:true,order:_cancelRes.order,normalized:_cancelNorm,rung,attempts,plan};
         }
       }
+      // V13.4.334: the ABOVE check only ever fires on a SUCCESSFUL cancel --
+      //   but a FAILED cancel is at least as strong a signal of a hidden
+      //   fill, arguably stronger: Kalshi commonly rejects cancelling an
+      //   order that has already been fully executed, because there is
+      //   nothing left on the book to cancel. The V13.4.322 comment right
+      //   above this block already named this exact case ("a FAILED cancel
+      //   is itself a signal worth keeping") but the code only ever acted on
+      //   the cancel response when it succeeded -- a failed cancel fell
+      //   straight through to "unfilled" with no further check at all.
+      //   Reported live: a taking rung (no resting wait, immediate verify)
+      //   whose one verify read caught the order mid-match (not yet
+      //   reflected as filled), whose cancel then failed -- and the real
+      //   fill was never caught, because nothing looked again after that
+      //   failure. One more direct read here, exactly mirroring the
+      //   verify-before-cancel check above, settles it either way.
+      if(!_cancelOk){
+        const _postCancelCheck=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
+        if(_postCancelCheck.ok){
+          const _pcNorm=kalshiNormalizeOrder(_postCancelCheck.order);
+          if(_pcNorm.status==='filled'){
+            return{ok:true,order:_postCancelCheck.order,normalized:_pcNorm,rung,attempts,plan};
+          }
+        }
+      }
     }
     // V13.4.322: if the final direct check could not reach Kalshi AND the
     //   cancel also failed, the true fill state is genuinely UNKNOWN -- not
@@ -5783,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.333-ladder-runaway-bailout';
-const TARA_VERSION_DISPLAY='Tara 13.4.333';
+const BASELINE_VERSION='2026.09.10-v13.4.334-cancel-failure-verify';
+const TARA_VERSION_DISPLAY='Tara 13.4.334';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
