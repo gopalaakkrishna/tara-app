@@ -5756,8 +5756,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.331-positions-pagination-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.331';
+const BASELINE_VERSION='2026.09.10-v13.4.332-cost-timing-caution-watch';
+const TARA_VERSION_DISPLAY='Tara 13.4.332';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46471,6 +46471,53 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
     };
   },[kalshiCreds.apiKeyId,kalshiCreds.privateKeyPem,positionReconciliation]);
+
+  // ── V13.4.332: COST/TIMING CAUTION WATCH (non-blocking, data-motivated) ────
+  // A 1000-trade log analysis (2026-09-10) found that paying 70c+ (the market
+  // already very confident) while 10+ minutes remain in the window was the
+  // single worst-performing combination checked: 58.3% WR, -6.0c/trade average
+  // across the full log. The pattern held the same losing direction in both a
+  // chronological train split (n=9) and test split (n=27), but neither half
+  // alone clears significance (p=0.674, p=0.200) -- the sample is too thin to
+  // trust as a hard rule yet. Per this session's own standing bar (the
+  // isTrendAtLock sit-out in V13.4.324 only shipped once BOTH halves cleared
+  // significance), this does not get to be a gate. It gets a caution instead --
+  // exactly the same "surface it, don't block it" treatment V9.7.6's
+  // WEAK-CLUSTER CAUTION already uses for a thin-but-real cluster.
+  //
+  // Deliberately implemented as a single post-commit watcher rather than
+  // threading a check into every tier's own commit branch (directional-lock,
+  // time-cap-commit, patient, structural-led, no-sitout-commit, ... each
+  // builds its own snapshot object independently) -- one shared checkpoint on
+  // the committed snapshot covers all of them uniformly and can't miss one.
+  // Only ever ADDS to snap.caution/reason, never changes call/direction/size,
+  // and only runs once per snapshot (_costTimeWatchChecked guards against
+  // rechecking every tick). The underlying fields (kalshiAtLock, atSecondsLeft)
+  // are already recorded on every log entry regardless of this effect, so
+  // re-validating this pattern later needs no schema change.
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      const snap=taraCallSnapshotRef.current;
+      if(!snap||!snap.locked||snap.call==='SIT_OUT'||snap._costTimeWatchChecked)return;
+      const cost=Number(snap.kalshiAtLock);
+      const secLeft=Number(snap.atSecondsLeft);
+      if(!Number.isFinite(cost)||!Number.isFinite(secLeft)){
+        taraCallSnapshotRef.current={...snap,_costTimeWatchChecked:true};
+        return;
+      }
+      if(cost>=70&&secLeft>=600){
+        const _note='cost/timing watch -- 70c+ with 10+min left, historically the weakest combination in the log (58% WR, -6c avg, unproven at current sample size) -- not blocked, just flagged';
+        taraCallSnapshotRef.current={
+          ...snap,
+          caution:snap.caution?`${snap.caution} · ${_note}`:_note,
+          _costTimeWatchChecked:true,
+        };
+      }else{
+        taraCallSnapshotRef.current={...snap,_costTimeWatchChecked:true};
+      }
+    },1000);
+    return()=>clearInterval(iv);
+  },[]);
 
   // ── POLL EFFECT ───────────────────────────────────────────────────────────
   // While an order is in 'placing'/'submitted'/'resting'/'partially_filled' state,
