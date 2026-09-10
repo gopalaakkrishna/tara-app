@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.09-v13.4.324-trend-at-lock-sitout';
-const TARA_VERSION_DISPLAY='Tara 13.4.324';
+const BASELINE_VERSION='2026.09.09-v13.4.325-kalshi-window-closed-converts';
+const TARA_VERSION_DISPLAY='Tara 13.4.325';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5781,22 +5781,38 @@ const NO_SITOUT_MODE=true;
 //   direction the existing evidence already pointed.
 const LOCK_DEADLINE_SEC=420;
 // V13.4.250 — NO GATES, per explicit instruction. Every price/EV/edge gate is
-//   gone; the only two cases left are physical impossibilities, not decisions:
-//     kalshi-window-closed          -- no contract exists to buy
+//   gone; the only case left was meant to be a physical impossibility, not a
+//   decision:
 //     no-go-price-unavailable-sitout -- no price, so nothing can be sized or costed
-//   Committing a call in either would write a log entry against a market that
-//   is not there, which is data corruption rather than a trade. If those should
+//   Committing a call here would write a log entry against a market that is
+//   not there, which is data corruption rather than a trade. If that should
 //   go too, empty this set.
 //
 //   REMOVED HERE (all of these now trade): no-go-edge, edge-sitout,
 //   no-go-edge-band-sitout, no-go-edge-dead-window, v1123-ev-gate,
 //   time-cap-band-sitout. See NO_ENTRY_GATES below -- the cost band itself is
 //   what actually enforced most of these, in 7 separate places.
+//
+// V13.4.325 CORRECTION: 'kalshi-window-closed' used to sit in this set under
+//   the same "physical impossibility" description above -- that was wrong.
+//   Its actual trigger (see the price-threshold check further down this
+//   effect) fires when the price for Tara's direction ran up past a live,
+//   computed cost ceiling after being favorable earlier in the window --
+//   a real contract still exists to buy, it just got more expensive. That
+//   is a price/EV decision, mechanically the same kind of gate V13.4.250
+//   removed everywhere else, just mislabeled. Reconstructed against a real
+//   106-sample log (leaning direction inferred from posterior, validated
+//   97% against actual committed directions elsewhere in the same log):
+//   60.4% win rate, but the entries only qualify for this gate by having
+//   already run to an average 60.6c entry cost, so the reconstructed
+//   breakeven is ~60.6% too -- net -22c over 106 samples, statistically a
+//   wash. Unlike 'trend-at-lock-sitout' below, this one never proved an
+//   edge either way, so it does not earn a mislabeled exception. Removed;
+//   it now converts to a real commit like every other non-kept sit-out.
 const _SITOUT_KEEP=new Set([
-  'kalshi-window-closed',
   'no-go-price-unavailable-sitout',
   // V13.4.324: trend-at-lock-sitout is a DECISION gate, not a physical
-  //   impossibility like the two above -- added anyway because it is the
+  //   impossibility like the case above -- added anyway because it is the
   //   one candidate (of 18 fields tested the same way) that held up on a
   //   proper train/test split of the real call log: time-cap-commit wins
   //   46.4% when the market is trending at the moment of lock vs 71.7% when
