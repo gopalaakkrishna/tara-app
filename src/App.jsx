@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.338-sitout-settlement-guarantee';
-const TARA_VERSION_DISPLAY='Tara 13.4.338';
+const BASELINE_VERSION='2026.09.10-v13.4.339-sitout-nogo-mislabel-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.339';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48584,9 +48584,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
-          // result:null populates at rollover scoring. NO_TRADE entries skip resolution
-          //   (no win/loss to compute) but the entry exists so memory shows the no-go event.
-          result:snapshot.isNoGo?'NO_TRADE':null,
+          // V13.4.339: was `snapshot.isNoGo?'NO_TRADE':null`. isNoGo is set on
+          //   every quality-based sit-out gate (trend-at-lock, late-trend-oppose,
+          //   tier1-only-skip, the generic 'sitout' tier) -- NOT only on the rare
+          //   case of a genuinely absent market. `call:'NO_TRADE'` is never
+          //   actually assigned anywhere in this file (grep-confirmed) -- every
+          //   one of these snapshots has call:'SIT_OUT'. So this line was
+          //   immediately pre-resolving most sit-outs to 'NO_TRADE' at commit
+          //   time, before they ever reached the rollover/backfill resolution
+          //   pipeline (both of which search for result===null) -- exactly the
+          //   "sitout left as no trade" the user reported, unrelated to and not
+          //   fixed by v338's resolution-reliability work, since these entries
+          //   were never pending in the first place. Only ONE sit-out gate
+          //   (edge-sitout) happened not to set isNoGo, which is the only
+          //   reason any sit-out was ever seen correctly settling as SITOUT.
+          //   Always start pending; call:'SIT_OUT' resolves to result:'SITOUT'
+          //   via the SAME immediate-at-rollover path v338 already ships for
+          //   every other sit-out category -- one terminal state, not two.
+          result:null,
           // V10.0.0 Phase 4: shadow timing decision. Populated from
           //   _phase4DecisionRef when auto-exec entry effect ran. May be null
           //   for snapshots logged outside the auto-exec entry path
