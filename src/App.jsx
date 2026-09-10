@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.09-v13.4.327-remove-late-lock-penalty';
-const TARA_VERSION_DISPLAY='Tara 13.4.327';
+const BASELINE_VERSION='2026.09.10-v13.4.328-ticker-mismatch-safety-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.328';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15238,6 +15238,10 @@ function PositionReconciliationBanner({positionReconciliation}){
   //   (see _computeDrift below) -- resolved-nofill is genuinely good news
   //   (green), resolved-filled means a real, unmanaged position was just
   //   confirmed and needs the user's attention (red, same as phantom-auto).
+  // V13.4.328: unknown-ticker-mismatch/ticker-mismatch-auto are unresolved
+  //   ambiguity (Kalshi shows a real position on the same side, just not
+  //   under the tracked ticker) -- red/urgent like the other unresolved
+  //   kinds, never the reassuring green a clean "confirmed no fill" gets.
   const _kindColor=(k)=>k==='unknown-to-tara'||k==='unknown-resolved-nofill'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
   const _kindLabel=(k)=>{
     if(k==='phantom-auto')return 'phantom (auto)';
@@ -15247,6 +15251,8 @@ function PositionReconciliationBanner({positionReconciliation}){
     if(k==='unknown-to-tara')return 'kalshi-only';
     if(k==='unknown-resolved-filled')return 'confirmed filled';
     if(k==='unknown-resolved-nofill')return 'confirmed no fill';
+    if(k==='unknown-ticker-mismatch')return 'ticker mismatch — verify';
+    if(k==='ticker-mismatch-auto')return 'ticker mismatch — verify';
     return k;
   };
   return (
@@ -40662,29 +40668,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const yes=best.yes_ask??best.yes_bid??best.last_price??null;
           if(yes!=null)yesCents=Number(yes);
         }
-        // V13.4.142: record the raw bid/ask behind that mid, so executable entry cost
-        //   (ask for YES, 100-bid for NO) is knowable at lock time. See _kalshiQuote.
-        //   Legacy integer-cent fields are accepted as a fallback for older payloads.
-        try{
-          const _bidC=yesBidDollars!=null?Math.round(parseFloat(yesBidDollars)*100)
-                     :(best.yes_bid!=null?Number(best.yes_bid):null);
-          const _askC=yesAskDollars!=null?Math.round(parseFloat(yesAskDollars)*100)
-                     :(best.yes_ask!=null?Number(best.yes_ask):null);
-          const _bidOK=_bidC!=null&&isFinite(_bidC)&&_bidC>=0&&_bidC<=100;
-          const _askOK=_askC!=null&&isFinite(_askC)&&_askC>=0&&_askC<=100;
-          _kalshiQuote={
-            bid:_bidOK?_bidC:null,
-            ask:_askOK?_askC:null,
-            mid:(yesCents!=null&&isFinite(yesCents))?yesCents:null,
-            spread:(_bidOK&&_askOK)?(_askC-_bidC):null,
-            at:Date.now(),
-            ticker:best.ticker||null,
-          };
-        }catch(_e){/* quote capture must never break the price feed */}
-        // V13.4.59: TRUST GUARD -- accept the YES price only if the picked market is actually
-        //   at-the-money (strike within 1% of spot). Blind fallback picks (no spot) and
-        //   wrong-window / far-OTM markets surface as 0/4/99/100c poison; reject those so the
-        //   engine never locks or sits out on an off-window price. Last trusted price is kept.
+        // V13.4.328: TRUST GUARD MOVED EARLIER + EXTENDED TO GATE THE TICKER,
+        //   NOT JUST THE DISPLAYED PRICE. This check (V13.4.59/62) used to run
+        //   AFTER _kalshiQuote -- which carries .ticker, the value every real
+        //   order AND the position-reconciliation check use to identify the
+        //   traded contract -- was already unconditionally assigned from
+        //   `best`, and setKalshiStrike/setKalshiActiveMarket just below were
+        //   unconditional too. So an untrusted pick (wrong-window, off-strike,
+        //   thin-book poison) could still overwrite the ACTIVE TICKER even
+        //   while its price was correctly rejected -- a wrong ticker is worse
+        //   than a wrong price: it means the order, and every later
+        //   reconciliation check, targets a different contract than intended.
+        //   Reported live: Tara's displayed strike ($78,318.76) didn't match
+        //   Kalshi's own site for the same window ($78,366.94), and a real
+        //   fill on Kalshi went completely untracked because of it -- the
+        //   position-reconciliation self-heal (V13.4.322) even told the user
+        //   "confirmed no fill, safe to ignore" on a position Kalshi's own
+        //   site showed as real, filled, and cashable. The trust check now
+        //   runs FIRST and gates _kalshiQuote/setKalshiStrike/
+        //   setKalshiActiveMarket together with the price -- an untrusted
+        //   pick changes nothing, keeping the last trusted ticker/strike/
+        //   quote exactly like the price already did.
         let _kalshiPriceTrusted=false;
         {
           const _spotNow=currentPriceRef.current||0;
@@ -40708,11 +40712,32 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             setKalshiYesPrice(yesCents);
           }
         }
-        if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
-          setKalshiStrike(bestStrike);
+        if(_kalshiPriceTrusted){
+          // V13.4.142: record the raw bid/ask behind that mid, so executable entry cost
+          //   (ask for YES, 100-bid for NO) is knowable at lock time. See _kalshiQuote.
+          //   Legacy integer-cent fields are accepted as a fallback for older payloads.
+          try{
+            const _bidC=yesBidDollars!=null?Math.round(parseFloat(yesBidDollars)*100)
+                       :(best.yes_bid!=null?Number(best.yes_bid):null);
+            const _askC=yesAskDollars!=null?Math.round(parseFloat(yesAskDollars)*100)
+                       :(best.yes_ask!=null?Number(best.yes_ask):null);
+            const _bidOK=_bidC!=null&&isFinite(_bidC)&&_bidC>=0&&_bidC<=100;
+            const _askOK=_askC!=null&&isFinite(_askC)&&_askC>=0&&_askC<=100;
+            _kalshiQuote={
+              bid:_bidOK?_bidC:null,
+              ask:_askOK?_askC:null,
+              mid:(yesCents!=null&&isFinite(yesCents))?yesCents:null,
+              spread:(_bidOK&&_askOK)?(_askC-_bidC):null,
+              at:Date.now(),
+              ticker:best.ticker||null,
+            };
+          }catch(_e){/* quote capture must never break the price feed */}
+          if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
+            setKalshiStrike(bestStrike);
+          }
+          const _activeMarket=best.ticker?{ticker:best.ticker,closeTime:best.close_time,strike:bestStrike,strikeType:best.strike_type,event:best._event_ticker}:null;
+          if(_activeMarket)setKalshiActiveMarket(_activeMarket);
         }
-        const _activeMarket=best.ticker?{ticker:best.ticker,closeTime:best.close_time,strike:bestStrike,strikeType:best.strike_type,event:best._event_ticker}:null;
-        if(_activeMarket)setKalshiActiveMarket(_activeMarket);
         // V7.0.3: per-asset cache. Removed the bestStrike>1000 guard which was BTC-only —
         //   SOL ($200) and DOGE ($0.45) strikes were being rejected entirely from cache.
         if(bestStrike!=null&&bestStrike>0){
@@ -46102,14 +46127,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _ordRec=readOrderState(_aos);
         const _taraCount=_ordRec.count||0;
         if(!_match){
-          _details.push({
-            kind:'phantom-auto',
-            ticker:_aos.ticker,
-            taraCount:_taraCount,
-            kalshiCount:0,
-            side:_aos.side||(_aos.dir==='UP'?'yes':'no'),
-            note:`Tara's auto-exec thinks you hold ${_taraCount} contract(s) but Kalshi shows none — likely closed manually or order errored`,
-          });
+          // V13.4.328: same safety fix as the unknown-resolved-nofill case
+          //   below -- a ticker miss here doesn't prove the position is
+          //   closed, only that it isn't listed under THIS ticker. Check for
+          //   a same-side position elsewhere before declaring it phantom.
+          const _expectedSide=_aos.side||(_aos.dir==='UP'?'yes':'no');
+          const _sameSideOpen=positions.filter(p=>p.side===_expectedSide);
+          if(_sameSideOpen.length===0){
+            _details.push({
+              kind:'phantom-auto',
+              ticker:_aos.ticker,
+              taraCount:_taraCount,
+              kalshiCount:0,
+              side:_expectedSide,
+              note:`Tara's auto-exec thinks you hold ${_taraCount} contract(s) but Kalshi shows none — likely closed manually or order errored`,
+            });
+          }else{
+            _details.push({
+              kind:'ticker-mismatch-auto',
+              ticker:_aos.ticker,
+              taraCount:_taraCount,
+              kalshiCount:_sameSideOpen.reduce((a,p)=>a+p.count,0),
+              side:_expectedSide,
+              note:`Kalshi shows no position under the tracked ticker (${_aos.ticker}), but ${_sameSideOpen.length} other open ${_expectedSide.toUpperCase()} position(s) exist: ${_sameSideOpen.map(p=>p.ticker+' x'+p.count).join(', ')}. This may be a ticker mismatch -- check Kalshi directly before assuming this position is closed.`,
+            });
+          }
         }else if(_taraCount>0&&_match.count!==_taraCount){
           _details.push({
             kind:'count-mismatch-auto',
@@ -46147,14 +46189,39 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             note:`Confirmed on Kalshi: this DID fill (${_match.count} contract(s) on ${_match.side.toUpperCase()}). Auto-exec lost track of the fill, so stop-loss/take-profit/trailing-stop will NOT manage this position. Manage the exit directly on Kalshi.`,
           });
         }else{
-          _details.push({
-            kind:'unknown-resolved-nofill',
-            ticker:_aos.ticker,
-            taraCount:0,
-            kalshiCount:0,
-            side:_aos.dir==='UP'?'yes':'no',
-            note:'Confirmed on Kalshi: this did not fill. Safe to ignore -- no real position exists for this window.',
-          });
+          // V13.4.328: SAFETY FIX. "No position under the tracked ticker" is
+          //   not the same fact as "no position exists" -- a ticker mismatch
+          //   (the market-selection logic picking a different strike/
+          //   contract than the one that actually filled, a Kalshi ticker-
+          //   format drift, etc.) produces the exact same zero-match result
+          //   as a genuine non-fill. Reported live: this precise case,
+          //   Kalshi's own site showing a real filled 3-contract position on
+          //   the correct side while this code confidently told the user
+          //   "confirmed no fill, safe to ignore." Only declare a clean
+          //   no-fill when Kalshi reports NO open position on the expected
+          //   side at all; if any same-side position exists elsewhere, this
+          //   is an unresolved mismatch, not a safe negative.
+          const _expectedSide=_aos.dir==='UP'?'yes':'no';
+          const _sameSideOpen=positions.filter(p=>p.side===_expectedSide);
+          if(_sameSideOpen.length===0){
+            _details.push({
+              kind:'unknown-resolved-nofill',
+              ticker:_aos.ticker,
+              taraCount:0,
+              kalshiCount:0,
+              side:_expectedSide,
+              note:'Confirmed on Kalshi: this did not fill. Safe to ignore -- no real position exists for this window.',
+            });
+          }else{
+            _details.push({
+              kind:'unknown-ticker-mismatch',
+              ticker:_aos.ticker,
+              taraCount:0,
+              kalshiCount:_sameSideOpen.reduce((a,p)=>a+p.count,0),
+              side:_expectedSide,
+              note:`Kalshi shows no position under the tracked ticker (${_aos.ticker}), but ${_sameSideOpen.length} other open ${_expectedSide.toUpperCase()} position(s) exist: ${_sameSideOpen.map(p=>p.ticker+' x'+p.count).join(', ')}. This may be a ticker mismatch, not a genuine non-fill -- check Kalshi directly before assuming this is safe to ignore.`,
+            });
+          }
         }
       }
       // PHANTOM: manualKalshiEntry stale (user closed but didn't tell Tara)
