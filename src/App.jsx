@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.337-kalshi-strike-scoping-crash-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.337';
+const BASELINE_VERSION='2026.09.10-v13.4.338-sitout-settlement-guarantee';
+const TARA_VERSION_DISPLAY='Tara 13.4.338';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37037,6 +37037,70 @@ function TaraApp(){
     const bucket=Math.floor(e.time/winMs)*winMs;
     return{...e,windowId:`${e.windowType}-${new Date(bucket).toISOString()}`};
   },[]);
+  // V13.4.338: extracted out of the cloudWatch callback below so it can ALSO
+  //   run from a plain mount-time effect, independent of cloud data ever
+  //   arriving. Before this, the ENTIRE scan lived inside
+  //   cloudWatch('memory/taraCallLog',(d)=>{...if(!d...)return;...}) -- if
+  //   Supabase never answers (billing/quota restriction, confirmed live this
+  //   session as 402s on tara_state), this scan never ran at all, on any
+  //   device, no matter how many times the app was reopened. This function
+  //   only reads refs (taraCallLogRef, pendingResolutionRef), so it is safe
+  //   to call from either trigger.
+  const _scanStalePending=React.useCallback(()=>{
+    // V8.1: Stale-pending resolver. Scan for entries that should have been
+    //   resolved by now (window closed >15min ago, still pending). Queues them for the
+    //   settlement fetcher. Fixes the 13-hour-old pending entries from user's call log.
+    try{
+      const _now=Date.now();
+      const _stale=(taraCallLogRef.current||[]).filter(e=>{
+        if(!e||e.result)return false;
+        if(e.dir==='NO_TRADE')return false; // explicit no-go, never had a result expected
+        const _winMs=e.windowType==='15m'?900000:300000;
+        if(!e.windowId)return false;
+        const _winStart=e.windowId.match(/-(.+)$/)?.[1];
+        if(!_winStart)return false;
+        const _closeTime=new Date(_winStart).getTime()+_winMs;
+        return _now-_closeTime>15*60*1000; // >15min stale
+      });
+      if(_stale.length>0&&pendingResolutionRef.current){
+        // Add to settlement queue if not already there
+        _stale.forEach(e=>{
+          const _winStart=e.windowId.match(/-(.+)$/)?.[1];
+          if(!_winStart)return;
+          const _winMs=e.windowType==='15m'?900000:300000;
+          const _closeTime=new Date(_winStart).getTime()+_winMs;
+          if(!pendingResolutionRef.current.some(p=>p.tradeId===e.id)){
+            pendingResolutionRef.current.push({
+              tradeId:e.id,
+              windowCloseTime:_closeTime,
+              attempts:0,
+              asset:e.asset||'BTC',
+              windowType:e.windowType,
+              strike:e.strike,
+              dir:e.dir,
+              _v8_1_stalePending:true,
+              // V13.4.248: tells the resolver below which array actually holds
+              //   this entry. Without it every item queued from here got looked
+              //   up in tradeLogRef -- a different, largely-vestigial array --
+              //   found nothing, and was silently dropped after 5 minutes with
+              //   its taraCallLog entry never touched. Confirmed live: two real
+              //   entries (2026-08-25, 2026-08-28) sat at result:null indefinitely,
+              //   one for 4 days, until corrected by hand against Kalshi's
+              //   settled market for each ticker.
+              source:'taraCallLog',
+            });
+          }
+        });
+        try{console.info('[V8.1] Queued',_stale.length,'stale pending entries for re-resolve');}catch(_){}
+      }
+    }catch(_){}
+  },[]);
+  // V13.4.338: mount-time trigger, independent of cloud sync. A short delay
+  //   lets localStorage-hydrated state settle into taraCallLogRef first.
+  useEffect(()=>{
+    const t=setTimeout(_scanStalePending,3000);
+    return()=>clearTimeout(t);
+  },[_scanStalePending]);
   useEffect(()=>{
     const unsub=cloudWatch('memory/taraCallLog',(d)=>{
       _callLogHydratedRef.current=true;
@@ -37210,56 +37274,13 @@ function TaraApp(){
           }catch(_){}
         },100);
       }
-      // V8.1: Stale-pending resolver. On hydration, scan for entries that should have been
-      //   resolved by now (window closed >15min ago, still pending). Queues them for the
-      //   settlement fetcher. Fixes the 13-hour-old pending entries from user's call log.
-      try{
-        const _now=Date.now();
-        const _stale=(taraCallLogRef.current||[]).filter(e=>{
-          if(!e||e.result)return false;
-          if(e.dir==='NO_TRADE')return false; // explicit no-go, never had a result expected
-          const _winMs=e.windowType==='15m'?900000:300000;
-          if(!e.windowId)return false;
-          const _winStart=e.windowId.match(/-(.+)$/)?.[1];
-          if(!_winStart)return false;
-          const _closeTime=new Date(_winStart).getTime()+_winMs;
-          return _now-_closeTime>15*60*1000; // >15min stale
-        });
-        if(_stale.length>0&&pendingResolutionRef.current){
-          // Add to settlement queue if not already there
-          _stale.forEach(e=>{
-            const _winStart=e.windowId.match(/-(.+)$/)?.[1];
-            if(!_winStart)return;
-            const _winMs=e.windowType==='15m'?900000:300000;
-            const _closeTime=new Date(_winStart).getTime()+_winMs;
-            if(!pendingResolutionRef.current.some(p=>p.tradeId===e.id)){
-              pendingResolutionRef.current.push({
-                tradeId:e.id,
-                windowCloseTime:_closeTime,
-                attempts:0,
-                asset:e.asset||'BTC',
-                windowType:e.windowType,
-                strike:e.strike,
-                dir:e.dir,
-                _v8_1_stalePending:true,
-                // V13.4.248: tells the resolver below which array actually holds
-                //   this entry. Without it every item queued from here got looked
-                //   up in tradeLogRef -- a different, largely-vestigial array --
-                //   found nothing, and was silently dropped after 5 minutes with
-                //   its taraCallLog entry never touched. Confirmed live: two real
-                //   entries (2026-08-25, 2026-08-28) sat at result:null indefinitely,
-                //   one for 4 days, until corrected by hand against Kalshi's
-                //   settled market for each ticker.
-                source:'taraCallLog',
-              });
-            }
-          });
-          try{console.info('[V8.1] Queued',_stale.length,'stale pending entries for re-resolve');}catch(_){}
-        }
-      }catch(_){}
+      // V13.4.338: this used to be the ONLY place the stale-pending scan ran
+      //   (see _scanStalePending above, defined once and shared) -- now it's
+      //   just one of two triggers, the other being a plain mount effect.
+      _scanStalePending();
     });
     return unsub;
-  },[_backfillCallLogId]);
+  },[_backfillCallLogId,_scanStalePending]);
   // V12.8: SYNC-HEARTBEAT SUBSCRIBER + CATCH-UP PULL
   //   Subscribes to the tiny realtime heartbeat. When the cloud signature is ahead of
   //   this device's local log signature, another device has committed entries we have
@@ -41159,6 +41180,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const ageSec=(now-pending.windowCloseTime)/1000;
         // Don't query Kalshi for at least 30s after window close — they need time to settle
         if(ageSec<30)continue;
+        // V13.4.338: a SIT_OUT doesn't need Kalshi's settlement at all -- the
+        //   decision not to trade was already made at commit time. Without
+        //   this, a SIT_OUT that only reached resolution through THIS queue
+        //   (rather than live, at rollover) fell through to the taraCallLog
+        //   branch below, where `finalResult=_entry.dir===kalshiOutcomeDir?
+        //   'WIN':'LOSS'` unconditionally turns any dir that isn't 'UP'/'DOWN'
+        //   into a false LOSS -- a sit-out scored as a loss it never took.
+        if(pending.source==='taraCallLog'){
+          const _stalledEntry=(taraCallLogRef.current||[]).find(t=>t.id===pending.tradeId);
+          if(_stalledEntry&&_stalledEntry.dir==='SIT_OUT'){
+            if(typeof window._taraApplyReconcile==='function'){
+              try{await window._taraApplyReconcile(new Map([[pending.tradeId,{result:'SITOUT',resolution:'backfill-sitout-immediate'}]]));}catch(_){}
+            }
+            pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
+            continue;
+          }
+        }
         // V13.4.248: taraCallLog-sourced items (the V8.1 stale-pending backfill,
         //   tagged source:'taraCallLog') do not belong to the tradeLog branch below
         //   at all -- that branch looks the id up in tradeLogRef, a different array,
@@ -41982,6 +42020,35 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               }
               const next=[...prev];
               next[idx.i]={...idx.e,result:'SITOUT',resolvedAt:Date.now(),resolution:'5m-no-kalshi'};
+              setTimeout(()=>_recomputeLearningsFromLog(next),0);
+              return next;
+            });
+          } else if(!_capturedSnap||_capturedSnap.call==='SIT_OUT'){
+            // V13.4.338: a sit-out is already decided at commit time -- unlike
+            //   WIN/LOSS, it needs no price data to resolve. It used to fall
+            //   through to the SAME Kalshi-strike-dependent _trySettle poll
+            //   below (via _resolveScore's SIT_OUT branch, now dead code for
+            //   15m), meaning a sit-out could sit PENDING for the full 60s and
+            //   then stay stuck if Kalshi's strike feed was degraded that
+            //   night -- exactly the v336/v337 dependency it never actually
+            //   needed. Resolve it immediately here instead, mirroring the 5m
+            //   branch above (minus its 5m-specific "only if opened late"
+            //   ambiguity guard, which doesn't apply to a 15m commit made
+            //   with full context).
+            const _winMsImm=900000;
+            const _capturedWindowIdImm=_capturedSnap?.windowId||(()=>{
+              const _justClosedBucketImm=Math.floor(Date.now()/_winMsImm)*_winMsImm-_winMsImm;
+              return `15m-${new Date(_justClosedBucketImm).toISOString()}`;
+            })();
+            setTaraCallLog(prev=>{
+              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowIdImm&&e.result===null);
+              if(!idx){
+                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType);
+              }
+              if(!idx)return prev;
+              if(idx.e.result!==null)return prev;
+              const next=[...prev];
+              next[idx.i]={...idx.e,result:'SITOUT',resolvedAt:Date.now(),resolution:'immediate-no-kalshi-needed'};
               setTimeout(()=>_recomputeLearningsFromLog(next),0);
               return next;
             });
