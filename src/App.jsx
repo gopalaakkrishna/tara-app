@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.334-cancel-failure-verify';
-const TARA_VERSION_DISPLAY='Tara 13.4.334';
+const BASELINE_VERSION='2026.09.10-v13.4.335-rollover-timeformat-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.335';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35534,7 +35534,7 @@ function TaraApp(){
   const[currentOffer,setCurrentOffer]=useState('');
   const[windowType,setWindowType]=useState('15m');
   const[chartRes,setChartRes]=useState('1m');
-  const[timeState,setTimeState]=useState({currentTime:'',startWindow:'',nextWindow:'',minsRemaining:0,secsRemaining:0,currentHour:0});
+  const[timeState,setTimeState]=useState({currentTime:'',startWindow:'',nextWindow:'',nextWindowMs:0,minsRemaining:0,secsRemaining:0,currentHour:0});
   const[isLoading,setIsLoading]=useState(true);
   // ── COMMITTED LOCK STATE MACHINE ──
   // These refs form an immutable lock per window. Once locked, only reality caps can unlock.
@@ -38537,6 +38537,11 @@ function TaraApp(){
   const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.7.0 online. New since 9.5.0 — auto-execution depth, shadow staleness diagnostic, and Mission Mode. MISSION MODE (9.7.0). Set a starting bankroll, target dollars, and deadline. Tara sizes each auto-exec trade using fractional Kelly with cluster-specific WR from regimeDirCalibration. Hard stops at drawdown floor and at target — no chasing past either side. Math-driven distance-to-target tilt — behind schedule means modest upsize, ahead schedule means downsize 30 percent to lock in gains. Drawdown brake — quadratic shrink as bankroll approaches floor. Honest probability display — every render shows estimated odds of hitting target. Below 25 percent, target is flagged unrealistic with explicit warning. Compact dashboard widget shows bankroll, target, progress, time remaining, odds. Status states — active, paused, hit, busted, expired. Default Kelly multiplier 0.25 quarter Kelly for conservative growth. AUTO-EXEC IN DEPTH (9.6.0). Massive expansion of Kalshi auto-execution settings. Collapsible 7-step how-to guide right at top of section. Advanced entry filters — per-asset enable BTC ETH separately, per-window enable 15m 5m separately, minimum tier from any to super-confluence-only, minimum quality score, minimum conviction points, lock stability seconds before placing, skip marginal-zone caution. Advanced exit logic — stop-loss in cents below fill price, time-based exit at N seconds before window close. Position sizing — fixed bet, scale with conviction low and high, or Kelly fraction. Three exit paths run in parallel, whichever fires first wins. SHADOW STALENESS DIAGNOSTIC (9.6.1). Tap stale indicator on inactive asset card to see attempts, success rate, per-failure-type counters and last actual error. BUGFIX (9.5.2). Fixed atrBps not defined crash from 9.4.0 marginal-zone caution. SHADOW HEARTBEAT (9.5.1). Removed timeState secsRemaining from shadow effect deps. PRESERVED — opponent modeling Kalshi-spot divergence detector, per-regime direction calibration, V9.4.0 asymmetric tape-led floor and SHORT SQUEEZE UP gates and marginal-zone caution, V9.3.0 RSA-PSS Kalshi signing and multi-asset parallel shadow engine, all V9.2.x engine overhaul layers."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
+  // V13.4.335: companion to lastWindowRef holding the window boundary as a
+  //   raw epoch ms number, not a locale-formatted display string. See the
+  //   rollover-detection effect below (timeState.nextWindowMs) for why this
+  //   exists as a SEPARATE value rather than just fixing lastWindowRef.
+  const _lastWindowMsRef=useRef(0);
   const[userPosition,setUserPosition]=useState(null);
   // V10.2.9 — MANUAL KALSHI ENTRY RECORDER
   //   Solves the V10.2.7 disconnect: when user clicks ENTERED UP/DOWN, that
@@ -39717,7 +39722,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   useEffect(()=>{const u=()=>{const now=new Date();const ms=now.getTime();const iMs=(windowType==='15m'?15:5)*60*1000;const nMs=Math.ceil((ms+500)/iMs)*iMs;const nW=new Date(nMs);const sW=new Date(nMs-iMs);const diff=nW.getTime()-now.getTime();
     // V8.9.3: 3-way time format
     const tz=timeFormat==='utc'?{timeZone:'UTC'}:timeFormat==='est'?{timeZone:'America/New_York'}:undefined;
-    let ct,sw,nw;try{ct=now.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});}catch(e){ct=now.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});}setTimeState({currentTime:String(ct),startWindow:String(sw),nextWindow:String(nw),minsRemaining:Math.floor(diff/60000),secsRemaining:Math.floor((diff%60000)/1000),currentHour:now.getHours()});};u();const t=setInterval(u,1000);return()=>clearInterval(t);},[windowType,timeFormat]);
+    let ct,sw,nw;try{ct=now.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});}catch(e){ct=now.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});}setTimeState({currentTime:String(ct),startWindow:String(sw),nextWindow:String(nw),nextWindowMs:nMs,minsRemaining:Math.floor(diff/60000),secsRemaining:Math.floor((diff%60000)/1000),currentHour:now.getHours()});};u();const t=setInterval(u,1000);return()=>clearInterval(t);},[windowType,timeFormat]);
+  // V13.4.335: nextWindowMs is the raw epoch-ms window boundary computed just
+  //   above, BEFORE it gets locale-formatted into nextWindow/startWindow for
+  //   display. timeFormat is a dependency of this very effect (LOCAL/UTC/EST,
+  //   the "Time format: click to cycle" control) -- switching it recomputes
+  //   nextWindow as a DIFFERENT STRING for the exact same real window (e.g.
+  //   "3:00 AM" -> "07:00"). The rollover-detection effect below used to
+  //   compare that formatted string directly, so toggling the display format
+  //   mid-window looked identical to a real window change -- silently wiping
+  //   autoOrderState (and every other per-window ref) out from under a live,
+  //   already-filled position with no error, no warning, nothing. Reported
+  //   live as auto-exec tracking "going missing suddenly" for no apparent
+  //   reason after a real fill. nextWindowMs never changes on a format
+  //   switch, only on an actual window boundary, so it's what rollover
+  //   detection should have been keyed on from the start.
 
   // Position status
   const positionStatus=useMemo(()=>{if(!positionEntry||!currentPrice)return null;const{price:entry,side}=positionEntry;const pnlPct=side==='UP'?((currentPrice-entry)/entry)*100:((entry-currentPrice)/entry)*100;return{entry,side,pnlPct,isStopHit:pnlPct<=-30};},[positionEntry,currentPrice,betAmount]);
@@ -41285,7 +41304,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     return()=>clearInterval(resolverIv);
   },[adaptiveWeights]);
   // Window rollover
-  useEffect(()=>{if(timeState.nextWindow&&timeState.nextWindow!==lastWindowRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){
+  useEffect(()=>{if(timeState.nextWindowMs&&timeState.nextWindowMs!==_lastWindowMsRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){
           let won=false,active=false;
           // V3.2.4: General scorecard no longer auto-updates. Per user: scoring is decoupled
           //   from general predictions. The user enters/closes positions for their own use,
@@ -41998,7 +42017,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   place every other per-window ref already resets, so it can't be missed by
         //   a future rollover-detection change made only here.
         setAutoOrderState(null);
-        taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
+        taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;_lastWindowMsRef.current=timeState.nextWindowMs;tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
         // V10.7.62: force re-render immediately after refs clear so UI flushes
         //   stale lock display. lockedCallRef is a ref (not state) — without this,
         //   old lock stays visible until next organic render.
@@ -42015,7 +42034,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   5 seconds after rollover — prevents stale analysis from instant-locking the
         //   new window before fresh price data arrives.
         _rolloverGraceRef.current=Date.now();
-        }},[timeState.nextWindow,currentPrice,windowType,userPosition]);
+        }},[timeState.nextWindowMs,currentPrice,windowType,userPosition]);
   // V10.7.60: removed targetMargin + adaptiveWeights from rollover deps.
   //   targetMargin changes every Kalshi poll (every 1.5s) — was re-running the rollover
   //   effect mid-window, causing scanning flashes and stale-lock glitches.
@@ -52241,6 +52260,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(currentPriceRef)currentPriceRef.current=null;
     if(velocityRef&&velocityRef.current)velocityRef.current={v1s:0,v5s:0,v15s:0,v30s:0,accel:0,jerk:0,peakPnL:0,troughPnL:0,pnlSlope:0};
     lastWindowRef.current='';
+    _lastWindowMsRef.current=0;
     peakOfferRef.current=0;
     _hasRestoredLockRef.current=false;
     _cloudRestoreCompletedRef.current=false; // V7.10.3
