@@ -5041,6 +5041,21 @@ const kalshiRunEntryLadder=async({
     if(orderId){
       const _cancelRes=await kalshiCancelOrder({apiKeyId,privateKeyPem,orderId,dryRun});
       _cancelOk=!!_cancelRes.ok;
+      // V13.4.330: a cancel racing a fill is a normal exchange condition --
+      //   Kalshi can return a clean success for "cancel" on an order that
+      //   filled moments before the DELETE landed, with nothing left to
+      //   cancel. The old code trusted _cancelOk (did the DELETE request
+      //   itself succeed) alone and never looked at what the cancel
+      //   response's own order object said about the order's actual final
+      //   state. Reported live: a real fill at 91.2c on Kalshi's own site,
+      //   the ladder declared 'no-fill' and gave up -- the cancel response
+      //   would have shown the fill if anything had checked it.
+      if(_cancelOk&&_cancelRes.order){
+        const _cancelNorm=kalshiNormalizeOrder(_cancelRes.order);
+        if(_cancelNorm.status==='filled'){
+          return{ok:true,order:_cancelRes.order,normalized:_cancelNorm,rung,attempts,plan};
+        }
+      }
     }
     // V13.4.322: if the final direct check could not reach Kalshi AND the
     //   cancel also failed, the true fill state is genuinely UNKNOWN -- not
@@ -5715,8 +5730,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.329-drift-recheck-debounce';
-const TARA_VERSION_DISPLAY='Tara 13.4.329';
+const BASELINE_VERSION='2026.09.10-v13.4.330-cancel-race-fill-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.330';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46228,7 +46243,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   than having no automated protection at all. Surfacing the confirmed
       //   truth quickly is the safe half of this fix; recovering full exit
       //   management from it is a separate, deliberately unstarted project.
-      if(_aos&&!_aos.dryRun&&_aos.status==='unknown'&&_aos.ticker){
+      // V13.4.330: ALSO cover status:'error',reason:'no-fill'. Reported live:
+      //   the entry ladder genuinely exhausted every rung believing each
+      //   cancel was clean (the v330 cancel-race fix above closes the most
+      //   likely cause, but this net catches it regardless of cause) and set
+      //   status:'error' -- a status this self-healing check never looked at,
+      //   so a real fill hidden behind a false 'no-fill' had NO safety net at
+      //   all until the user checked Kalshi's own site by hand. 'error' with
+      //   any other reason (bad-args, no-stake, a pre-order validation
+      //   failure with no HTTP call ever made) is not a fill-uncertain state
+      //   and stays out of scope -- only 'no-fill' specifically represents
+      //   "we sent real orders and are not sure what happened to them."
+      if(_aos&&!_aos.dryRun&&(_aos.status==='unknown'||(_aos.status==='error'&&_aos.reason==='no-fill'))&&_aos.ticker){
         const _match=positions.find(p=>p.ticker===_aos.ticker);
         if(_match&&_match.count>0){
           _driftHit('unknown-nofill:'+_aos.ticker);
