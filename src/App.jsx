@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.339-sitout-nogo-mislabel-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.339';
+const BASELINE_VERSION='2026.09.10-v13.4.340-hourly-timing-window-refit';
+const TARA_VERSION_DISPLAY='Tara 13.4.340';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17345,10 +17345,22 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
     //   it already removes the genuinely negative 45-61min band.
     //   Lateness is instead used to SIZE UP (see the V11 gate's late-window
     //   boost), which captures the effect without discarding good volume.
+    // V13.4.340: the above held on 196 locks; it no longer holds on the most
+    //   recent 500 settled (real, chronologically split train/test, cost
+    //   deconfounded -- avg cost ~53c in every zone below):
+    //       0-15min left (the "85%" band): n=68   avgNet -14.94c  (train -19 to -24c, test -3 to -8c)
+    //       40-45min left ("67%" tail):    n=208  avgNet  -4.63c  (train -3.08c, test -6.10c) -- 42% of ALL volume
+    //       15-40min left:                 n=222  avgNet  +3.90c  (train +3.03c, test +4.69c)
+    //   Applying only-lock-15-40min retroactively to this exact book flips it
+    //   from -1016c total to +865c. The 45-61min region this comment
+    //   originally protected is irrelevant now -- the notch moved to the two
+    //   ends instead of the middle. Lowering the cap to 40 removes the worst
+    //   AND most voluminous bucket; the mid-dead-zone below now covers 0-15
+    //   instead of 25-35 (that old zone was down to n=3/500, negligible).
     //   Override if wanted: localStorage 'taraHourlyMaxMinsLeft'.
     const MAX_MINS_LEFT_TO_LOCK=(function(){
       try{const v=parseFloat(localStorage.getItem('taraHourlyMaxMinsLeft'));
-        return(Number.isFinite(v)&&v>0&&v<=60)?v:45;}catch(_e){return 45;}
+        return(Number.isFinite(v)&&v>0&&v<=60)?v:40;}catch(_e){return 40;}
     })();
     // V13.4.164: require hydration before taking a NEW lock. Locking while L.locks is
     //   still empty-but-unhydrated is precisely how the contradicting pair got through.
@@ -17375,9 +17387,16 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
     //   both: too weak to fire early, too early for the barrier to have resolved.
     //   NOT a volume cut -- the ladder keeps scanning, so a signal blocked at 30m
     //   can still lock at 20m once it re-confirms. Deferral, not deletion.
+    // V13.4.340: the 25-35 notch above is gone -- on the most recent 500
+    //   settled it's down to n=3/500 (negligible). The notch moved to the
+    //   LATE end instead: 0-15min left is now -14.94c/ct (train -19 to -24c,
+    //   test -3 to -8c, both halves consistently bad; see MAX_MINS_LEFT_TO_LOCK
+    //   comment above for the full breakdown). Repointing this same dead-zone
+    //   mechanism at 0-15 instead of 25-35 -- one dead zone, moved to where
+    //   the real notch is now, not a second gate stacked on the old one.
     //   Dials: 'taraHourlyDeadLo' / 'taraHourlyDeadHi' (minutes; set equal to disable).
-    const _MID_DEAD_LO=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadLo'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:25;}catch(_e){return 25;}})();
-    const _MID_DEAD_HI=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadHi'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:35;}catch(_e){return 35;}})();
+    const _MID_DEAD_LO=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadLo'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:0;}catch(_e){return 0;}})();
+    const _MID_DEAD_HI=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadHi'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:15;}catch(_e){return 15;}})();
     const _inMidDead=_MID_DEAD_HI>_MID_DEAD_LO&&minsLeft>=_MID_DEAD_LO&&minsLeft<_MID_DEAD_HI;
     // V13.4.202: the open-lock set is computed BEFORE the gate, because the cap
     //   has to count the same thing the contradiction check does. Union of the
