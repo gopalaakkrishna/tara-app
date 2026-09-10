@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.328-ticker-mismatch-safety-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.328';
+const BASELINE_VERSION='2026.09.10-v13.4.329-drift-recheck-debounce';
+const TARA_VERSION_DISPLAY='Tara 13.4.329';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15242,15 +15242,21 @@ function PositionReconciliationBanner({positionReconciliation}){
   //   ambiguity (Kalshi shows a real position on the same side, just not
   //   under the tracked ticker) -- red/urgent like the other unresolved
   //   kinds, never the reassuring green a clean "confirmed no fill" gets.
-  const _kindColor=(k)=>k==='unknown-to-tara'||k==='unknown-resolved-nofill'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
+  // V13.4.329: the two '-pending' kinds are a single-poll miss awaiting a
+  //   second confirmation (see _driftMiss in the reconciliation poll) --
+  //   amber, same as SIT-OUT's "watch, not alarmed, not confirmed" tier.
+  //   Deliberately NOT the green a genuine 'confirmed no fill' gets.
+  const _kindColor=(k)=>k==='phantom-auto-pending'||k==='unknown-nofill-pending'?T2_SITOUT:k==='unknown-to-tara'||k==='unknown-resolved-nofill'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
   const _kindLabel=(k)=>{
     if(k==='phantom-auto')return 'phantom (auto)';
+    if(k==='phantom-auto-pending')return 'verifying — recheck pending';
     if(k==='phantom-manual')return 'phantom (manual)';
     if(k==='count-mismatch-auto')return 'count mismatch (auto)';
     if(k==='count-mismatch-manual')return 'count mismatch (manual)';
     if(k==='unknown-to-tara')return 'kalshi-only';
     if(k==='unknown-resolved-filled')return 'confirmed filled';
     if(k==='unknown-resolved-nofill')return 'confirmed no fill';
+    if(k==='unknown-nofill-pending')return 'verifying — recheck pending';
     if(k==='unknown-ticker-mismatch')return 'ticker mismatch — verify';
     if(k==='ticker-mismatch-auto')return 'ticker mismatch — verify';
     return k;
@@ -45797,6 +45803,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // V13.4.253: per-fill high-water mark for the trailing stop. Keyed on
   //   ticker+fill time so a fresh position resets rather than inheriting.
   const _exitTrailRef=useRef({key:null,peak:-1,armed:false});
+  // V13.4.329: per-ticker consecutive-empty-poll counter for the position
+  //   reconciliation drift check. A single 30s snapshot showing "no matching
+  //   position, no same-side position either" is not proof of absence --
+  //   Kalshi's /portfolio/positions can lag a few seconds behind a fill that
+  //   just posted, and a real fill caught mid-propagation on one snapshot
+  //   used to be declared "CONFIRMED NO FILL -- safe to ignore" outright, on
+  //   the same single-poll basis v328 already fixed for the ticker-mismatch
+  //   case. Reported live: a real 1-contract fill, side matching Tara's own
+  //   locked direction, correctly absent from `positions` on one poll and
+  //   present moments later on Kalshi's own site -- the ticker/side logic
+  //   from v328 was correct and ran as designed, the missing piece was time.
+  const _driftMissTrackerRef=useRef({});
   const _runExit=useCallback(async(why)=>{
     if(_exitBusyRef.current)return{ok:false,reason:'busy'};
     const st=autoOrderState;
@@ -46098,6 +46116,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _up=_userPositionRef.current;
       const _km=_kalshiActiveMarketRef.current;
       const _activeTicker=_km?.ticker||null;
+      // V13.4.329: consecutive-miss debounce for the two "confidently declare
+      //   absence" branches below (phantom-auto, unknown-resolved-nofill). A
+      //   single 30s poll finding no match is not proof -- see the ref
+      //   declaration comment for the live incident this fixes. Keyed by
+      //   kind+ticker so unrelated branches/orders don't share a counter;
+      //   cleared whenever there's no order to reconcile so it can't leak
+      //   across windows.
+      if(!_aos)_driftMissTrackerRef.current={};
+      const _driftMiss=(key)=>{
+        const _t=_driftMissTrackerRef.current;
+        _t[key]=(_t[key]||0)+1;
+        return _t[key];
+      };
+      const _driftHit=(key)=>{ delete _driftMissTrackerRef.current[key]; };
       // PHANTOM: Tara thinks she has a live position
       // V10.7.32: also reconcile when status='exit-pending' (V10.7.26 exit
       //   limit placed but not yet filled — we want to verify the position
@@ -46134,15 +46166,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _expectedSide=_aos.side||(_aos.dir==='UP'?'yes':'no');
           const _sameSideOpen=positions.filter(p=>p.side===_expectedSide);
           if(_sameSideOpen.length===0){
-            _details.push({
-              kind:'phantom-auto',
-              ticker:_aos.ticker,
-              taraCount:_taraCount,
-              kalshiCount:0,
-              side:_expectedSide,
-              note:`Tara's auto-exec thinks you hold ${_taraCount} contract(s) but Kalshi shows none — likely closed manually or order errored`,
-            });
+            // V13.4.329: require 2 consecutive empty polls (>=30s of
+            //   sustained absence) before declaring this -- see ref comment
+            //   above _activeTicker for the live incident this fixes.
+            const _misses=_driftMiss('phantom-auto:'+_aos.ticker);
+            if(_misses<2){
+              _details.push({
+                kind:'phantom-auto-pending',
+                ticker:_aos.ticker,
+                taraCount:_taraCount,
+                kalshiCount:0,
+                side:_expectedSide,
+                note:`Kalshi shows no position under this ticker on this check -- rechecking before concluding anything. If this was a fill moments ago, this can just be API propagation lag.`,
+              });
+            }else{
+              _details.push({
+                kind:'phantom-auto',
+                ticker:_aos.ticker,
+                taraCount:_taraCount,
+                kalshiCount:0,
+                side:_expectedSide,
+                note:`Tara's auto-exec thinks you hold ${_taraCount} contract(s) but Kalshi shows none — likely closed manually or order errored`,
+              });
+            }
           }else{
+            _driftHit('phantom-auto:'+_aos.ticker);
             _details.push({
               kind:'ticker-mismatch-auto',
               ticker:_aos.ticker,
@@ -46152,15 +46200,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               note:`Kalshi shows no position under the tracked ticker (${_aos.ticker}), but ${_sameSideOpen.length} other open ${_expectedSide.toUpperCase()} position(s) exist: ${_sameSideOpen.map(p=>p.ticker+' x'+p.count).join(', ')}. This may be a ticker mismatch -- check Kalshi directly before assuming this position is closed.`,
             });
           }
-        }else if(_taraCount>0&&_match.count!==_taraCount){
-          _details.push({
-            kind:'count-mismatch-auto',
-            ticker:_aos.ticker,
-            taraCount:_taraCount,
-            kalshiCount:_match.count,
-            side:_match.side,
-            note:`Auto-exec thinks ${_taraCount} contracts, Kalshi shows ${_match.count}`,
-          });
+        }else{
+          _driftHit('phantom-auto:'+_aos.ticker);
+          if(_taraCount>0&&_match.count!==_taraCount){
+            _details.push({
+              kind:'count-mismatch-auto',
+              ticker:_aos.ticker,
+              taraCount:_taraCount,
+              kalshiCount:_match.count,
+              side:_match.side,
+              note:`Auto-exec thinks ${_taraCount} contracts, Kalshi shows ${_match.count}`,
+            });
+          }
         }
       }
       // V13.4.322: SELF-HEALING FOR 'unknown' fill status. kalshiRunEntryLadder
@@ -46180,6 +46231,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(_aos&&!_aos.dryRun&&_aos.status==='unknown'&&_aos.ticker){
         const _match=positions.find(p=>p.ticker===_aos.ticker);
         if(_match&&_match.count>0){
+          _driftHit('unknown-nofill:'+_aos.ticker);
           _details.push({
             kind:'unknown-resolved-filled',
             ticker:_aos.ticker,
@@ -46204,15 +46256,34 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _expectedSide=_aos.dir==='UP'?'yes':'no';
           const _sameSideOpen=positions.filter(p=>p.side===_expectedSide);
           if(_sameSideOpen.length===0){
-            _details.push({
-              kind:'unknown-resolved-nofill',
-              ticker:_aos.ticker,
-              taraCount:0,
-              kalshiCount:0,
-              side:_expectedSide,
-              note:'Confirmed on Kalshi: this did not fill. Safe to ignore -- no real position exists for this window.',
-            });
+            // V13.4.329: even a genuine same-side absence can be a one-poll
+            //   snapshot taken before a just-placed fill propagated into
+            //   Kalshi's /portfolio/positions. Reported live: exact match on
+            //   Tara's own locked direction and side, absent on one 30s
+            //   check, present on Kalshi's own site moments later. Require 2
+            //   consecutive empty polls before calling this "Confirmed."
+            const _misses=_driftMiss('unknown-nofill:'+_aos.ticker);
+            if(_misses<2){
+              _details.push({
+                kind:'unknown-nofill-pending',
+                ticker:_aos.ticker,
+                taraCount:0,
+                kalshiCount:0,
+                side:_expectedSide,
+                note:'Kalshi shows no position on this check -- rechecking before concluding this is a non-fill. If the order just placed, this can be propagation lag.',
+              });
+            }else{
+              _details.push({
+                kind:'unknown-resolved-nofill',
+                ticker:_aos.ticker,
+                taraCount:0,
+                kalshiCount:0,
+                side:_expectedSide,
+                note:'Confirmed on Kalshi: this did not fill. Safe to ignore -- no real position exists for this window.',
+              });
+            }
           }else{
+            _driftHit('unknown-nofill:'+_aos.ticker);
             _details.push({
               kind:'unknown-ticker-mismatch',
               ticker:_aos.ticker,
