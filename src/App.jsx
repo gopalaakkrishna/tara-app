@@ -5715,8 +5715,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.09-v13.4.326-free-reign-gate-cleanup';
-const TARA_VERSION_DISPLAY='Tara 13.4.326';
+const BASELINE_VERSION='2026.09.09-v13.4.327-remove-late-lock-penalty';
+const TARA_VERSION_DISPLAY='Tara 13.4.327';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -42669,10 +42669,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // V139: FGT 4/4 alignment also bypasses this. With FGT promoted to primary signal in V136,
         //       a 4/4 alignment in the late window is exactly the kind of high-conviction setup we want
         //       to lock — even if the kinematic trajectory is ambivalent.
-        if(isVeryLateLock&&_trajStrength<10&&_fgtAlignAbs<4){
-          taraAdviceRef.current=taraAdviceRef.current||'SEARCHING...';
-
-        } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&posterior>=LOCK_THRESHOLD_UP_EFFECTIVE&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
+        // V13.4.327 REMOVED: this outer isVeryLateLock/_trajStrength/_fgtAlignAbs
+        //   check used to skip UP AND DOWN evaluation entirely (both branches
+        //   below are `else if` off this same condition) whenever the window
+        //   was very late without an unusually strong trajectory/FGT read --
+        //   a hard block on lock formation woven into the shared decision
+        //   chain, not a separable gate. Per the explicit instruction to let
+        //   Tara lock on her own timing, removed so both directions are
+        //   always evaluated on their own merits, at any point in the window.
+        if(bullCount>=CONSECUTIVE_NEEDED_UP&&posterior>=LOCK_THRESHOLD_UP_EFFECTIVE&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
           // V146.1 FIX A: Added `posterior>=LOCK_THRESHOLD_UP_EFFECTIVE` to mirror DOWN side's
           //   existing check. Previously UP could fire when historical samples cleared the
           //   threshold even if current posterior had since dropped back. DOWN required both
@@ -42687,15 +42692,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _sessQ={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
           const _dsAdj=getMarketSessions().dsAdj||0; // V114: day×session quality bonus/penalty
           const _streakAdj=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0); const _dirBiasUp=streakData?.upBias||0; if(_dirBiasUp!==0)reasoning.push(`[DIR-BIAS] UP recent WR adj: ${_dirBiasUp}`); // V134
-          // V134: SURGICAL LATE-FOMO PENALTY — only when signals contradict
+          // V13.4.327 REMOVED: the V134 "surgical late-FOMO penalty" (-15 to
+          //   -25 off the quality score whenever the lock formed late in a
+          //   choppy regime without unanimous signal agreement) -- a timing-
+          //   based quality penalty, removed alongside the hard block above
+          //   per the same instruction. _isChoppyRegime is still used below
+          //   by the unrelated choppy-quality-floor check, so it stays.
           const _isChoppyRegime=regime==='RANGE-CHOP'||regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP';
-          const _upSignalsAgreeing=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
-          const _signalsUnanimous=_upSignalsAgreeing>=4;
-          const _trajContradicts=eng.trajectoryAdj<0;
-          const _lateFomoUp=isLateLockZone&&_isChoppyRegime&&posterior>=80&&(!_signalsUnanimous||_trajContradicts);
-          const _veryLateFomoUp=isVeryLateLock&&_isChoppyRegime&&posterior>=78&&(!_signalsUnanimous||_trajContradicts);
-          const _lateFomoPenalty=_veryLateFomoUp?-25:_lateFomoUp?-15:0;
-          if(_lateFomoPenalty<0)reasoning.push(`[LATE-FOMO] Late UP in ${regime}, ${_upSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty}`);
+          const _lateFomoPenalty=0;
           const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+_dsAdj+_streakAdj+_lateFomoPenalty+_dirBiasUp+(eng.windowDriftBps>25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps<-25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0)+(newsSentiment?.geoRisk>=0.5?-Math.round(8*newsSentiment.geoRisk):0)+(()=>{
             // V134: Sentiment-Trajectory interaction
             const tAdj=eng.trajectoryAdj||0;
@@ -42833,15 +42837,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _sessQ2={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
           const _dsAdj2=getMarketSessions().dsAdj||0;
           const _streakAdj2=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0); const _dirBiasDn=streakData?.dnBias||0; if(_dirBiasDn!==0)reasoning.push(`[DIR-BIAS] DOWN recent WR adj: ${_dirBiasDn}`);
-          // V134: Surgical DOWN late-FOMO — V134: TRENDING DOWN bypasses entirely (87% WR setup)
+          // V13.4.327 REMOVED: DOWN-side mirror of the UP-side late-FOMO
+          //   penalty removal above -- same reasoning, same instruction.
+          //   _isChoppyRegime2 stays; the unrelated choppy-quality-floor
+          //   check below still uses it.
           const _isChoppyRegime2=(regime==='RANGE-CHOP'||regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP')&&regime!=='TRENDING DOWN';
-          const _dnSignalsAgreeing=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
-          const _signalsUnanimous2=_dnSignalsAgreeing>=4;
-          const _trajContradicts2=eng.trajectoryAdj>0;
-          const _lateFomoDn=isLateLockZone&&_isChoppyRegime2&&posterior<=20&&(!_signalsUnanimous2||_trajContradicts2);
-          const _veryLateFomoDn=isVeryLateLock&&_isChoppyRegime2&&posterior<=22&&(!_signalsUnanimous2||_trajContradicts2);
-          const _lateFomoPenalty2=_veryLateFomoDn?-25:_lateFomoDn?-15:0;
-          if(_lateFomoPenalty2<0)reasoning.push(`[LATE-FOMO] Late DOWN in ${regime}, ${_dnSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty2}`);
+          const _lateFomoPenalty2=0;
           const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+_dsAdj2+_streakAdj2+_lateFomoPenalty2+_dirBiasDn+(eng.windowDriftBps<-25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps>25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score<-2?+5:newsSentiment.score>2?(-8):0):0)+(newsSentiment?.geoRisk>=0.5?-Math.round(8*newsSentiment.geoRisk):0)+(()=>{
             const tAdj=eng.trajectoryAdj||0;
             const sScore=newsSentiment?.score||0;
@@ -42972,8 +42973,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                          `posterior moved to ${avgRecent.toFixed(0)}`;
             reasoning.push(`[SIT-OUT-EXIT] Releasing sit-out: ${reason}`);
             // Don't set state here — fall through to FORMING/SEARCHING below
-          } else if(isVeryLateLock){
-            taraAdviceRef.current='NO CALL';
+          // V13.4.327 REMOVED: `else if(isVeryLateLock){taraAdviceRef.current=
+          //   'NO CALL';}` -- explicitly refused to keep searching/analyzing
+          //   once very late in the window even when neither direction had
+          //   cleared its sample threshold yet. Removed so this case falls
+          //   through to the normal sit-out/analyzing logic below instead of
+          //   a timing-based hard stop.
           } else if(_shouldSitOut){
             taraAdviceRef.current='SITTING OUT — Mixed signals, no edge';
             reasoning.push(`[SIT-OUT] Mid-window posterior ${avgRecent.toFixed(0)}, consensus UP:${_upConsensus} DN:${_dnConsensus} — no edge`);
