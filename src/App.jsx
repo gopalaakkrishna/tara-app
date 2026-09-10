@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.336-dead-proxy-layer-restored';
-const TARA_VERSION_DISPLAY='Tara 13.4.336';
+const BASELINE_VERSION='2026.09.10-v13.4.337-kalshi-strike-scoping-crash-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.337';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40807,6 +40807,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   pick changes nothing, keeping the last trusted ticker/strike/
         //   quote exactly like the price already did.
         let _kalshiPriceTrusted=false;
+        // V13.4.337: hoisted out of the `if(_kalshiPriceTrusted)` block below --
+        //   it used to be `const`-declared THERE (block-scoped) while the cache
+        //   write further down (a separate, sibling `if(bestStrike>0)` block)
+        //   read it unconditionally. Every successful fetch with a valid strike
+        //   threw "_activeMarket is not defined", landing in the outer catch and
+        //   stamping window.__taraKalshiDebug as {ok:false,via:'error',...} --
+        //   masking a real success as a hard failure, and (worse) preventing
+        //   lastKalshiSuccessRef from ever caching a strike, so the ONE fallback
+        //   this function has for a transient proxy hiccup (up to 15min of
+        //   cached strike) never had anything in it. Confirmed live via
+        //   window.__taraKalshiDebug on the user's own device.
+        let _activeMarket=null;
         {
           const _spotNow=currentPriceRef.current||0;
           const _strikeOffPct=(_spotNow>0&&bestStrike>0)?Math.abs(bestStrike-_spotNow)/_spotNow:1;
@@ -40852,7 +40864,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
             setKalshiStrike(bestStrike);
           }
-          const _activeMarket=best.ticker?{ticker:best.ticker,closeTime:best.close_time,strike:bestStrike,strikeType:best.strike_type,event:best._event_ticker}:null;
+          _activeMarket=best.ticker?{ticker:best.ticker,closeTime:best.close_time,strike:bestStrike,strikeType:best.strike_type,event:best._event_ticker}:null;
           if(_activeMarket)setKalshiActiveMarket(_activeMarket);
         }
         // V7.0.3: per-asset cache. Removed the bestStrike>1000 guard which was BTC-only —
