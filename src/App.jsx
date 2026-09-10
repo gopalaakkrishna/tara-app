@@ -4996,8 +4996,35 @@ const kalshiRunEntryLadder=async({
     // The taking rung is not given time to rest; it either fills or it does not.
     const deadline=Date.now()+(rung.takesSpread?0:rung.waitSec*1000);
     let normalized=kalshiNormalizeOrder(placed.order);
+    // V13.4.333: RUNAWAY BAILOUT. Reported live, twice in one night: a resting
+    //   rung waits out its FULL timer even when the market has already blown
+    //   straight past the point where waiting still makes sense -- a fast,
+    //   one-directional move leaves the resting order behind, it sits
+    //   unfilled for the whole wait, and the entry is missed entirely on a
+    //   call that was correct the whole time. If the live market cost for our
+    //   side is already worse than this ladder's OWN final "take it now"
+    //   price (the price we would have accepted outright, no questions asked,
+    //   at lock time), the setup has moved further than this plan ever
+    //   anticipated -- stop waiting on this rung immediately instead of
+    //   burning the rest of its timer on a price that is already stale. Falls
+    //   through to the existing verify-before-cancel logic exactly as a
+    //   normal timeout would, so a fill landing in the last instant is never
+    //   missed by exiting early -- this only shortens a wait that the
+    //   ladder's own plan has already been overtaken by, it never shortens
+    //   the taking rung (which isn't given a wait at all) and never fires on
+    //   a rung that's merely resting normally.
+    const _takeRungCents=plan.rungs[plan.rungs.length-1]?.priceCents;
+    const _runawayBail=()=>{
+      if(rung.takesSpread||_takeRungCents==null)return false;
+      const _liveYes=Number(_kalshiQuote?.mid);
+      const _liveAt=Number(_kalshiQuote?.at)||0;
+      if(!Number.isFinite(_liveYes)||(Date.now()-_liveAt)>5000)return false;
+      const _liveCost=dir==='UP'?_liveYes:(100-_liveYes);
+      return _liveCost>_takeRungCents;
+    };
     while(normalized.status!=='filled'&&Date.now()<deadline){
       if(typeof shouldAbort==='function'&&shouldAbort())break;
+      if(_runawayBail())break;
       await new Promise(r=>setTimeout(r,pollMs));
       const look=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
       // V13.4.322: a failed POLL is not a failed ORDER. The old `if(!look.ok)
@@ -5756,8 +5783,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.332-cost-timing-caution-watch';
-const TARA_VERSION_DISPLAY='Tara 13.4.332';
+const BASELINE_VERSION='2026.09.10-v13.4.333-ladder-runaway-bailout';
+const TARA_VERSION_DISPLAY='Tara 13.4.333';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
