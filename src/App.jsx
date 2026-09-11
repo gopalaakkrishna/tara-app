@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.10-v13.4.340-hourly-timing-window-refit';
-const TARA_VERSION_DISPLAY='Tara 13.4.340';
+const BASELINE_VERSION='2026.09.11-v13.4.341-cold-start-warmup-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.341';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35389,6 +35389,14 @@ function TaraApp(){
     }catch(_){return null;}
   };
   const _warmState=_loadWarmState();
+  // V13.4.341: freeze the cold-start verdict at mount. _warmState above is
+  //   recomputed on every render (reads sessionStorage fresh each time), so by
+  //   the time later renders happen it reflects THIS session's own recent
+  //   saves, not what was available when the page actually loaded. useRef's
+  //   initializer only takes effect once, on the first render -- exactly what
+  //   we need to remember "did this page load start cold." Same >=10 threshold
+  //   the history-seed check below already uses.
+  const _isColdStartRef=useRef(!(_warmState?.history?.length>=10));
   const[history,setHistory]=useState(()=>{
     // Seed from warm state if available and fresh
     if(_warmState?.history?.length>=10){
@@ -44142,6 +44150,28 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(!analysis||_post==null||isNaN(_post)){
       return{call:'SIT_OUT',reason:'Engine still loading — analysis not ready yet',confidence:0};
     }
+    // V13.4.341: COLD-START WARM-UP GATE. The `analysis` null-check above only
+    //   requires liveHistory.length>=30 (candles) -- on a true cold start (no
+    //   usable sessionStorage warm state, see _isColdStartRef above) that floor
+    //   passes at ~30 real minutes in, but the V10.7.86 comment on the warm-state
+    //   restore documents that ADX/tape-flow/VWAP still need MORE than that
+    //   ("~50 ticks for tape flow, ~5 min for VWAP... first 3-5 windows have
+    //   partial signals and worse calls") with nothing enforcing it -- a real,
+    //   ungated gap between "analysis stops returning null" and "analysis is
+    //   actually trustworthy." This SIT_OUTs for the documented window instead
+    //   of silently trading on it. Warm-started sessions (the normal case, same
+    //   tab refreshed within 5min) are completely unaffected -- history seeds
+    //   instantly from sessionStorage so _isColdStartRef is false immediately.
+    //   Override: localStorage 'taraColdStartWarmupMin' (minutes, 0 disables).
+    if(_isColdStartRef.current){
+      const _coldWarmupMin=(function(){
+        try{const v=parseFloat(localStorage.getItem('taraColdStartWarmupMin'));
+          return(Number.isFinite(v)&&v>=0&&v<=180)?v:75;}catch(_e){return 75;}
+      })();
+      if(Date.now()-_mountTimeRef.current<_coldWarmupMin*60000){
+        return{call:'SIT_OUT',reason:'cold-start-warming-up',confidence:0};
+      }
+    }
     const post=_post;
     const conviction=Math.abs(post-50);
     const dir=post>=50?'UP':'DOWN';
@@ -44795,6 +44825,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(_reason.includes('new window'))return call;
     if(_reason.includes('searching for direction'))return call;
     if(_reason.includes('observing fresh data'))return call;
+    // V13.4.341: cold-start warm-up gate is the SAME physical constraint as
+    //   'engine still loading' above -- analysis stopped returning null once
+    //   liveHistory hit 30 candles, but tape-flow/VWAP are documented (see the
+    //   V10.7.86 warm-state comment) as still unreliable for the rest of the
+    //   warm-up window. Without this line, this postProcess would force-commit
+    //   straight through the cold-start SIT_OUT using the very posterior the
+    //   gate exists to distrust -- silently undoing it every time.
+    if(_reason.includes('cold-start-warming-up'))return call;
     // Dead-window check — the ONE legitimate sitout
     const _wa=analysis?.windowAmplitude;
     const _rangeBps=_wa?.rangeBps||0;
