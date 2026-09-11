@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.343-drift-banner-retry-exit';
-const TARA_VERSION_DISPLAY='Tara 13.4.343';
+const BASELINE_VERSION='2026.09.11-v13.4.344-recover-lost-tracking-exit';
+const TARA_VERSION_DISPLAY='Tara 13.4.344';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46159,9 +46159,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   30s timer runs, on demand -- not a second, divergent implementation.
   //   Assigned where `_tick` is defined below; read only from the button.
   const _manualReconcileNowRef=useRef(null);
-  const _runExit=useCallback(async(why)=>{
+  // V13.4.344: optional overrideState lets a caller that has ALREADY
+  //   confirmed a real position directly against Kalshi (e.g. the drift
+  //   banner's "unknown-resolved-filled"/"unknown-to-tara" cases, where
+  //   autoOrderState never reached status:'filled' because the fill was
+  //   never tracked in the first place) supply {status:'filled',dir,
+  //   ticker,filledCount,dryRun:false} and have this function close the
+  //   REAL confirmed position exactly as if it had been tracked normally.
+  //   Deliberately does NOT need filledAtCents -- placing/verifying a
+  //   closing order never reads it; only the post-exit P&L line below
+  //   does, and it already tolerates that being absent (stays null rather
+  //   than fabricating a number). The automated stop-loss/take-profit/
+  //   trailing-stop monitor is untouched -- it only ever calls this with
+  //   no override, reading the real (still-honestly-unknown) autoOrderState.
+  const _runExit=useCallback(async(why,overrideState)=>{
     if(_exitBusyRef.current)return{ok:false,reason:'busy'};
-    const st=autoOrderState;
+    const st=overrideState||autoOrderState;
     if(!st||st.status!=='filled')return{ok:false,reason:'no-position'};
     const dir=st.dir;
     if(dir!=='UP'&&dir!=='DOWN')return{ok:false,reason:'no-dir'};
@@ -46231,7 +46244,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // st.filledAtCents (captured at the top of this function) rather than
       // prev.filledAtCents -- same value, since nothing between them touches
       // it, but hoisted so the settlement ledger below can reuse it too.
-      const _execPnlPerContract=(exitVal!=null&&Number.isFinite(Number(st.filledAtCents)))
+      // V13.4.344: explicit st.filledAtCents!=null check added. Number(null)
+      //   is 0, not NaN -- Number.isFinite(Number(null)) is TRUE, so without
+      //   this an unknown entry price (the drift-banner override's own
+      //   filledAtCents:null, deliberately unguessed) would have silently
+      //   priced the entry at $0.00 instead of reporting P&L as unknown,
+      //   fabricating a wildly wrong profit number. Caught by this session's
+      //   own verification test before it ever shipped.
+      const _execPnlPerContract=(exitVal!=null&&st.filledAtCents!=null&&Number.isFinite(Number(st.filledAtCents)))
         ?(exitVal-Number(st.filledAtCents)):null;
       setAutoOrderState(prev=>Object.assign({},prev||{},{
         status:'exited',exitReason:why,exitOrder:res.order,
@@ -46593,7 +46613,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             taraCount:0,
             kalshiCount:_match.count,
             side:_match.side,
-            note:`Confirmed on Kalshi: this DID fill (${_match.count} contract(s) on ${_match.side.toUpperCase()}). Auto-exec lost track of the fill, so stop-loss/take-profit/trailing-stop will NOT manage this position. Manage the exit directly on Kalshi.`,
+            note:`Confirmed on Kalshi: this DID fill (${_match.count} contract(s) on ${_match.side.toUpperCase()}). Auto-exec lost track of the fill, so stop-loss/take-profit/trailing-stop will NOT manage this position. Use Exit Position below to close it, or manage it directly on Kalshi.`,
           });
         }else{
           // V13.4.328: SAFETY FIX. "No position under the tracked ticker" is
@@ -46684,7 +46704,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             taraCount:0,
             kalshiCount:_match.count,
             side:_match.side,
-            note:`Kalshi shows ${_match.count} ${_match.side.toUpperCase()} on the active window — Tara doesn't know about this. Either log it via ENTERED ${_match.side==='yes'?'UP':'DOWN'} + Real Kalshi fill, or close on Kalshi to clear`,
+            note:`Kalshi shows ${_match.count} ${_match.side.toUpperCase()} on the active window — Tara doesn't know about this. Use Exit Position below to close it, log it via ENTERED ${_match.side==='yes'?'UP':'DOWN'} + Real Kalshi fill, or close on Kalshi directly.`,
           });
         }
       }
@@ -53876,7 +53896,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               fixed a false-positive on dry-run fills). */}
           <PositionReconciliationBanner positionReconciliation={positionReconciliation}
             onRetryNow={()=>_manualReconcileNowRef.current&&_manualReconcileNowRef.current()}
-            onExitNow={()=>_runExit('manual-user-exit')}/>
+            onExitNow={()=>{
+              // V13.4.344: 'unknown-resolved-filled' and 'unknown-to-tara' are
+              //   the two drift kinds where Kalshi has ALREADY confirmed one
+              //   specific real, open position (ticker+side+count) that
+              //   autoOrderState never reached status:'filled' for -- exactly
+              //   the "lost tracking" case. Build the override _runExit needs
+              //   directly from that confirmed data instead of relying on
+              //   the (here, wrong-shaped) real autoOrderState. Every other
+              //   drift kind (phantom, count-mismatch, ticker-mismatch) is
+              //   either already correctly handled by real autoOrderState or
+              //   is genuinely ambiguous about WHICH ticker to close -- left
+              //   on the no-override path, same as before.
+              const _exitable=(positionReconciliation?.driftDetails||[])
+                .find(d=>(d.kind==='unknown-resolved-filled'||d.kind==='unknown-to-tara')&&d.ticker&&d.kalshiCount>0);
+              const _override=_exitable?{
+                status:'filled',
+                dir:_exitable.side==='yes'?'UP':'DOWN',
+                ticker:_exitable.ticker,
+                filledCount:_exitable.kalshiCount,
+                dryRun:false,
+                filledAtCents:null,
+                at:Date.now(),
+              }:null;
+              return _runExit('manual-user-exit',_override);
+            }}/>
           {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
               numbered stages, always present. Replaces the scattered TARA'S CALL
               headline + TRADE COACH + auto-exec status that all described the same
