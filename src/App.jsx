@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.345-entry-writes-self-sufficient';
-const TARA_VERSION_DISPLAY='Tara 13.4.345';
+const BASELINE_VERSION='2026.09.11-v13.4.346-entry-retry-after-nofill';
+const TARA_VERSION_DISPLAY='Tara 13.4.346';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41897,6 +41897,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     const _ledgerKey=(idx.e.asset||'BTC')+'|'+idx.e.windowId;
                     const _ledger=(typeof _execSettlementLedgerRef!=='undefined')?_execSettlementLedgerRef.current[_ledgerKey]:null;
                     if(!_ledger)return{};
+                    // V13.4.346: a failed-attempt-only ledger entry (see the
+                    //   entry-ladder's no-fill branch) has no fill data to
+                    //   compute P&L from at all -- stamp that a real attempt
+                    //   was made and why it didn't fill, so this is finally
+                    //   distinguishable from "auto-exec never even tried,"
+                    //   which used to look identical (both: no autoExec field).
+                    if(_ledger.filled===false){
+                      return{
+                        autoExecAttempted:true,
+                        autoExecAttempts:_ledger.attempts||null,
+                        autoExecLastReason:_ledger.lastReason||null,
+                      };
+                    }
                     let _realized=null;
                     if(_ledger.exitedAt!=null&&_ledger.realizedPnLDollars!=null){
                       // Closed early (trailing stop / take-profit / cut-loss / time
@@ -46037,17 +46050,59 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   "go check Kalshi directly," not a normal-looking error banner
         //   that reads as "nothing happened, 0 contracts."
         const _statusUnknown=res.reason==='unknown-verify-kalshi-directly';
-        // V13.4.345: SAME FIX AS THE FILLED WRITE BELOW -- see that comment.
-        //   This is the write path v343/v344's drift-recovery banner exists
-        //   for (status:'unknown'/'error'); if THIS write loses ticker/dir
-        //   to the identical race, the position becomes invisible to
-        //   _computeDrift too (its guard requires _aos.ticker), not just
-        //   hard for the exit button to reach.
+        // V13.4.346: THE ACTUAL "auto-exec doesn't place orders" bug. This
+        //   branch already sets status:'error' specifically so the
+        //   order-in-flight gate above (`st!=='error'`) lets a FUTURE call
+        //   retry -- but _entryFiredForRef.current was set unconditionally
+        //   at the top of this attempt and NEVER reset anywhere in the file
+        //   (confirmed by grep: exactly 2 references, the check and this one
+        //   set). The already-fired check runs BEFORE the order-in-flight
+        //   check and has no concept of success vs failure, so it permanently
+        //   blocked every later tick of the 2s auto-exec timer for this exact
+        //   lock regardless of what happened here -- a confirmed clean
+        //   no-fill (price ran away from the ladder, exactly the "KALSHI
+        //   ERROR ... no-fill" case reported live) got exactly ONE attempt
+        //   per window, ever, then silent permanent giving-up for the
+        //   remaining ~15 minutes even if price came back to a fillable
+        //   level seconds later. This is almost certainly why most committed
+        //   calls never produced a real order at all: not a fill-tracking
+        //   loss, an attempt that failed once and was never allowed to try
+        //   again. Reset ONLY on a CONFIRMED no-fill (_statusUnknown false)
+        //   -- deliberately NOT on 'unknown', where the original order might
+        //   have actually filled and a retry would risk a real double-fill.
+        //   This mirrors the order-in-flight gate's own existing distinction
+        //   exactly; it was just never applied here too.
+        if(!_statusUnknown)_entryFiredForRef.current=null;
         setAutoOrderState(prev=>Object.assign({},prev||{},{
           dir,ticker,dryRun,
           status:_statusUnknown?'unknown':'error',
           reason:res.reason,orderId:res.orderId||null,at:Date.now(),
+          // V13.4.346: durable attempt record. Until now a failed attempt
+          //   left NO trace in taraCallLog -- only a completed round trip
+          //   (status:'exited', which stamps autoExec below) was ever
+          //   visible after the fact, so "never attempted" and "attempted,
+          //   no-fill" were indistinguishable from the log alone (the exact
+          //   ambiguity flagged live tonight). attemptCount/lastAttemptReason
+          //   persist across retries via the prev spread above.
+          attemptCount:(Number(prev&&prev.attemptCount)||0)+1,
+          lastAttemptReason:res.reason,
         }));
+        // V13.4.346: mirror the success-path ledger write (below) so a
+        //   FAILED attempt is ALSO durably visible on the settled taraCallLog
+        //   entry, not just in the ephemeral live autoOrderState above --
+        //   otherwise this fix's own effect (retries actually happening now)
+        //   would be invisible in the exported log the same way the original
+        //   bug was. filled:false is what the settlement-merge reader below
+        //   checks to distinguish this from a real fill.
+        if(lock&&lock.windowId){
+          const _prevAttempt=_execSettlementLedgerRef.current['BTC|'+lock.windowId]||{};
+          _execSettlementLedgerRef.current['BTC|'+lock.windowId]={
+            ..._prevAttempt,
+            filled:false,dir,dryRun,
+            attempts:(Number(_prevAttempt.attempts)||0)+1,
+            lastReason:res.reason,lastAttemptAt:Date.now(),
+          };
+        }
         return res;
       }
       const filledAt=res.rung?res.rung.priceCents:costCents;
@@ -46088,7 +46143,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   by this window's id so it survives past this position even after
       //   autoOrderState is overwritten by the next window.
       if(lock&&lock.windowId){
+        const _priorAttempts=Number((_execSettlementLedgerRef.current['BTC|'+lock.windowId]||{}).attempts)||0;
         _execSettlementLedgerRef.current['BTC|'+lock.windowId]={
+          filled:true, // V13.4.346: explicit, so the reader below can tell this
+                       //   apart from a failed-attempt-only record (filled:false)
+          attempts:_priorAttempts+1, // carries forward any earlier no-fill retries
           dir,filledCount:_execFilledCount,filledAtCents:filledAt,
           stakeDollars:(filledAt*_execFilledCount)/100,
           dryRun,enteredAt:Date.now(),
