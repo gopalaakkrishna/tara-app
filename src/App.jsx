@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.348-entry-ladder-off';
-const TARA_VERSION_DISPLAY='Tara 13.4.348';
+const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
+const TARA_VERSION_DISPLAY='Tara 13.4.349';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46003,6 +46003,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const s=autoExecSettings||{};
     if(!s.enabled)return{ok:false,reason:'disarmed'};
     if(killSwitchEngaged)return{ok:false,reason:'kill-switch'};
+    // V13.4.349: THE REAL loss-streak cooldown gate. The V13.4.347 check
+    //   lives on the `taraCall` object's post-processor chain -- but THIS
+    //   function (the one that actually calls kalshiPlaceOrder) reads
+    //   taraCallSnapshotRef directly a few lines below (see _signalSource),
+    //   a separate commit pipeline `taraCall` never feeds into. Confirmed
+    //   live: a real DOWN lock at 42c filled with the 347 gates already
+    //   deployed, because they were gating an object nothing here reads.
+    //   This is the one chokepoint that moves real money regardless of
+    //   which upstream mechanism (taraCall, the snapshot/tier system, or
+    //   the engine lock) decided the direction, so the gate belongs here,
+    //   not upstream of it. Off-switch shared with the 347 gate:
+    //   localStorage 'taraLossCooldownGate'='off'.
+    try{
+      if(localStorage.getItem('taraLossCooldownGate')!=='off'&&_lossCooldownRef.current.windowsRemaining>0){
+        return{ok:false,reason:'loss-streak-cooldown:'+_lossCooldownRef.current.windowsRemaining+'-windows-left'};
+      }
+    }catch(_){}
     // V13.4.251: there is NO daily-loss, trades-per-day or loss-streak check
     //   here, and none anywhere else either -- maxDailyLoss,
     //   maxAutoTradesPerDay and autoExecCooldownUntil are never compared
@@ -46063,6 +46080,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // Executable cost per contract on the side we are actually taking.
     const costCents=_execCostCents(dir,30000);
     if(costCents==null||!_quoteUsable(_kalshiQuote))return{ok:false,reason:'no-usable-quote'};
+    // V13.4.349: THE REAL cost-band gate -- see the loss-cooldown comment
+    //   above for why this needs to live here and not (only) on `taraCall`.
+    //   costCents is already the live, direction-aware executable cost on
+    //   the side actually being taken (_execCostCents' own job) -- gating
+    //   HERE, at the moment of attempting the order, is more correct than
+    //   the lock-time price anyway, since it's the exact number that
+    //   decides what gets paid. Off-switch/override shared with the 347
+    //   gate: localStorage 'taraCostBandGate'/'taraCostBandMin'/'taraCostBandMax'.
+    try{
+      if(localStorage.getItem('taraCostBandGate')!=='off'){
+        const _rcbMin=(function(){try{const v=parseFloat(localStorage.getItem('taraCostBandMin'));return(Number.isFinite(v)&&v>=0&&v<100)?v:44;}catch(_){return 44;}})();
+        const _rcbMax=(function(){try{const v=parseFloat(localStorage.getItem('taraCostBandMax'));return(Number.isFinite(v)&&v>0&&v<=100)?v:77;}catch(_){return 77;}})();
+        if(costCents<_rcbMin||costCents>_rcbMax){
+          return{ok:false,reason:'cost-band:'+costCents.toFixed(0)+'c-outside-'+_rcbMin.toFixed(0)+'-'+_rcbMax.toFixed(0)};
+        }
+      }
+    }catch(_){}
     const ticker=_kalshiQuote&&_kalshiQuote.ticker;
     if(!ticker)return{ok:false,reason:'no-ticker'};
 
