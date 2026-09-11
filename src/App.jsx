@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.344-recover-lost-tracking-exit';
-const TARA_VERSION_DISPLAY='Tara 13.4.344';
+const BASELINE_VERSION='2026.09.11-v13.4.345-entry-writes-self-sufficient';
+const TARA_VERSION_DISPLAY='Tara 13.4.345';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46013,6 +46013,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           return !l||l.dir!==dir;
         },
         onRung:(rung)=>setAutoOrderState(prev=>Object.assign({},prev||{},{
+          // V13.4.345: dir/ticker/dryRun restated from THIS closure's own
+          //   scope, not left to `prev` to carry forward -- see the fill/
+          //   error writes below for why.
+          dir,ticker,dryRun,
           status:rung.takesSpread?'placing':'resting',
           rungCents:rung.priceCents,takesSpread:!!rung.takesSpread,step:rung.step,
           // V13.4.291: the ladder's actual walk. entryLadderPath and entryAttempts
@@ -46033,7 +46037,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   "go check Kalshi directly," not a normal-looking error banner
         //   that reads as "nothing happened, 0 contracts."
         const _statusUnknown=res.reason==='unknown-verify-kalshi-directly';
+        // V13.4.345: SAME FIX AS THE FILLED WRITE BELOW -- see that comment.
+        //   This is the write path v343/v344's drift-recovery banner exists
+        //   for (status:'unknown'/'error'); if THIS write loses ticker/dir
+        //   to the identical race, the position becomes invisible to
+        //   _computeDrift too (its guard requires _aos.ticker), not just
+        //   hard for the exit button to reach.
         setAutoOrderState(prev=>Object.assign({},prev||{},{
+          dir,ticker,dryRun,
           status:_statusUnknown?'unknown':'error',
           reason:res.reason,orderId:res.orderId||null,at:Date.now(),
         }));
@@ -46041,8 +46052,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
       const filledAt=res.rung?res.rung.priceCents:costCents;
       const _execFilledCount=(res.normalized&&res.normalized.filledCount)||Number(res.order&&res.order.count)||0;
+      // V13.4.345: dir/ticker restated explicitly here rather than left to
+      //   `prev` to carry forward. Flagged as a real, unconfirmed risk back
+      //   in v13.4.331 and never actually fixed: the window-rollover cleanup
+      //   effect calls setAutoOrderState(null) unconditionally on every
+      //   window change (~line 42217), with no check for an in-flight entry.
+      //   If that fires between the placement-time write (which DOES set
+      //   dir/ticker explicitly, a few lines up) and this fill callback,
+      //   `prev` is null here and the merge would have produced a
+      //   status:'filled' record silently missing both fields -- exactly
+      //   the shape _computeDrift's own guard (`&&_aos.ticker`) skips over
+      //   entirely, hiding a real fill from reconciliation with zero
+      //   warning. dir/ticker/dryRun are already sitting in this exact
+      //   closure (used two lines above for kalshiRunEntryLadder's own
+      //   call) -- restating them costs nothing and makes every write in
+      //   this function self-sufficient regardless of what `prev` holds.
       setAutoOrderState(prev=>Object.assign({},prev||{},{
-        status:'filled',dryRun,order:res.order,
+        dir,ticker,status:'filled',dryRun,order:res.order,
         filledCount:_execFilledCount,
         filledAtCents:filledAt,
         tookSpread:!!(res.rung&&res.rung.takesSpread),
