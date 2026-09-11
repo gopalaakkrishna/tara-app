@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.342-fast-stale-pending-sweep';
-const TARA_VERSION_DISPLAY='Tara 13.4.342';
+const BASELINE_VERSION='2026.09.11-v13.4.343-drift-banner-retry-exit';
+const TARA_VERSION_DISPLAY='Tara 13.4.343';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15320,8 +15320,39 @@ function QualityGateCard({qualityGate,regime,session}){
 //     - unknown-to-tara: Kalshi has a position Tara doesn't know about
 //   Each line shows a concise action hint. Dismissable for the rest of this
 //   poll cycle (next poll will re-render if drift persists).
-function PositionReconciliationBanner({positionReconciliation}){
+function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitNow}){
   const[dismissedAt,setDismissedAt]=React.useState(0);
+  // V13.4.343: manual retry + manual exit. Retry re-runs the exact same
+  //   check the 30s poll does (onRetryNow), so "checking" here just means
+  //   "a check is in flight" -- the banner itself refreshes from the real
+  //   lastCheckAt/driftDetails once it resolves. Exit is two-click armed
+  //   (matches this app's existing ARMED/LIVE language elsewhere) so a
+  //   stray click can't fire a real closing order.
+  const[retrying,setRetrying]=React.useState(false);
+  const[exitArmed,setExitArmed]=React.useState(false);
+  const[exitBusy,setExitBusy]=React.useState(false);
+  const[exitResult,setExitResult]=React.useState(null);
+  const _handleRetry=()=>{
+    if(retrying||!onRetryNow)return;
+    setRetrying(true);
+    try{onRetryNow();}catch(_){}
+    setTimeout(()=>setRetrying(false),2500);
+  };
+  const _handleExitClick=()=>{
+    if(exitBusy)return;
+    if(!exitArmed){
+      setExitArmed(true);
+      setTimeout(()=>setExitArmed(false),4000);
+      return;
+    }
+    setExitArmed(false);
+    setExitBusy(true);
+    setExitResult(null);
+    Promise.resolve(onExitNow?.())
+      .then(r=>setExitResult(r||{ok:false,reason:'no-handler'}))
+      .catch(e=>setExitResult({ok:false,reason:String(e?.message||e)}))
+      .finally(()=>setExitBusy(false));
+  };
   const _rec=positionReconciliation;
   if(!_rec||_rec.status!=='drift'||!Array.isArray(_rec.driftDetails)||_rec.driftDetails.length===0)return null;
   // If user dismissed this poll's banner, suppress until next poll arrives
@@ -15359,13 +15390,25 @@ function PositionReconciliationBanner({positionReconciliation}){
         <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:'#E8455E'}}>
           ⚠ Position drift detected
         </span>
-        <button
-          type="button"
-          onClick={()=>setDismissedAt(Date.now())}
-          className="text-[10px] hover:opacity-100 transition-opacity"
-          style={{color:'rgba(237,237,237,0.55)',opacity:0.7,background:'none',border:'none',cursor:'pointer',padding:0}}
-          title="dismiss until next poll"
-        >dismiss</button>
+        <div className="flex items-center gap-2.5">
+          {onRetryNow&&(
+            <button
+              type="button"
+              onClick={_handleRetry}
+              disabled={retrying}
+              className="text-[10px] hover:opacity-100 transition-opacity"
+              style={{color:'rgba(237,237,237,0.55)',opacity:retrying?0.4:0.7,background:'none',border:'none',cursor:retrying?'default':'pointer',padding:0}}
+              title="run this check again now, instead of waiting for the next poll"
+            >{retrying?'checking…':'↻ retry'}</button>
+          )}
+          <button
+            type="button"
+            onClick={()=>setDismissedAt(Date.now())}
+            className="text-[10px] hover:opacity-100 transition-opacity"
+            style={{color:'rgba(237,237,237,0.55)',opacity:0.7,background:'none',border:'none',cursor:'pointer',padding:0}}
+            title="dismiss until next poll"
+          >dismiss</button>
+        </div>
       </div>
       <div className="text-[10px] mb-1.5 leading-relaxed" style={{color:'rgba(237,237,237,0.65)'}}>
         Tara's tracked position{_rec.driftDetails.length===1?'':'s'} {_rec.driftDetails.length===1?'doesn\'t':'don\'t'} match what Kalshi shows. Last checked {Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.
@@ -15386,6 +15429,31 @@ function PositionReconciliationBanner({positionReconciliation}){
       <div className="text-[9px] mt-1.5" style={{color:'rgba(237,237,237,0.45)'}}>
         Full diff in console: <code style={{color:'rgba(237,237,237,0.65)'}}>{'window.__taraPositionReconciliation()'}</code>
       </div>
+      {onExitNow&&(
+        <div className="mt-2 pt-2" style={{borderTop:'1px solid rgba(232,69,94,0.2)'}}>
+          <button
+            type="button"
+            onClick={_handleExitClick}
+            disabled={exitBusy}
+            className="w-full py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-all"
+            style={exitBusy
+              ?{background:'rgba(237,237,237,0.08)',color:'rgba(237,237,237,0.4)',border:'1px solid rgba(237,237,237,0.15)',cursor:'default'}
+              :exitArmed
+              ?{background:'#E8455E',color:'#fff',border:'1px solid #E8455E',cursor:'pointer'}
+              :{background:'rgba(232,69,94,0.12)',color:'#E8455E',border:'1px solid rgba(232,69,94,0.4)',cursor:'pointer'}}
+            title="places a real closing order against Tara's tracked position, if one exists"
+          >{exitBusy?'exiting…':exitArmed?'tap again to confirm exit':'exit position'}</button>
+          {exitResult&&(
+            <div className="text-[10px] mt-1 leading-relaxed" style={{color:exitResult.ok?'#23B981':'rgba(237,237,237,0.65)'}}>
+              {exitResult.ok
+                ?'Exit order placed and confirmed filled.'
+                :exitResult.reason==='no-position'
+                ?'Nothing to exit — no tracked filled position for this window.'
+                :`Exit did not complete: ${exitResult.reason}`}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -46086,6 +46154,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   present moments later on Kalshi's own site -- the ticker/side logic
   //   from v328 was correct and ran as designed, the missing piece was time.
   const _driftMissTrackerRef=useRef({});
+  // V13.4.343: holds the reconciliation poll's own `_tick` function so the
+  //   drift banner's manual "retry" button can trigger the SAME check the
+  //   30s timer runs, on demand -- not a second, divergent implementation.
+  //   Assigned where `_tick` is defined below; read only from the button.
+  const _manualReconcileNowRef=useRef(null);
   const _runExit=useCallback(async(why)=>{
     if(_exitBusyRef.current)return{ok:false,reason:'busy'};
     const st=autoOrderState;
@@ -46663,8 +46736,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // First check after 5s (give the app time to settle), then every 30s
     const _firstHandle=setTimeout(_tick,5000);
     const _intervalHandle=setInterval(_tick,30000);
+    // V13.4.343: expose this exact check for the drift banner's manual retry.
+    _manualReconcileNowRef.current=_tick;
     return ()=>{
       _stopped=true;
+      _manualReconcileNowRef.current=null;
       clearTimeout(_firstHandle);
       clearInterval(_intervalHandle);
     };
@@ -53798,7 +53874,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               auto-exec: flags when Tara's tracked position doesn't match Kalshi's
               actual book. Shows ONLY when the 30s poll detects drift (v13.4.319
               fixed a false-positive on dry-run fills). */}
-          <PositionReconciliationBanner positionReconciliation={positionReconciliation}/>
+          <PositionReconciliationBanner positionReconciliation={positionReconciliation}
+            onRetryNow={()=>_manualReconcileNowRef.current&&_manualReconcileNowRef.current()}
+            onExitNow={()=>_runExit('manual-user-exit')}/>
           {/* V13.4.268: THIS TRADE -- the card from the mockup. One trade, three
               numbered stages, always present. Replaces the scattered TARA'S CALL
               headline + TRADE COACH + auto-exec status that all described the same
