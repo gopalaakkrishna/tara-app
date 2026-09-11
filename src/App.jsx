@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.346-entry-retry-after-nofill';
-const TARA_VERSION_DISPLAY='Tara 13.4.346';
+const BASELINE_VERSION='2026.09.11-v13.4.347-costband-and-loss-cooldown';
+const TARA_VERSION_DISPLAY='Tara 13.4.347';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35561,6 +35561,14 @@ function TaraApp(){
   //   this to force SEARCH mode for 5s after rollover, preventing stale-analysis
   //   instant-lock on the new window.
   const _rolloverGraceRef=useRef(0);
+  // V13.4.347: loss-streak cooldown, explicit user request 2026-09-11 ("a
+  //   cooldown of 2 windows where tara's call lock sits out after 2 losses
+  //   in a row"). windowsRemaining counts down by 1 at every window
+  //   rollover (below); triggeredForId is the settled id of the most
+  //   recent loss that already started a cooldown, so re-checking the same
+  //   still-most-recent pair on every re-render doesn't re-arm it forever.
+  //   Read from the taraCall post-processor cascade further down.
+  const _lossCooldownRef=useRef({windowsRemaining:0,triggeredForId:null});
   // V9.2.2: ML model state — declared here, training effect runs after taraCallLog is available (below).
   const[taraMLModel,setTaraMLModel]=useState(()=>{
     try{
@@ -36384,6 +36392,24 @@ function TaraApp(){
   },[taraCallLog]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
+  // V13.4.347: arm the loss-streak cooldown when the two MOST RECENT settled
+  //   (WIN/LOSS only -- SIT_OUT/NO_TRADE/pending entries are skipped, they
+  //   are neither a win nor a loss) results are both LOSS. triggeredForId
+  //   guards against re-arming on every re-render while that same pair
+  //   stays the most recent -- only a genuinely NEW settled loss can arm it
+  //   again. If a loss lands right after a cooldown ends, this correctly
+  //   re-arms (the new loss + the one before it are still "2 in a row").
+  useEffect(()=>{
+    const _settled=taraCallLog
+      .filter(e=>e&&(e.dir==='UP'||e.dir==='DOWN')&&(e.result==='WIN'||e.result==='LOSS'))
+      .sort((a,b)=>b.id-a.id);
+    if(_settled.length<2)return;
+    const[_latest,_prev]=_settled;
+    if(_latest.result==='LOSS'&&_prev.result==='LOSS'&&_lossCooldownRef.current.triggeredForId!==_latest.id){
+      _lossCooldownRef.current={windowsRemaining:2,triggeredForId:_latest.id};
+      try{console.info('[V13.4.347] loss-streak cooldown armed -- 2 losses in a row, sitting out the next 2 windows');}catch(_){}
+    }
+  },[taraCallLog]);
   // V8.1: Track if we have user-action writes pending pre-hydration. If true, force a
   //   write the moment cloudWatch hydrates so those entries don't get silently dropped.
   const _logWritePendingRef=useRef(false);
@@ -42245,6 +42271,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   5 seconds after rollover — prevents stale analysis from instant-locking the
         //   new window before fresh price data arrives.
         _rolloverGraceRef.current=Date.now();
+        // V13.4.347: loss-streak cooldown counts down by exactly one window
+        //   per real rollover -- this effect fires once per window
+        //   transition, which is exactly the unit "2 windows" means.
+        if(_lossCooldownRef.current.windowsRemaining>0){
+          _lossCooldownRef.current={..._lossCooldownRef.current,windowsRemaining:_lossCooldownRef.current.windowsRemaining-1};
+        }
         }},[timeState.nextWindowMs,currentPrice,windowType,userPosition]);
   // V10.7.60: removed targetMargin + adaptiveWeights from rollover deps.
   //   targetMargin changes every Kalshi poll (every 1.5s) — was re-running the rollover
@@ -45075,6 +45107,60 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           taraCall._decentOddsKEntry=_kEntry;
         }
       }
+    }
+  }catch(_){}
+
+  // V13.4.347: EXPLICIT COST-BAND LOCK, direct user request 2026-09-11 --
+  //   "only lock between 44-77c... it can lock whenever in the window at
+  //   her own confidence." No timing restriction at all, deliberately --
+  //   this ONLY gates on the direction-aware entry price. Independent of
+  //   the entry-quality band above (currently fully inert: NO_ENTRY_GATES
+  //   forces its min/max to 0/100) -- not reusing that machinery on
+  //   purpose, since NO_ENTRY_GATES also controls unrelated edge-watch/EV
+  //   gates this request never asked to re-enable. Runs after the V10.6.8
+  //   force-commit like every other gate in this cascade, so it needs no
+  //   whitelist entry there -- it only ever converts UP/DOWN to SIT_OUT,
+  //   never the other way. Off-switch: localStorage 'taraCostBandGate'='off'.
+  //   Override band: 'taraCostBandMin'/'taraCostBandMax' (cents).
+  try{
+    const _cbOn=(function(){try{return localStorage.getItem('taraCostBandGate')!=='off';}catch(_){return true;}})();
+    if(_cbOn&&taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
+      const _cbEntry=(analysis&&typeof analysis.kalshiAtLock==='number')?analysis.kalshiAtLock:null;
+      if(_cbEntry!=null){
+        const _cbMin=(function(){try{const v=parseFloat(localStorage.getItem('taraCostBandMin'));return(Number.isFinite(v)&&v>=0&&v<100)?v:44;}catch(_){return 44;}})();
+        const _cbMax=(function(){try{const v=parseFloat(localStorage.getItem('taraCostBandMax'));return(Number.isFinite(v)&&v>0&&v<=100)?v:77;}catch(_){return 77;}})();
+        // Direction-aware: kalshiAtLock is the raw Kalshi YES price, the
+        //   entry cost ONLY for an UP lock -- a DOWN lock's real cost is
+        //   100-kalshiAtLock (the exact pricing bug this file already
+        //   fixed once before, V13.4.77's own comment above documents it).
+        const _cbCost=(taraCall.call==='UP')?_cbEntry:(100-_cbEntry);
+        if(_cbCost<_cbMin||_cbCost>_cbMax){
+          taraCall.call='SIT_OUT';
+          taraCall.reason='[V13.4.347] cost band '+_cbMin.toFixed(0)+'-'+_cbMax.toFixed(0)+'c: entry '+_cbCost.toFixed(0)+'c is outside the band. Waiting for a price inside it.';
+          taraCall.noGoCategory='cost-band-sitout';
+          taraCall._costBandGated=true;
+          taraCall._costBandEntry=_cbCost;
+        }
+      }
+    }
+  }catch(_){}
+
+  // V13.4.347: LOSS-STREAK COOLDOWN, direct user request 2026-09-11 -- "a
+  //   cooldown of 2 windows where tara's call lock sits out after 2 losses
+  //   in a row." _lossCooldownRef is armed by the taraCallLog watcher and
+  //   counted down by exactly one per real window rollover (both declared
+  //   near _rolloverGraceRef / taraCallLogRef). Same "runs after the
+  //   force-commit, only ever downgrades UP/DOWN to SIT_OUT" shape as
+  //   every other gate in this cascade -- no whitelist entry needed.
+  //   Off-switch: localStorage 'taraLossCooldownGate'='off'.
+  try{
+    const _lcOn=(function(){try{return localStorage.getItem('taraLossCooldownGate')!=='off';}catch(_){return true;}})();
+    if(_lcOn&&taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')&&_lossCooldownRef.current.windowsRemaining>0){
+      taraCall.call='SIT_OUT';
+      taraCall.reason='[V13.4.347] loss-streak cooldown: 2 losses in a row, sitting out for '+_lossCooldownRef.current.windowsRemaining+' more window(s).';
+      taraCall.noGoCategory='loss-streak-cooldown';
+      taraCall._lossCooldownGated=true;
+      taraCall._lossCooldownWindowsRemaining=_lossCooldownRef.current.windowsRemaining;
     }
   }catch(_){}
 
