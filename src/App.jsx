@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.347-costband-and-loss-cooldown';
-const TARA_VERSION_DISPLAY='Tara 13.4.347';
+const BASELINE_VERSION='2026.09.11-v13.4.348-entry-ladder-off';
+const TARA_VERSION_DISPLAY='Tara 13.4.348';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35050,6 +35050,21 @@ function TaraApp(){
                 try{console.info('[V13.4.249] entry ladder ON by default — rest instead of cross (V13.4.228: +2.85c/contract swing)');}catch(_e){}
               }
               localStorage.setItem('tara_v13_4_249_ladder_default_applied','1');
+            }
+            // V13.4.348: explicit user request 2026-09-11 -- turn the ladder
+            //   off. One-time FORCED flip, same shape as the V13.4.249
+            //   migration right above (which is exactly why a plain code
+            //   default change would not have worked here: this account's
+            //   autoExecSettings already carries a real, persisted true
+            //   value from that migration, and the normal fallback path
+            //   above only fills in when a value is missing -- it never
+            //   overrides one that's already set). Runs once, then respects
+            //   whatever the user chooses afterward, including turning it
+            //   back on via the Trading Settings checkbox.
+            if(!localStorage.getItem('tara_v13_4_348_ladder_disabled_applied')){
+              _v=false;
+              try{console.info('[V13.4.348] entry ladder OFF per explicit request -- takes the offer immediately instead of resting for a better price');}catch(_e){}
+              localStorage.setItem('tara_v13_4_348_ladder_disabled_applied','1');
             }
           }catch(_e){}
           return _v;
