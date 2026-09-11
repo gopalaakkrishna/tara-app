@@ -5807,8 +5807,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.09.11-v13.4.341-cold-start-warmup-gate';
-const TARA_VERSION_DISPLAY='Tara 13.4.341';
+const BASELINE_VERSION='2026.09.11-v13.4.342-fast-stale-pending-sweep';
+const TARA_VERSION_DISPLAY='Tara 13.4.342';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37073,10 +37073,14 @@ function TaraApp(){
   //   device, no matter how many times the app was reopened. This function
   //   only reads refs (taraCallLogRef, pendingResolutionRef), so it is safe
   //   to call from either trigger.
-  const _scanStalePending=React.useCallback(()=>{
+  const _scanStalePending=React.useCallback((maxAgeMs)=>{
     // V8.1: Stale-pending resolver. Scan for entries that should have been
     //   resolved by now (window closed >15min ago, still pending). Queues them for the
     //   settlement fetcher. Fixes the 13-hour-old pending entries from user's call log.
+    // V13.4.342: maxAgeMs is now an optional override (default stays 15min)
+    //   so the 20s resolver interval below can ALSO call this with a much
+    //   shorter floor -- see that call site for why.
+    const _maxAge=Number.isFinite(maxAgeMs)&&maxAgeMs>0?maxAgeMs:15*60*1000;
     try{
       const _now=Date.now();
       const _stale=(taraCallLogRef.current||[]).filter(e=>{
@@ -37087,7 +37091,7 @@ function TaraApp(){
         const _winStart=e.windowId.match(/-(.+)$/)?.[1];
         if(!_winStart)return false;
         const _closeTime=new Date(_winStart).getTime()+_winMs;
-        return _now-_closeTime>15*60*1000; // >15min stale
+        return _now-_closeTime>_maxAge;
       });
       if(_stale.length>0&&pendingResolutionRef.current){
         // Add to settlement queue if not already there
@@ -41200,6 +41204,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   Falls back to local-feed result after 5 minutes of failed polling.
   useEffect(()=>{
     const resolverIv=setInterval(async()=>{
+      // V13.4.342: FAST STALE-PENDING SWEEP. _scanStalePending's OTHER two
+      //   triggers (mount+3s, Supabase cloud updates) don't guarantee a check
+      //   soon after _trySettle's own rollover-triggered ~68s poll gives up --
+      //   a directional call whose Kalshi strike lands at, say, 90s or a few
+      //   minutes post-close (well within Kalshi's normal range) sat fully
+      //   unattended for up to 15 minutes despite THIS SAME 20s interval
+      //   already running and able to resolve it immediately once queued.
+      //   90s floor is a safety buffer past _trySettle's own window (8s+12x5s
+      //   ≈68s) so the two mechanisms never race the same entry.
+      try{_scanStalePending(90000);}catch(_){}
       if(!pendingResolutionRef.current||pendingResolutionRef.current.length===0)return;
       const now=Date.now();
       // Process each pending resolution
