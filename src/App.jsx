@@ -5808,7 +5808,7 @@ const evaluateTradeTimingV1=(inputs)=>{
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
-const TARA_VERSION_DISPLAY='Tara 13.4.349';
+const TARA_VERSION_DISPLAY='Tara 13.4.350';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48282,7 +48282,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let _earlyLockFired=false;
     let _earlyLockTier=null;
     let _fastLockFired=false;
-    const _logSnapshotEntry=(snapshot)=>{
+    function _logSnapshotEntry(snapshot){
       // V13.4.127 attempted to wire up flipAtLock here -- turned out to be dead code.
       //   A separate, later object-literal construction site (the main automatic
       //   pipeline's entry builder, ~L42160) ALREADY captures this same data under a
