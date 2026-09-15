@@ -13,33 +13,23 @@ jobs:
   verify-live:
     runs-on: ubuntu-latest
     steps:
-      - name: Poll taracalls.pages.dev for v13.4.350 source fix
+      - name: Verify taracalls.pages.dev serves v13.4.350 source fix
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           base='https://taracalls.pages.dev'
-          for attempt in $(seq 1 36); do
-            stamp=$(date +%s)
-            echo "Attempt ${attempt}/36 at $(date -u +%FT%TZ)"
-            html=$(curl -fsS --retry 2 -H 'Cache-Control: no-cache' "${base}/?verify=${stamp}" || true)
-            asset=$(printf '%s' "$html" | grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' | head -n1 || true)
-            if [ -z "$asset" ]; then
-              echo '  Could not find Vite JS asset in live HTML.'
-              sleep 10
-              continue
-            fi
-            echo "  Live asset: ${asset}"
-            js=$(curl -fsS --retry 2 -H 'Cache-Control: no-cache' "${base}${asset}?verify=${stamp}" || true)
-            has_version=0
-            has_hoist=0
-            printf '%s' "$js" | grep -Fq 'Tara 13.4.350' && has_version=1 || true
-            printf '%s' "$js" | grep -Fq 'function _logSnapshotEntry(' && has_hoist=1 || true
-            echo "  Tara 13.4.350: ${has_version}; hoisted helper: ${has_hoist}"
-            if [ "$has_version" -eq 1 ] && [ "$has_hoist" -eq 1 ]; then
-              echo 'VERIFIED: Cloudflare is serving the repaired v13.4.350 bundle.'
-              exit 0
-            fi
-            sleep 10
-          done
-          echo 'Cloudflare did not serve the repaired bundle within 6 minutes.' >&2
-          exit 1
+          stamp=$(date +%s)
+          curl -fsS --retry 3 -H 'Cache-Control: no-cache' "${base}/?verify=${stamp}" -o /tmp/tara-index.html
+          asset=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' /tmp/tara-index.html | head -n1)
+          test -n "$asset"
+          echo "Live asset: ${asset}"
+          curl -fsS --retry 3 -H 'Cache-Control: no-cache' "${base}${asset}?verify=${stamp}" -o /tmp/tara-live.js
+          grep -Fq 'Tara 13.4.350' /tmp/tara-live.js
+          echo 'Verified version string: Tara 13.4.350'
+          grep -Fq 'function _logSnapshotEntry(' /tmp/tara-live.js
+          echo 'Verified hoisted helper: function _logSnapshotEntry(...)'
+          if grep -Fq "const _logSnapshotEntry=" /tmp/tara-live.js; then
+            echo 'Old TDZ-prone const declaration is still present in live bundle.' >&2
+            exit 1
+          fi
+          echo 'VERIFIED: Cloudflare is serving the repaired v13.4.350 bundle and the old TDZ declaration is absent.'
