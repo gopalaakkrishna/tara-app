@@ -2867,6 +2867,76 @@ const readOrderState=(s)=>{
   };
 };
 
+// V13.4.353 — readExchangePositionTruth: keep the user's Tara-follow marker,
+// AutoTrade's local lifecycle, and the exchange book as three different facts.
+// A local marker is useful for Tara's coaching, but it is never proof that a
+// Kalshi position exists. The control-room summaries must only call a position
+// OPEN when the latest successful exchange snapshot contains the expected
+// ticker/side/count. This helper is intentionally display-only: it does not
+// submit, cancel, retry, or mutate any live-money state.
+const readExchangePositionTruth=({positionReconciliation,autoOrderState,userPosition,manualKalshiEntry,activeTicker})=>{
+  const _rec=positionReconciliation||{};
+  const _details=Array.isArray(_rec.driftDetails)?_rec.driftDetails:[];
+  const _positions=Array.isArray(_rec.kalshiPositions)?_rec.kalshiPositions:null;
+  const _order=readOrderState(autoOrderState);
+  const _ticker=autoOrderState?.ticker||activeTicker||null;
+  const _side=autoOrderState?.dir==='UP'||manualKalshiEntry?.side==='UP'||userPosition==='UP'?'yes'
+    :autoOrderState?.dir==='DOWN'||manualKalshiEntry?.side==='DOWN'||userPosition==='DOWN'?'no':null;
+  const _hasSuccessfulPoll=!!(_rec.lastCheckAt>0&&_positions);
+  const _match=_hasSuccessfulPoll&&_ticker
+    ?_positions.find(p=>p&&p.ticker===_ticker&&Number(p.count)>0)||null
+    :null;
+  const _noFillConfirmed=_details.some(d=>d&&d.kind==='unknown-resolved-nofill')
+    ||(autoOrderState?.status==='no-fill'&&autoOrderState?.noFillConfirmed===true);
+  const _localExpectation=!!(userPosition||manualKalshiEntry||autoOrderState);
+  const _hasUnmanagedConfirmedFill=_details.some(d=>d&&(
+    d.kind==='unknown-resolved-filled'||d.kind==='unknown-to-tara'));
+
+  if(_rec.status==='error'){
+    return{state:'unknown',label:'UNKNOWN',tone:'warn',match:_match,count:0,
+      summary:'Exchange position check failed. Do not retry until the check is healthy.',
+      detail:_rec.lastErrorMsg||'Kalshi did not return a trustworthy position snapshot.'};
+  }
+  // A confirmed no-fill is a flat outcome, even though reconciliation keeps
+  // the green diagnostic detail visible for auditability.
+  if(_noFillConfirmed&&!_hasUnmanagedConfirmedFill&&!_match){
+    return{state:'flat',label:'FLAT · NO FILL',tone:'quiet',match:null,count:0,
+      summary:'Kalshi confirmed no position for this AutoTrade attempt.',
+      detail:'No duplicate retry is needed for this attempt.'};
+  }
+  const _pendingOnly=_details.length>0&&_details.every(d=>d&&(
+    d.kind==='phantom-auto-pending'||d.kind==='unknown-nofill-pending'));
+  if(_rec.status==='drift'&&_pendingOnly){
+    return{state:'checking',label:'CHECKING',tone:'warn',match:null,count:0,
+      summary:'Kalshi is being rechecked before Tara declares a fill or no-fill.',
+      detail:'This is a verification state, not a confirmed flat position or a retry signal.'};
+  }
+  if(_rec.status==='drift'&&_details.length>0){
+    const _count=_match?.count||_details.reduce((n,d)=>n+(Number(d?.kalshiCount)||0),0);
+    return{state:'reconcile',label:'RECONCILE',tone:'warn',match:_match,count:_count,
+      summary:'Tara and Kalshi disagree. Resolve the exchange truth before taking another action.',
+      detail:_details[0]?.note||'Position state is not safe to infer locally.'};
+  }
+  if(!_hasSuccessfulPoll){
+    return{state:_localExpectation?'checking':'unverified',label:_localExpectation?'CHECKING':'UNVERIFIED',tone:'warn',match:null,count:0,
+      summary:_localExpectation?'Waiting for the first successful exchange position check.':'No successful exchange position check has run yet.',
+      detail:'A Tara marker or order status is not exchange confirmation; no duplicate retry is authorized by this display.'};
+  }
+  if(_match&&(!_side||_match.side===_side)){
+    return{state:'open',label:'OPEN',tone:'live',match:_match,count:Number(_match.count)||0,
+      summary:`Kalshi confirms ${Number(_match.count)||0} ${_match.side==='yes'?'UP':'DOWN'} contract${Number(_match.count)===1?'':'s'} on this window.`,
+      detail:'Exchange position is the money truth; local Tara state is secondary.'};
+  }
+  if(_localExpectation&&(_order.status==='placing'||_order.status==='resting'||_order.status==='submitted'||_order.status==='partially_filled'||_order.status==='unknown'||_order.status==='filled'||_order.status==='exiting'||_order.status==='exit-pending')){
+    return{state:'checking',label:'CHECKING',tone:'warn',match:null,count:0,
+      summary:'Local AutoTrade state exists, but Kalshi has not confirmed the position in the latest snapshot.',
+      detail:'Keep the order under observation; do not place a duplicate order.'};
+  }
+  return{state:'flat',label:'FLAT',tone:'quiet',match:null,count:0,
+    summary:'Kalshi shows no open position for this window.',
+    detail:'This is a confirmed flat state from the latest successful exchange check.'};
+};
+
 // ═══════════════════════════════════════
 // ICONS
 // ═══════════════════════════════════════
@@ -10403,7 +10473,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
 //   controls, or AutoTrade settings. The important distinction is deliberate:
 //   Tara's committed lock is the record; AutoTrade is the execution layer; the
 //   exchange position/reconciliation state is the money-truth layer.
-const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosition,positionReconciliation,taraScorecards,todayData,timeState,windowType})=>{
+const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosition,positionReconciliation,manualKalshiEntry,activeTicker,taraScorecards,todayData,timeState,windowType})=>{
   const _snap=snapshot||null;
   const _lock=readLockState(_snap);
   const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
@@ -10411,7 +10481,8 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _autoOn=!!autoExecSettings?.enabled;
   const _autoLabel=_autoOn?(autoExecSettings?.dryRun===false?'ARMED · LIVE':'ARMED · DRY'):'OFF · SAFE';
   const _orderLabel=autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' ').toUpperCase():'WAITING';
-  const _positionLabel=userPosition?'OPEN':positionReconciliation?.status==='drift'?'RECONCILE':'FLAT';
+  const _positionTruth=readExchangePositionTruth({positionReconciliation,autoOrderState,userPosition,manualKalshiEntry,activeTicker});
+  const _positionLabel=_positionTruth.label;
   const _confidence=Number(_snap?.confidence??_snap?.posterior??taraCall?.confidence??0);
   const _edge=Number(_snap?.edgePts??_snap?.edge??taraCall?.edgePts??taraCall?.edge??0);
   const _edgeLabel=Number.isFinite(_edge)&&_edge!==0?`${_edge>0?'+':''}${Math.round(_edge)}pt`:'—';
@@ -10420,7 +10491,7 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _steps=[
     {n:'01',label:'Tara call',value:_callLabel,tone:_dir==='UP'?'up':_dir==='DOWN'?'down':'quiet'},
     {n:'02',label:'AutoTrade',value:_autoLabel,tone:_autoOn?'live':'quiet'},
-    {n:'03',label:'Position truth',value:_positionLabel,tone:_positionLabel==='OPEN'?'live':_positionLabel==='RECONCILE'?'warn':'quiet'},
+    {n:'03',label:'Position truth',value:_positionLabel,tone:_positionTruth.tone},
     {n:'04',label:'Record',value:_record.total?`${_record.total} windows`:'hourly + window log',tone:'quiet'},
   ];
   return(
@@ -10455,21 +10526,27 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
       <div className="tara-call-ledger__timeline">
         <span>OBSERVE</span><i>→</i><span>LEAN</span><i>→</i><b>LOCKED</b><i>→</i><span>SETTLE</span><i>→</i><span>{_window.toUpperCase()} RECORD</span>
       </div>
-      <div className="tara-call-ledger__details">
+       <div className="tara-call-ledger__details">
         <div>
           <h4>WHAT TARA LOCKED</h4>
           <strong>{_dir||'NO DIRECTION'}</strong>
           <span>BTC {_window} · {timeState?.nextWindow||'window active'}</span>
           <span>Decision gates remain visible in the live panels below.</span>
         </div>
-        <div>
-          <h4>RECORD TRUTH</h4>
+         <div>
+           <h4>RECORD TRUTH</h4>
           <span><b>Won</b><strong>{_record.wins}</strong></span>
           <span><b>Lost</b><strong className="is-down">{_record.losses}</strong></span>
           <span><b>Sat out</b><strong>{_record.sitouts}</strong></span>
-          <span><b>Scored</b><strong>{_record.scored||'—'}</strong></span>
-        </div>
-      </div>
+           <span><b>Scored</b><strong>{_record.scored||'—'}</strong></span>
+         </div>
+         <div>
+           <h4>EXCHANGE POSITION</h4>
+           <strong className={_positionTruth.state==='open'?'is-up':_positionTruth.tone==='warn'?'is-amber':''}>{_positionTruth.label}</strong>
+           <span>{_positionTruth.summary}</span>
+           <span>{_positionTruth.detail}</span>
+         </div>
+       </div>
       <div className="tara-page-brief__flow">
         {_steps.map(step=>(
           <div key={step.n} className={'tara-page-brief__step tara-page-brief__step--'+step.tone}>
@@ -10497,12 +10574,13 @@ const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow,act
   return <nav className="tara-workspace-nav" aria-label="Workspace views">{_items.map(([id,label])=><button key={id} onClick={()=>_click(id)} className={activeView===id?'is-active':''}>{label}</button>)}<button className={activeView==='brain'?'is-active':''} onClick={()=>{setActiveView('brain');setShowAnalytics(false);setShowBrain(true);}}>BRAIN</button></nav>;
 };
 
-const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,taraScorecards,windowType})=>{
+const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,manualKalshiEntry,activeTicker,taraScorecards,windowType})=>{
   const _auto=killSwitchEngaged?'KILLED · NEW ORDERS BLOCKED':autoExecSettings?.enabled?(autoExecSettings?.dryRun?'ARMED · DRY RUN':'ARMED · LIVE'):'DISARMED · SAFE';
   const _autoTone=killSwitchEngaged?'bad':autoExecSettings?.enabled?'ok':'muted';
   const _bank=Number(mission?.currentBankroll||mission?.startBankroll||0);
   const _risk=Number(autoExecSettings?.maxBetUsd||autoExecSettings?.betAmount||0);
-  const _position=userPosition?'OPEN':positionReconciliation?.status==='drift'?'RECONCILE':'FLAT';
+  const _positionTruth=readExchangePositionTruth({positionReconciliation,autoOrderState,userPosition,manualKalshiEntry,activeTicker});
+  const _position=_positionTruth.label;
   const _record=_taraRecordStats(taraScorecards?.[windowType]);
   const _recorded=_record.total;
   const _won=_record.wins;
@@ -10515,13 +10593,13 @@ const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradi
     <section className="tara-rail-card tara-rail-mission">
       <div className="tara-rail-card__head"><div><div className="tara-rail-kicker">AUTOTRADE MISSION</div><h2>Execution guardrails</h2></div><small>single control surface</small></div>
       <div className="tara-rail-arm"><div><strong className={'tone-'+_autoTone}>{_auto}</strong><small>AutoExecSimplePanel · safe mode</small></div><span className={'tara-rail-toggle '+(autoExecSettings?.enabled&&!killSwitchEngaged?'is-on':'')}><i/></span></div>
-      <div className="tara-rail-rows"><span>Mission bankroll <b>{_bank>0?`$${_bank.toFixed(2)}`:'not set'}</b></span><span>Risk per trade <b>{_risk>0?`$${_risk.toFixed(2)}`:'settings'}</b></span><span>Position state <b>{_position}</b></span><span>Entry gates <b className="tone-ok">reconciliation on</b></span></div>
+       <div className="tara-rail-rows"><span>Mission bankroll <b>{_bank>0?`$${_bank.toFixed(2)}`:'not set'}</b></span><span>Risk per trade <b>{_risk>0?`$${_risk.toFixed(2)}`:'settings'}</b></span><span>Position state <b>{_position}</b></span><span>Entry gates <b className="tone-ok">reconciliation on</b></span></div>
       <div className="tara-rail-riskbar">{Array.from({length:10},(_,i)=><i key={i} className={i<Math.ceil(Math.max(0,_riskScore)/10)?'is-hot':''}/>)}</div><div className="tara-rail-kicker">risk state · {_riskScore}/100 movement</div>
       <div className="tara-rail-actions"><button className="tara-rail-action" onClick={()=>setShowTradingSettings(true)}>CONFIGURE</button><button className="tara-rail-action tara-rail-action--secondary" onClick={()=>setShowTradingSettings(true)}>DRY RUN</button></div>
     </section>
     <section className="tara-rail-card">
       <div className="tara-rail-card__head"><div><div className="tara-rail-kicker">ALERT CENTER</div><h2>What needs attention</h2></div><small>live</small></div>
-      <div className="tara-rail-alert"><b className={positionReconciliation?.status==='drift'?'tone-bad':'tone-ok'}>{positionReconciliation?.status==='drift'?'△ Reconciliation required':'● Position truth'}</b><span>{positionReconciliation?.status==='drift'?'Exchange and tracked state disagree — retry remains blocked.':_position==='OPEN'?'Exchange position is open; no duplicate retry.':'No exchange position on this window.'}</span></div>
+       <div className="tara-rail-alert"><b className={_positionTruth.tone==='warn'?'tone-bad':_positionTruth.tone==='live'?'tone-ok':'tone-muted'}>{_positionTruth.state==='reconcile'?'△ Reconciliation required':_positionTruth.state==='open'?'● Exchange position confirmed':_positionTruth.state==='flat'?'● Position truth':'◌ Position check'}</b><span>{_positionTruth.summary} {_positionTruth.detail}</span></div>
       <div className="tara-rail-alert"><b className={_riskScore>=70?'tone-bad':_riskScore>=40?'tone-amber':'tone-ok'}>ϟ Movement risk</b><span>{_riskScore>=70?'Extreme movement risk.':_riskScore>=40?'Elevated movement risk.':'Normal movement risk.'} {_riskScore}/100.</span></div>
       <div className="tara-rail-alert"><b className="tone-muted">↕ AutoTrade</b><span>{autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' '):'No order lifecycle is active.'}</span></div>
     </section>
@@ -15529,13 +15607,20 @@ function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitN
     if(k==='unknown-nofill-pending')return 'verifying — recheck pending';
     if(k==='unknown-ticker-mismatch')return 'ticker mismatch — verify';
     if(k==='ticker-mismatch-auto')return 'ticker mismatch — verify';
+    if(k==='side-mismatch-auto')return 'side mismatch — verify';
     return k;
   };
+  const _isConfirmedNoFill=_rec.driftDetails.length>0&&_rec.driftDetails.every(d=>d&&d.kind==='unknown-resolved-nofill');
+  const _isPending=_rec.driftDetails.length>0&&_rec.driftDetails.every(d=>d&&(
+    d.kind==='phantom-auto-pending'||d.kind==='unknown-nofill-pending'));
+  const _bannerColor=_isConfirmedNoFill?'#23B981':_isPending?T2_SITOUT:'#E8455E';
+  const _bannerBg=_isConfirmedNoFill?'rgba(35,185,129,0.07)':_isPending?'rgba(212,162,76,0.08)':'rgba(232,69,94,0.08)';
+  const _bannerBorder=_isConfirmedNoFill?'rgba(35,185,129,0.28)':_isPending?'rgba(212,162,76,0.30)':'rgba(232,69,94,0.35)';
   return (
-    <div className="mb-2 p-2.5 rounded-lg" style={{background:'rgba(232,69,94,0.08)',border:'1px solid rgba(232,69,94,0.35)'}}>
+    <div className="mb-2 p-2.5 rounded-lg" style={{background:_bannerBg,border:`1px solid ${_bannerBorder}`}}>
       <div className="flex items-baseline justify-between mb-1.5">
-        <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:'#E8455E'}}>
-          ⚠ Position drift detected
+        <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:_bannerColor}}>
+          {_isConfirmedNoFill?'✓ No fill confirmed':_isPending?'◌ Position check pending':'⚠ Position drift detected'}
         </span>
         <div className="flex items-center gap-2.5">
           {onRetryNow&&(
@@ -15558,7 +15643,11 @@ function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitN
         </div>
       </div>
       <div className="text-[10px] mb-1.5 leading-relaxed" style={{color:'rgba(237,237,237,0.65)'}}>
-        Tara's tracked position{_rec.driftDetails.length===1?'':'s'} {_rec.driftDetails.length===1?'doesn\'t':'don\'t'} match what Kalshi shows. Last checked {Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.
+        {_isConfirmedNoFill
+          ?`Kalshi confirms this AutoTrade attempt did not create a live position. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`
+          :_isPending
+          ?`Kalshi is rechecking the position before Tara declares a fill or no-fill. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`
+          :`Tara's tracked position${_rec.driftDetails.length===1?'':'s'} ${_rec.driftDetails.length===1?'doesn\'t':'don\'t'} match what Kalshi shows. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`}
       </div>
       <div className="space-y-1.5">
         {_rec.driftDetails.map((d,i)=>(
@@ -15576,7 +15665,7 @@ function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitN
       <div className="text-[9px] mt-1.5" style={{color:'rgba(237,237,237,0.45)'}}>
         Full diff in console: <code style={{color:'rgba(237,237,237,0.65)'}}>{'window.__taraPositionReconciliation()'}</code>
       </div>
-      {onExitNow&&(
+      {onExitNow&&!_isConfirmedNoFill&&!_isPending&&(
         <div className="mt-2 pt-2" style={{borderTop:'1px solid rgba(232,69,94,0.2)'}}>
           <button
             type="button"
@@ -47096,7 +47185,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
         }else{
           _driftHit('phantom-auto:'+_aos.ticker);
-          if(_taraCount>0&&_match.count!==_taraCount){
+          const _expectedSide=_aos.side||(_aos.dir==='UP'?'yes':'no');
+          if(_expectedSide&&_match.side!==_expectedSide){
+            _details.push({
+              kind:'side-mismatch-auto',
+              ticker:_aos.ticker,
+              taraCount:_taraCount,
+              kalshiCount:_match.count,
+              side:_match.side,
+              note:`AutoTrade expects ${_expectedSide.toUpperCase()} on this ticker, but Kalshi shows ${_match.side.toUpperCase()}. Do not treat this as the intended position — verify the exchange position before any retry or exit.`,
+            });
+          }else if(_taraCount>0&&_match.count!==_taraCount){
             _details.push({
               kind:'count-mismatch-auto',
               ticker:_aos.ticker,
@@ -54453,6 +54552,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           autoOrderState={autoOrderState}
           userPosition={userPosition}
           positionReconciliation={positionReconciliation}
+          manualKalshiEntry={manualKalshiEntry}
+          activeTicker={kalshiActiveMarket?.ticker||null}
           taraScorecards={taraScorecards}
           todayData={todayData}
           timeState={timeState}
@@ -55359,6 +55460,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           userPosition={userPosition}
           positionReconciliation={positionReconciliation}
           autoOrderState={autoOrderState}
+          manualKalshiEntry={manualKalshiEntry}
+          activeTicker={kalshiActiveMarket?.ticker||null}
           taraScorecards={taraScorecards}
           windowType={windowType}
         />
