@@ -398,7 +398,7 @@ const _notePeerBuild=(by,version)=>{
   _PEER_BUILD.by=by; _PEER_BUILD.version=version||null; _PEER_BUILD.at=Date.now();
 };
 const _peerBuildLag=()=>{
-  const mine=_buildNum(typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null);
+  const mine=_buildNum(typeof TARA_BUILD_VERSION!=='undefined'?TARA_BUILD_VERSION:null);
   const theirs=_buildNum(_PEER_BUILD.version);
   if(mine==null||theirs==null||!_PEER_BUILD.by)return null;
   return{by:_PEER_BUILD.by,theirs,mine,behind:mine-theirs,at:_PEER_BUILD.at,
@@ -5880,11 +5880,15 @@ const evaluateTradeTimingV1=(inputs)=>{
   };
 };
 
-// V134: Baseline version marker — bump when SEED_TRADES is refreshed.
-// Personal layer compares this on load and offers a sync prompt if the user's
-// last-synced version is older than the current baked baseline.
+// V134: The baseline marker is intentionally separate from the app build.
+// BASELINE_VERSION tracks the baked SEED_TRADES/data migration boundary only.
+// Do not bump it for ordinary fixes: the migration check compares this value
+// and can offer a baseline sync (or the legacy fresh-start path) to the user.
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
-const TARA_VERSION_DISPLAY='Tara 13.4.350';
+// Production build marker — bump this on every shipped code change. This is the
+// version shown in the UI, crash reports, peer-build checks, and new trade rows.
+const TARA_BUILD_VERSION='2026.09.18-v13.4.357-autoexec-rollover-safety';
+const TARA_VERSION_DISPLAY='Tara 13.4.357';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15102,7 +15106,8 @@ class ErrorBoundary extends React.Component{
       const ts=new Date().toISOString();
       const payload={
         ts,
-        version:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown',
+        version:typeof TARA_BUILD_VERSION!=='undefined'?TARA_BUILD_VERSION:'unknown',
+        baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown',
         message:String(e?.message||e||'(no message)'),
         stack:String(e?.stack||'(no stack)'),
         componentStack:String(i?.componentStack||'(no component stack)'),
@@ -15178,7 +15183,8 @@ class ErrorBoundary extends React.Component{
     const _info=this.state.errorInfo;
     const _diag=[
       `Tara crash report`,
-      `Version: ${typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown'}`,
+      `Build: ${typeof TARA_BUILD_VERSION!=='undefined'?TARA_BUILD_VERSION:'unknown'}`,
+      `Baseline: ${typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown'}`,
       `Time: ${new Date().toISOString()}`,
       `URL: ${typeof location!=='undefined'?location.href:'(no URL)'}`,
       `User Agent: ${typeof navigator!=='undefined'?navigator.userAgent:'(no UA)'}`,
@@ -15214,7 +15220,7 @@ class ErrorBoundary extends React.Component{
       <div className="min-h-screen bg-[#050508] text-rose-500 p-6 sm:p-8 font-mono">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-bold mb-1">Tara Engine Crash</h1>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 mb-4">{typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown version'}</p>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 mb-4">{typeof TARA_BUILD_VERSION!=='undefined'?TARA_BUILD_VERSION:'unknown build'}</p>
           {/* Headline error message */}
           <pre className="bg-black p-4 rounded-lg text-xs mb-4 whitespace-pre-wrap border border-rose-500/30">{_err?.toString()||'(no error)'}</pre>
           {/* V8.8.4: Full diagnostic — stack + component stack — collapsed by default-look summary/details */}
@@ -37209,7 +37215,7 @@ function TaraApp(){
               const _cloud=cloudData&&cloudData.sig?cloudData.sig:null;
               const _next=_sigMax(_cloud,localSig);
               if(_cloud&&!_sigBehind(_cloud,localSig))return null;
-              return{sig:_next,by:_taraDeviceId,version:BASELINE_VERSION,ts:Date.now()};
+              return{sig:_next,by:_taraDeviceId,version:TARA_BUILD_VERSION,ts:Date.now()};
             },
             3000,
           );
@@ -49611,7 +49617,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           // V12.6: stamp build version on every entry — tells us which device/build
           //   fired the lock. 0% stamp rate on 'version' = all entries came from stale
           //   cached builds. Hard-refresh every device when deploying.
-          taraVersion:BASELINE_VERSION,
+          taraVersion:TARA_BUILD_VERSION,
           device:_taraDeviceId,
           htDir:analysis?.rawSignalScores?._trendConfirm?.htDir||null,
           stDir:analysis?.rawSignalScores?._trendConfirm?.stDir||null,
@@ -53486,7 +53492,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <div className={'text-xs uppercase tracking-widest font-bold '+(syncState.error?'text-rose-400':syncState.complete?'text-emerald-400':'text-indigo-400')}>
                   {syncState.error?'Sync Failed':syncState.complete?'Sync Complete':'Syncing Baseline'}
                 </div>
-                <div className="text-[10px] text-[#EDEDED]/40 mt-0.5">{BASELINE_VERSION}</div>
+                <div className="text-[10px] text-[#EDEDED]/40 mt-0.5">baseline {BASELINE_VERSION}</div>
               </div>
             </div>
 
