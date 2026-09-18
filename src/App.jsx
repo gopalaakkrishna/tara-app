@@ -42664,20 +42664,41 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         taraCallSnapshotRef.current=null;
         taraCallSampleRef.current={dir:null,count:0};
         taraSampleRateRef.current=[]; // V5.7.2: clear rate history for new window
-        // V13.4.290 (ORD-2): autoOrderState was never cleared here. A comment at
-        //   ~L46392 ("CLEANUP ON WINDOW ROLL ... When the window changes, clear stale
-        //   auto-order state") describes exactly this fix, but only a ref got
-        //   declared under it (_lastSeenWindowIdRef, read nowhere) -- the effect body
-        //   itself was never written. Once v286 made the 'exited' state finally
-        //   readable, an order that filled and closed in window N kept _liveValid true
-        //   in window N+1 (it only requires the ORDER's direction to match the CURRENT
-        //   call), so the trade ticket rendered last window's entry/exit/stake/result
-        //   instead of a fresh plan, and its "edit values for this window" control
-        //   stayed hidden -- for every subsequent same-direction window, since nothing
-        //   ever produced a fresh 'placing' write to displace it. Cleared in the one
-        //   place every other per-window ref already resets, so it can't be missed by
-        //   a future rollover-detection change made only here.
-        setAutoOrderState(null);
+        // V13.4.290 (ORD-2): retire terminal auto-order state at the rollover so
+        //   the new ticket cannot render the prior window's entry/exit/result.
+        // V13.4.356: do NOT discard unresolved real-money state at this boundary.
+        //   A new window can arrive while an entry ladder, an exit verification, or
+        //   an exchange position is still unresolved. Clearing here made the next
+        //   reconciliation blind to that old ticker; an async callback could then
+        //   recreate only `{status:'filled'}` or `{status:'exiting'}` after the
+        //   cleanup, losing the ticker/count needed to protect the real position.
+        //   Carry the state with an explicit rolloverPending marker instead. The
+        //   reconciler clears it only after Kalshi has confirmed the old position
+        //   is flat (with its existing two-poll debounce). This may briefly block
+        //   the next auto entry, but it cannot silently abandon live money.
+        const _rollAos=autoOrderStateRef.current;
+        const _rollReason=String(_rollAos?.reason||'');
+        const _rollExitUncertain=!!(_rollAos&&(
+          (_rollAos.status==='unknown'&&_rollReason==='exit-unconfirmed-verify-kalshi-directly')
+          ||(_rollAos.status==='error'&&(_rollReason.startsWith('exit failed:')||_rollReason.startsWith('exit threw:')))
+        ));
+        const _rollNeedsCarry=!!(_rollAos&&!_rollAos.dryRun&&_rollAos.ticker&&(
+          _rollExitUncertain
+          ||_rollAos.status==='placing'
+          ||_rollAos.status==='resting'
+          ||_rollAos.status==='filled'
+          ||_rollAos.status==='exiting'
+          ||_rollAos.status==='exit-pending'
+          ||(_rollAos.status==='unknown'&&_rollReason!=='exit-unconfirmed-verify-kalshi-directly')
+          ||(_rollAos.status==='error'&&_rollReason==='no-fill')
+        ));
+        if(_rollNeedsCarry){
+          setAutoOrderState(prev=>prev&&prev.ticker===_rollAos.ticker
+            ?{...prev,rolloverPending:true,rolloverAt:Date.now()}
+            :prev);
+        }else{
+          setAutoOrderState(null);
+        }
         taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;_lastWindowMsRef.current=timeState.nextWindowMs;tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
         // V10.7.62: force re-render immediately after refs clear so UI flushes
         //   stale lock display. lockedCallRef is a ref (not state) — without this,
@@ -46621,7 +46642,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   exactly; it was just never applied here too.
         if(!_statusUnknown)_entryFiredForRef.current=null;
         setAutoOrderState(prev=>Object.assign({},prev||{},{
-          dir,ticker,dryRun,
+          dir,ticker,dryRun,windowId:(lock&&lock.windowId)||null,asset:'BTC',
           status:_statusUnknown?'unknown':'error',
           reason:res.reason,orderId:res.orderId||null,at:Date.now(),
           // V13.4.346: durable attempt record. Until now a failed attempt
@@ -46670,7 +46691,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   call) -- restating them costs nothing and makes every write in
       //   this function self-sufficient regardless of what `prev` holds.
       setAutoOrderState(prev=>Object.assign({},prev||{},{
-        dir,ticker,status:'filled',dryRun,order:res.order,
+        dir,ticker,status:'filled',dryRun,windowId:(lock&&lock.windowId)||null,asset:'BTC',order:res.order,
         filledCount:_execFilledCount,
         filledAtCents:filledAt,
         tookSpread:!!(res.rung&&res.rung.takesSpread),
@@ -46712,7 +46733,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       return res;
     }catch(e){
       const msg=String((e&&e.message)||e);
-      setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:msg,at:Date.now()}));
+      setAutoOrderState(prev=>Object.assign({},prev||{}, {
+        dir,ticker,dryRun,windowId:(lock&&lock.windowId)||null,asset:'BTC',
+        status:'error',reason:msg,at:Date.now(),
+      }));
       return{ok:false,reason:msg};
     }finally{
       _entryBusyRef.current=false;
@@ -46823,7 +46847,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     _exitFiredForRef.current=key;
     _exitBusyRef.current=true;
 
-    setAutoOrderState(prev=>Object.assign({},prev||{},{status:'exiting',exitReason:why,at:Date.now()}));
+     setAutoOrderState(prev=>Object.assign({},prev||{}, {
+       dir,ticker:st.ticker,dryRun,windowId:st.windowId||null,asset:st.asset||'BTC',
+       filledCount:st.filledCount,filledAtCents:st.filledAtCents,
+       status:'exiting',exitReason:why,at:Date.now(),
+     }));
     try{
       const res=await kalshiExitPosition({
         apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,
@@ -46834,7 +46862,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // Leave the ref set so a failed exit does not retry in a tight loop;
         // it is surfaced instead, because silently hammering a broken exit is
         // how a bad position gets worse.
-        setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:'exit failed: '+res.reason,exitReason:why,at:Date.now()}));
+         setAutoOrderState(prev=>Object.assign({},prev||{}, {
+           dir,ticker:st.ticker,dryRun,windowId:st.windowId||null,asset:st.asset||'BTC',
+           filledCount:st.filledCount,filledAtCents:st.filledAtCents,
+           status:'error',reason:'exit failed: '+res.reason,exitReason:why,at:Date.now(),
+         }));
         return res;
       }
       // V13.4.322: VERIFY THE EXIT ACTUALLY FILLED. This crosses the spread
@@ -46863,10 +46895,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   get this position closed; canceling it here would remove that
         //   with nothing left in its place. Surface as unknown rather than
         //   silently reporting a clean 'exited' that may not be true.
-        setAutoOrderState(prev=>Object.assign({},prev||{},{
-          status:'unknown',reason:'exit-unconfirmed-verify-kalshi-directly',
-          exitReason:why,orderId:_exitOrderId||null,at:Date.now(),
-        }));
+         setAutoOrderState(prev=>Object.assign({},prev||{},{
+           dir,ticker:st.ticker,dryRun,windowId:st.windowId||null,asset:st.asset||'BTC',
+           filledCount:st.filledCount,filledAtCents:st.filledAtCents,
+           status:'unknown',reason:'exit-unconfirmed-verify-kalshi-directly',
+           exitReason:why,orderId:_exitOrderId||null,at:Date.now(),
+         }));
         return{ok:false,reason:'exit-unconfirmed-verify-kalshi-directly',order:_exitOrderObj,orderId:_exitOrderId};
       }
       res.order=_exitOrderObj;
@@ -46885,8 +46919,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   own verification test before it ever shipped.
       const _execPnlPerContract=(exitVal!=null&&st.filledAtCents!=null&&Number.isFinite(Number(st.filledAtCents)))
         ?(exitVal-Number(st.filledAtCents)):null;
-      setAutoOrderState(prev=>Object.assign({},prev||{},{
-        status:'exited',exitReason:why,exitOrder:res.order,
+       setAutoOrderState(prev=>Object.assign({},prev||{},{
+         dir,ticker:st.ticker,dryRun,windowId:st.windowId||null,asset:st.asset||'BTC',
+         filledCount:st.filledCount,filledAtCents:st.filledAtCents,
+         status:'exited',exitReason:why,exitOrder:res.order,
         exitAtCents:limitCents,
         pnlCentsPerContract:_execPnlPerContract,
         at:Date.now(),
@@ -46910,7 +46946,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       return res;
     }catch(e){
       const msg=String((e&&e.message)||e);
-      setAutoOrderState(prev=>Object.assign({},prev||{},{status:'error',reason:'exit threw: '+msg,at:Date.now()}));
+       setAutoOrderState(prev=>Object.assign({},prev||{}, {
+         dir,ticker:st.ticker,dryRun,windowId:st.windowId||null,asset:st.asset||'BTC',
+         filledCount:st.filledCount,filledAtCents:st.filledAtCents,
+         status:'error',reason:'exit threw: '+msg,at:Date.now(),
+       }));
       return{ok:false,reason:msg};
     }finally{
       _exitBusyRef.current=false;
@@ -47446,6 +47486,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             if(!prev||prev.ticker!==_aosNow.ticker||!(prev.status==='unknown'||(prev.status==='error'&&prev.reason==='no-fill')))return prev;
             return{...prev,status:'no-fill',noFillConfirmed:true,noFillConfirmedAt:Date.now()};
           });
+        }
+        // V13.4.356: a carried real-money order may legitimately span the
+        //   window boundary. Once the exchange snapshot has been empty for the
+        //   same two-poll debounce used by the drift detector, retire only that
+        //   carried state. Never do this while the entry/exit request itself is
+        //   still running, and never retire a ticker-mismatch/open result.
+        const _rolloverFlat=!!(_aosNow?.rolloverPending
+          &&!_entryBusyRef.current&&!_exitBusyRef.current
+          &&_details.some(d=>d&&d.ticker===_aosNow.ticker
+            &&(d.kind==='phantom-auto'||d.kind==='unknown-resolved-nofill'||d.kind==='exit-confirmed-flat')));
+        if(_rolloverFlat){
+          setAutoOrderState(prev=>prev&&prev.rolloverPending&&prev.ticker===_aosNow.ticker?null:prev);
         }
         setPositionReconciliation({
           status:_details.length>0?'drift':'in-sync',
