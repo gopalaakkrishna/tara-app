@@ -10392,44 +10392,130 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _snap=snapshot||null;
   const _lock=readLockState(_snap);
   const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
-  const _callLabel=_dir?`${_dir} locked`:taraCall?.call==='SIT_OUT'?'sitting out':'scanning';
+  const _callLabel=_dir?`${_dir} · locked`:taraCall?.call==='SIT_OUT'?'SITTING OUT':'SCANNING';
   const _autoOn=!!autoExecSettings?.enabled;
-  const _autoLabel=_autoOn?(autoExecSettings?.dryRun===false?'live armed':'dry-run armed'):'off';
-  const _orderLabel=autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' '):'waiting';
-  const _positionLabel=userPosition?'open':positionReconciliation?.status==='drift'?'verify':'none';
-  const _resolved=(todayData?.wins||0)+(todayData?.losses||0);
+  const _autoLabel=_autoOn?(autoExecSettings?.dryRun===false?'ARMED · LIVE':'ARMED · DRY'):'OFF · SAFE';
+  const _orderLabel=autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' ').toUpperCase():'WAITING';
+  const _positionLabel=userPosition?'OPEN':positionReconciliation?.status==='drift'?'RECONCILE':'FLAT';
+  const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+  const _won=_log.filter(e=>e?.result==='WIN').length;
+  const _lost=_log.filter(e=>e?.result==='LOSS').length;
+  const _sat=_log.filter(e=>e?.result==='SITOUT'||e?.result==='SAT_OUT').length;
+  const _resolved=_won+_lost+_sat;
+  const _confidence=Number(_snap?.confidence??_snap?.posterior??taraCall?.confidence??0);
+  const _edge=Number(_snap?.edgePts??_snap?.edge??taraCall?.edgePts??taraCall?.edge??0);
+  const _edgeLabel=Number.isFinite(_edge)&&_edge!==0?`${_edge>0?'+':''}${Math.round(_edge)}pt`:'—';
   const _window=windowType||timeState?.windowType||'15m';
   const _steps=[
     {n:'01',label:'Tara call',value:_callLabel,tone:_dir==='UP'?'up':_dir==='DOWN'?'down':'quiet'},
     {n:'02',label:'AutoTrade',value:_autoLabel,tone:_autoOn?'live':'quiet'},
-    {n:'03',label:'Position truth',value:_positionLabel,tone:_positionLabel==='open'?'live':_positionLabel==='verify'?'warn':'quiet'},
+    {n:'03',label:'Position truth',value:_positionLabel,tone:_positionLabel==='OPEN'?'live':_positionLabel==='RECONCILE'?'warn':'quiet'},
     {n:'04',label:'Record',value:_resolved?`${_resolved} resolved`:'hourly + window log',tone:'quiet'},
   ];
   return(
-    <section className="tara-page-brief" aria-label="Tara decision flow">
-      <div className="tara-page-brief__intro">
-        <div className="tara-page-brief__eyebrow">CONTROL ROOM · {_window.toUpperCase()} · LIVE</div>
-        <h2>Tara Call <span>→</span> AutoTrade <span>→</span> Position truth</h2>
-        <p>Tara’s locked call is the decision recorded for this window. AutoTrade places the order from that lock; the exchange position and reconciliation check decide what actually exists.</p>
+    <section className="tara-page-brief tara-call-ledger" aria-label="Tara call and execution truth">
+      <div className="tara-call-ledger__topline">
+        <div className="tara-page-brief__intro">
+          <div className="tara-page-brief__eyebrow">OPERATE · LIVE CONTROL ROOM</div>
+          <h2>Tara Call + execution truth</h2>
+          <p>One window. Four truths kept separate.</p>
+        </div>
+        <div className="tara-call-ledger__badges">
+          <span>15m call record</span><span>AutoTrade audit</span><span>TradingView market</span>
+        </div>
+      </div>
+      <div className="tara-call-ledger__hero">
+        <div>
+          <div className="tara-call-ledger__kicker">TARA'S CALL · PRIMARY {_window.toUpperCase()} DECISION LEDGER</div>
+          <h3 className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_callLabel}</h3>
+          <p>This is Tara’s recorded decision for this window. It settles into the Tara Call record whether AutoTrade acts, rests, fills, or stays dry.</p>
+        </div>
+        <div className="tara-call-ledger__truth">
+          <strong>{_lock.tradeable?'CALL LOCKED':'CALLING ONLY'}</strong>
+          <small>{_confidence>0?`${Math.round(_confidence)}% confidence`:'waiting for confidence'} · {_orderLabel}</small>
+        </div>
+      </div>
+      <div className="tara-call-ledger__metrics">
+        <div><label>Call</label><strong className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_dir||'—'}</strong></div>
+        <div><label>Confidence</label><strong>{_confidence>0?`${Math.round(_confidence)}%`:'—'}</strong></div>
+        <div><label>Market edge</label><strong className={_edge>0?'is-up':_edge<0?'is-down':''}>{_edgeLabel}</strong></div>
+        <div><label>Call record</label><strong className="is-amber">{_won} · {_lost} · {_sat}</strong></div>
+      </div>
+      <div className="tara-call-ledger__timeline">
+        <span>OBSERVE</span><i>→</i><span>LEAN</span><i>→</i><b>LOCKED</b><i>→</i><span>SETTLE</span><i>→</i><span>{_window.toUpperCase()} RECORD</span>
+      </div>
+      <div className="tara-call-ledger__details">
+        <div>
+          <h4>WHAT TARA LOCKED</h4>
+          <strong>{_dir||'NO DIRECTION'}</strong>
+          <span>BTC {_window} · {timeState?.nextWindow||'window active'}</span>
+          <span>Decision gates remain visible in the live panels below.</span>
+        </div>
+        <div>
+          <h4>RECORD TRUTH</h4>
+          <span><b>Won</b><strong>{_won}</strong></span>
+          <span><b>Lost</b><strong className="is-down">{_lost}</strong></span>
+          <span><b>Sat out</b><strong>{_sat}</strong></span>
+          <span><b>Window</b><strong>last {_resolved||'—'} calls</strong></span>
+        </div>
       </div>
       <div className="tara-page-brief__flow">
         {_steps.map(step=>(
           <div key={step.n} className={'tara-page-brief__step tara-page-brief__step--'+step.tone}>
             <span className="tara-page-brief__step-no">{step.n}</span>
-            <div className="tara-page-brief__step-copy">
-              <span>{step.label}</span>
-              <strong>{step.value}</strong>
-            </div>
+            <div className="tara-page-brief__step-copy"><span>{step.label}</span><strong>{step.value}</strong></div>
           </div>
         ))}
       </div>
       <div className="tara-page-brief__meta">
-        <span>{Array.isArray(taraCallLog)?taraCallLog.length:0} call records</span>
-        <span className="tara-page-brief__dot">·</span>
-        <span>hourly ladder stays visible below</span>
+        <span>{_log.length} call records</span><span className="tara-page-brief__dot">·</span><span>hourly ladder stays independent below</span>
       </div>
     </section>
   );
+};
+
+const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow})=>{
+  const _scroll=()=>{if(typeof document!=='undefined')document.getElementById('tara-primary-surface')?.scrollIntoView({behavior:'smooth',block:'start'});};
+  const _items=[['overview','OVERVIEW'],['execution','EXECUTION'],['signals','SIGNALS'],['market','MARKET'],['analytics','ANALYTICS'],['news','NEWS & MACRO'],['memory','MEMORY'],['schedule','SCHEDULE & LADDER'],['logs','LOGS & SYNC']];
+  const _click=(id)=>{
+    if(id==='analytics'){setShowAnalytics(true);return;}
+    if(id==='logs'){setShowHeaderOverflow(true);return;}
+    if(id==='overview'||id==='execution'||id==='signals'||id==='market'||id==='news'||id==='memory'||id==='schedule')_scroll();
+  };
+  return <nav className="tara-workspace-nav" aria-label="Workspace views">{_items.map(([id,label],i)=><button key={id} onClick={()=>_click(id)} className={i===0?'is-active':''}>{label}</button>)}<button onClick={()=>setShowBrain(true)}>BRAIN</button></nav>;
+};
+
+const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,taraCallLog})=>{
+  const _auto=killSwitchEngaged?'KILLED · NEW ORDERS BLOCKED':autoExecSettings?.enabled?(autoExecSettings?.dryRun?'ARMED · DRY RUN':'ARMED · LIVE'):'DISARMED · SAFE';
+  const _autoTone=killSwitchEngaged?'bad':autoExecSettings?.enabled?'ok':'muted';
+  const _bank=Number(mission?.currentBankroll||mission?.startBankroll||0);
+  const _risk=Number(autoExecSettings?.maxBetUsd||autoExecSettings?.betAmount||0);
+  const _position=userPosition?'OPEN':positionReconciliation?.status==='drift'?'RECONCILE':'FLAT';
+  const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+  const _record=_log.length;
+  const _won=_log.filter(e=>e?.result==='WIN').length;
+  const _lost=_log.filter(e=>e?.result==='LOSS').length;
+  const _sat=_log.filter(e=>e?.result==='SITOUT'||e?.result==='SAT_OUT').length;
+  const _resolved=_won+_lost+_sat;
+  const _winRate=_resolved?Math.round((_won/_resolved)*100):null;
+  const _riskScore=Number(movementRisk?.score||0);
+  return <aside className="tara-approved-rail" aria-label="Execution and record rail">
+    <section className="tara-rail-card tara-rail-mission">
+      <div className="tara-rail-card__head"><div><div className="tara-rail-kicker">AUTOTRADE MISSION</div><h2>Execution guardrails</h2></div><small>single control surface</small></div>
+      <div className="tara-rail-arm"><div><strong className={'tone-'+_autoTone}>{_auto}</strong><small>AutoExecSimplePanel · safe mode</small></div><span className={'tara-rail-toggle '+(autoExecSettings?.enabled&&!killSwitchEngaged?'is-on':'')}><i/></span></div>
+      <div className="tara-rail-rows"><span>Mission bankroll <b>{_bank>0?`$${_bank.toFixed(2)}`:'not set'}</b></span><span>Risk per trade <b>{_risk>0?`$${_risk.toFixed(2)}`:'settings'}</b></span><span>Position state <b>{_position}</b></span><span>Entry gates <b className="tone-ok">reconciliation on</b></span></div>
+      <div className="tara-rail-riskbar">{Array.from({length:10},(_,i)=><i key={i} className={i<Math.ceil(Math.max(0,_riskScore)/10)?'is-hot':''}/>)}</div><div className="tara-rail-kicker">risk state · {_riskScore}/100 movement</div>
+      <div className="tara-rail-actions"><button className="tara-rail-action" onClick={()=>setShowTradingSettings(true)}>CONFIGURE</button><button className="tara-rail-action tara-rail-action--secondary" onClick={()=>setShowTradingSettings(true)}>DRY RUN</button></div>
+    </section>
+    <section className="tara-rail-card">
+      <div className="tara-rail-card__head"><div><div className="tara-rail-kicker">ALERT CENTER</div><h2>What needs attention</h2></div><small>live</small></div>
+      <div className="tara-rail-alert"><b className={positionReconciliation?.status==='drift'?'tone-bad':'tone-ok'}>{positionReconciliation?.status==='drift'?'△ Reconciliation required':'● Position truth'}</b><span>{positionReconciliation?.status==='drift'?'Exchange and tracked state disagree — retry remains blocked.':_position==='OPEN'?'Exchange position is open; no duplicate retry.':'No exchange position on this window.'}</span></div>
+      <div className="tara-rail-alert"><b className={_riskScore>=70?'tone-bad':_riskScore>=40?'tone-amber':'tone-ok'}>ϟ Movement risk</b><span>{_riskScore>=70?'Extreme movement risk.':_riskScore>=40?'Elevated movement risk.':'Normal movement risk.'} {_riskScore}/100.</span></div>
+      <div className="tara-rail-alert"><b className="tone-muted">↕ AutoTrade</b><span>{autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' '):'No order lifecycle is active.'}</span></div>
+    </section>
+    <section className="tara-rail-card tara-rail-record"><div className="tara-rail-kicker">LAST 1,000</div><strong>{_winRate!=null?`${_winRate}%`:'—'}</strong><div className="tara-rail-record__grid"><span>Won<b>{_won}</b></span><span>Lost<b>{_lost}</b></span><span>Sat out<b>{_sat}</b></span><span>Resolved<b>{_resolved||'—'}</b></span></div><div className="tara-rail-record__note">Hourly, sports, and weather records stay separate by design.</div></section>
+    <section className="tara-rail-card tara-rail-capabilities"><div className="tara-rail-card__head"><div><div className="tara-rail-kicker">CAPABILITIES LEDGER</div><h2>Everything remains reachable</h2></div><small>inventory</small></div><div className="tara-rail-cap-grid"><span><b>TRADE</b>signal · fills · exit</span><span><b>PROTECT</b>kill · reconcile · no-fill</span><span><b>READ</b>chart · depth · tape</span><span><b>LEARN</b>memory · analytics</span><span><b>CONTEXT</b>news · macro · weather</span><span><b>OPERATE</b>schedule · logs · export</span></div></section>
+  </aside>;
 };
 
 
@@ -53134,8 +53220,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-1.5 sm:gap-2">
 
           {/* LEFT: Logo + version + balance */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
+          <div className="flex items-center gap-1.5 shrink-0 tara-brand-lockup">
+            <span className="tara-brandmark" aria-hidden="true"><i/></span>
+            <div className="tara-brand-copy">
+              <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">tara<span>.</span></h1>
+              <small>DECISION ENGINE · {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}</small>
+            </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
                 mockup's one-accent rule it has no claim on green at all -- and
@@ -53143,9 +53233,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {/* V13.4.299b: font-sans removed -- it beat the global mono rule at
                 equal specificity, so the build number was the one label still in
                 the sans face. The mockup sets it in .m. */}
-            <span className={'hidden sm:flex items-center text-[10px] tabular-nums tracking-wider'} style={{color:'rgba(237,237,237,0.34)'}}>
-              {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
-            </span>
             {/* V13.1: telemetry-health badge - confirms rich-entry stamping after deploy */}
             {(()=>{try{
               const _tl=Array.isArray(taraCallLogRef.current)?taraCallLogRef.current:[];
@@ -53207,7 +53294,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           <div className="flex items-center gap-1.5 shrink-0">
 
             {/* BTC */}
-            <div className={'flex bg-[#0A0A0E] border border-[#1B1B22] rounded-lg p-0.5 shrink-0'}>
+            <div className={'tara-modebar flex bg-[#0A0A0E] border border-[#1B1B22] rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
                 const _active=currentAsset===k;
@@ -53256,6 +53343,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <span className="text-sm leading-none" style={{color:showWeather?T2_GOLD:'inherit'}}>🌡</span>
                 <span className="hidden sm:inline text-[10px]">Weather</span>
               </button>
+              <button onClick={()=>{setShowBrain(true);setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Tara's Brain">BRAIN</button>
+              <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Analytics">ANALYTICS</button>
+            </div>
+
+            <div className="tara-status-chips" aria-label="Live feed status">
+              <span className={feedFrozen?'is-warn':'is-ok'}>● FEED {feedFrozen?'STALE':'NOMINAL'}</span>
+              <span className={kalshiPingState?.ok===false?'is-warn':'is-ok'}>↕ KALSHI {kalshiPingState?.ok===false?'CHECK':'SYNCED'}</span>
             </div>
 
             {/* window fixed at 15m, 5m removed v13.3.0 */}
@@ -54044,19 +54138,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           currentStreak={currentStreak}
         />
 
-        <TaraPageBrief
-          taraCall={taraCall}
-          snapshot={taraCallSnapshotRef.current||null}
-          autoExecSettings={autoExecSettings}
-          autoOrderState={autoOrderState}
-          userPosition={userPosition}
-          positionReconciliation={positionReconciliation}
-          taraCallLog={taraCallLog}
-          todayData={todayData}
-          timeState={timeState}
-          windowType={windowType}
-        />
-
         {/* V13.4.293: Today card moved to the center column. */}
 
 
@@ -54251,7 +54332,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
-        <>
+        <div className="tara-approved-columns">
+        <div className="tara-approved-primary" id="tara-primary-surface">
+        <TaraWorkspaceNav
+          setShowAnalytics={setShowAnalytics}
+          setShowBrain={setShowBrain}
+          setShowHeaderOverflow={setShowHeaderOverflow}
+        />
+        <TaraPageBrief
+          taraCall={taraCall}
+          snapshot={taraCallSnapshotRef.current||null}
+          autoExecSettings={autoExecSettings}
+          autoOrderState={autoOrderState}
+          userPosition={userPosition}
+          positionReconciliation={positionReconciliation}
+          taraCallLog={taraCallLog}
+          todayData={todayData}
+          timeState={timeState}
+          windowType={windowType}
+        />
         {/* V13.4.298: lg:auto-rows-fr + the grid default (stretch) forced every
             column to the height of the tallest one, showing as 400-600px of
             blank space under the shorter columns' last card once all 3 columns
@@ -54259,7 +54358,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             blank, right column ~22%, on a 2011px-tall left column). lg:items-start
             lets each column size to its own content instead -- the tradeoff is
             the columns' bottom edges no longer line up. */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:items-start min-w-0 pb-16 lg:pb-0">
+        <div className="tara-live-grid grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:items-start min-w-0 pb-16 lg:pb-0">
           
           {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
               the first and largest thing on screen, because it is the only card that
@@ -55136,14 +55235,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             RightPanel (column 3); ScheduleBySessionCard is new. lg:grid-cols-2
             so both are visible together on desktop; single column on mobile,
             same convention as the main grid above. */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0">
+        <div className="tara-hourly-row grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0">
           <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
           <ScheduleBySessionCard taraCallLog={taraCallLog}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
         <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/>
-        </>
+        </div>
+        <TaraApprovedRail
+          autoExecSettings={autoExecSettings}
+          mission={mission}
+          killSwitchEngaged={killSwitchEngaged}
+          setShowTradingSettings={setShowTradingSettings}
+          movementRisk={movementRisk}
+          userPosition={userPosition}
+          positionReconciliation={positionReconciliation}
+          autoOrderState={autoOrderState}
+          taraCallLog={taraCallLog}
+        />
+        </div>
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState} timeFormat={timeFormat}/>
@@ -56459,6 +56570,167 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           .tara-page-brief__step { min-height: 66px; }
           .tara-specialist-brief { align-items: flex-start; flex-direction: column; gap: 12px; padding: 15px 14px 13px; }
           .tara-specialist-brief__legend { justify-content: flex-start; }
+        }
+
+        /* ── APPROVED CONTROL-ROOM SHELL ───────────────────────────────
+           The approved Tara mockup is a two-column operating surface: a
+           decision ledger on the left, and execution guardrails/alerts/record
+           on the right. Existing live panels remain inside the primary column;
+           this shell changes hierarchy and navigation, not the data model. */
+        .tara-live-shell {
+          background:
+            radial-gradient(78% 54% at 54% -18%, rgba(28,49,43,0.42), transparent 60%),
+            #07090b !important;
+          color: #eef4f0;
+        }
+        .tara-header {
+          min-height: 76px;
+          padding: 0 28px !important;
+          background: rgba(7,9,11,0.92) !important;
+          border-bottom-color: #252d31 !important;
+          box-shadow: 0 1px 0 rgba(255,255,255,0.025);
+        }
+        .tara-header > div { max-width: 1760px !important; width: 100%; gap: 18px !important; }
+        .tara-brand-lockup { gap: 10px !important; min-width: 205px; }
+        .tara-brandmark { width: 27px; height: 27px; border: 1px solid #5a6b63; display: grid; place-items: center; flex: 0 0 auto; }
+        .tara-brandmark i { width: 10px; height: 10px; display: block; background: #62e39a; transform: rotate(45deg); }
+        .tara-brand-copy { display: flex; flex-direction: column; min-width: 0; }
+        .tara-brand-copy h1 { font: 600 22px/1 'Space Grotesk', sans-serif !important; letter-spacing: -0.07em; }
+        .tara-brand-copy h1 span { color: #62e39a; }
+        .tara-brand-copy small { margin-top: 4px; color: #82908d; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .14em; white-space: nowrap; }
+        .tara-modebar { align-self: stretch; display: flex; gap: 0 !important; margin-left: 0; border-left: 1px solid #252d31; background: transparent !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; }
+        .tara-modebar > button { min-width: 72px; height: 100%; padding: 0 13px !important; border: 0 !important; border-right: 1px solid #252d31 !important; border-radius: 0 !important; background: transparent !important; color: #82908d !important; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace !important; letter-spacing: .13em !important; text-transform: uppercase; }
+        .tara-modebar > button:first-child { border-left: 0 !important; }
+        .tara-modebar > button:hover, .tara-modebar > button[style*="rgb(212"] { color: #eef4f0 !important; }
+        .tara-header-mode-button { position: relative; }
+        .tara-header-mode-button:hover { color: #eef4f0 !important; }
+        .tara-status-chips { display: flex; align-items: center; gap: 8px; margin-left: auto; white-space: nowrap; }
+        .tara-status-chips span { border: 1px solid #252d31; border-radius: 999px; padding: 7px 10px; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; }
+        .tara-status-chips .is-ok { color: #62e39a; border-color: #27523e; background: #0d1a14; }
+        .tara-status-chips .is-warn { color: #e0b765; border-color: #594a2c; background: #1a160d; }
+        .tara-workspace-nav { display: flex; gap: 7px; overflow-x: auto; padding: 1px 0 15px; border-bottom: 1px solid #252d31; }
+        .tara-workspace-nav button { flex: 0 0 auto; padding: 9px 11px; border: 1px solid #252d31; color: #82908d; background: transparent; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+        .tara-workspace-nav button:hover, .tara-workspace-nav button.is-active { color: #eef4f0; border-color: #577264; background: #101915; }
+        .tara-approved-columns { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(300px,.72fr); gap: 18px; align-items: start; padding-top: 2px; }
+        .tara-approved-primary, .tara-approved-rail { min-width: 0; }
+        .tara-page-brief.tara-call-ledger { display: block; padding: 0; border-color: #3a5146; border-radius: 0; background: linear-gradient(130deg, #0d1214, #0a0d10); box-shadow: 0 18px 60px rgba(0,0,0,.28); }
+        .tara-page-brief.tara-call-ledger::before { background: linear-gradient(90deg, #62e39a, rgba(98,227,154,.08) 58%, transparent); height: 2px; }
+        .tara-call-ledger__topline { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 18px 20px 15px; border-bottom: 1px solid #252d31; background: linear-gradient(90deg, #101a15, #0b1012); }
+        .tara-call-ledger__topline .tara-page-brief__intro h2 { margin: 6px 0 4px; font-size: 22px; }
+        .tara-call-ledger__topline .tara-page-brief__intro p { color: #82908d; font-size: 12px; }
+        .tara-call-ledger__badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+        .tara-call-ledger__badges span { border: 1px solid #313b3f; padding: 7px 9px; color: #82908d; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
+        .tara-call-ledger__hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 18px 20px 16px; }
+        .tara-call-ledger__kicker, .tara-rail-kicker { color: #82908d; font: 10px/1.2 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; }
+        .tara-call-ledger__hero h3 { margin: 8px 0 7px; color: #eef4f0; font: 600 clamp(30px,4vw,50px)/.98 'Space Grotesk', sans-serif; letter-spacing: -.07em; text-transform: uppercase; }
+        .tara-call-ledger__hero h3.is-up { color: #62e39a; }
+        .tara-call-ledger__hero h3.is-down { color: #ee6d72; }
+        .tara-call-ledger__hero p { max-width: 650px; color: #82908d; font-size: 12px; line-height: 1.45; }
+        .tara-call-ledger__truth { min-width: 175px; padding-top: 6px; text-align: right; }
+        .tara-call-ledger__truth strong { display: block; color: #e0b765; font: 600 14px 'Space Grotesk', sans-serif; }
+        .tara-call-ledger__truth small { display: block; margin-top: 5px; color: #82908d; font: 9px/1.6 'IBM Plex Mono', ui-monospace, monospace; }
+        .tara-call-ledger__metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #252d31; border-top: 1px solid #252d31; border-bottom: 1px solid #252d31; }
+        .tara-call-ledger__metrics > div { min-width: 0; padding: 14px 17px; background: #0b1012; }
+        .tara-call-ledger__metrics label { display: block; color: #82908d; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+        .tara-call-ledger__metrics strong { display: block; margin-top: 7px; color: #eef4f0; font: 600 22px/1 'Space Grotesk', sans-serif; }
+        .tara-call-ledger__metrics strong.is-up { color: #62e39a; }
+        .tara-call-ledger__metrics strong.is-down { color: #ee6d72; }
+        .tara-call-ledger__metrics strong.is-amber { color: #e0b765; }
+        .tara-call-ledger__timeline { display: flex; align-items: center; gap: 8px; padding: 16px 20px; color: #56625f; font: 8px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+        .tara-call-ledger__timeline b { color: #62e39a; font-weight: 500; }
+        .tara-call-ledger__timeline i { color: #56625f; font-style: normal; }
+        .tara-call-ledger__details { display: grid; grid-template-columns: 1.05fr .95fr; gap: 1px; background: #252d31; border-top: 1px solid #252d31; }
+        .tara-call-ledger__details > div { min-width: 0; padding: 16px 18px; background: #0b1012; }
+        .tara-call-ledger__details h4 { margin: 0 0 13px; color: #82908d; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+        .tara-call-ledger__details > div > strong { display: block; color: #62e39a; font: 600 30px/1 'Space Grotesk', sans-serif; }
+        .tara-call-ledger__details > div > span { display: block; padding-top: 8px; color: #82908d; font-size: 11px; }
+        .tara-call-ledger__details > div:last-child > span { display: flex; justify-content: space-between; border-bottom: 1px solid #1b2426; }
+        .tara-call-ledger__details > div:last-child > span:last-child { border-bottom: 0; }
+        .tara-call-ledger__details > div:last-child b { color: #82908d; font-weight: 400; }
+        .tara-call-ledger__details > div:last-child strong { color: #eef4f0; font: 500 11px 'IBM Plex Mono', ui-monospace, monospace; }
+        .tara-call-ledger__details .is-down { color: #ee6d72 !important; }
+        .tara-call-ledger .tara-page-brief__flow { margin: 0; border: 0; border-radius: 0; border-top: 1px solid #252d31; }
+        .tara-call-ledger .tara-page-brief__step { min-height: 64px; }
+        .tara-call-ledger .tara-page-brief__meta { padding: 11px 18px 13px; border-top: 1px solid #252d31; }
+        .tara-rail-card { margin-bottom: 18px; border: 1px solid #252d31; background: #0c1113; }
+        .tara-rail-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 15px 16px; border-bottom: 1px solid #252d31; }
+        .tara-rail-card__head h2 { margin: 5px 0 0; color: #eef4f0; font: 600 13px/1.1 'Space Grotesk', sans-serif; }
+        .tara-rail-card__head small { color: #82908d; font: 9px 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
+        .tara-rail-mission { border-color: #3a5146; }
+        .tara-rail-arm { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #252d31; }
+        .tara-rail-arm strong { display: block; font: 600 22px/1.05 'Space Grotesk', sans-serif; }
+        .tara-rail-arm small { display: block; margin-top: 4px; color: #82908d; font: 9px 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
+        .tara-rail-toggle { width: 43px; height: 23px; padding: 3px; border: 1px solid #313b3f; border-radius: 20px; background: #202629; }
+        .tara-rail-toggle i { display: block; width: 15px; height: 15px; border-radius: 50%; background: #82908d; }
+        .tara-rail-toggle.is-on { border-color: #397451; background: #23332b; }
+        .tara-rail-toggle.is-on i { margin-left: 17px; background: #62e39a; }
+        .tone-ok { color: #62e39a !important; }
+        .tone-bad { color: #ee6d72 !important; }
+        .tone-amber { color: #e0b765 !important; }
+        .tone-muted { color: #82908d !important; }
+        .tara-rail-rows { padding: 7px 16px 3px; }
+        .tara-rail-rows span { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1b2426; color: #82908d; font-size: 12px; }
+        .tara-rail-rows span:last-child { border-bottom: 0; }
+        .tara-rail-rows b { color: #eef4f0; font: 500 10px 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
+        .tara-rail-actions { display: flex; gap: 8px; padding: 0 16px 16px; }
+        .tara-rail-mission > .tara-rail-kicker { display: block; padding: 0 16px 12px; }
+        .tara-rail-riskbar { display: flex; gap: 3px; height: 5px; margin: 10px 16px 8px; }
+        .tara-rail-riskbar i { flex: 1; background: #27302e; }
+        .tara-rail-riskbar i.is-hot { background: #62e39a; }
+        .tara-rail-action { flex: 1; margin: 0; padding: 9px 12px; border: 1px solid #3c9567; background: #173d2c; color: #62e39a; font: 9px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+        .tara-rail-action--secondary { border-color: #394346; background: #151b1d; color: #c1ceca; }
+        .tara-rail-alert { display: grid; grid-template-columns: minmax(0,.7fr) minmax(0,1.3fr); gap: 10px; padding: 11px 16px; border-bottom: 1px solid #1c2426; }
+        .tara-rail-alert:last-child { border-bottom: 0; }
+        .tara-rail-alert b { font: 500 11px 'Space Grotesk', sans-serif; }
+        .tara-rail-alert span { color: #82908d; font-size: 10px; line-height: 1.35; }
+        .tara-rail-record { padding: 15px 16px; }
+        .tara-rail-record > strong { display: block; margin-top: 6px; color: #62e39a; font: 600 45px/1 'Space Grotesk', sans-serif; }
+        .tara-rail-record__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 15px -16px -15px; background: #252d31; }
+        .tara-rail-record__grid span { min-height: 60px; padding: 12px; background: #0b1012; color: #82908d; font: 9px 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
+        .tara-rail-record__grid b { display: block; margin-top: 5px; color: #eef4f0; font-size: 11px; font-weight: 500; text-transform: none; }
+        .tara-rail-record__note { padding-top: 12px; color: #56625f; font: 9px/1.4 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
+        .tara-rail-cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #252d31; }
+        .tara-rail-cap-grid span { min-height: 64px; padding: 12px 13px; background: #0b1012; color: #82908d; font-size: 10px; }
+        .tara-rail-cap-grid b { display: block; color: #eef4f0; font: 10px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .06em; }
+        .tara-live-grid { grid-template-columns: minmax(0,1.05fr) minmax(0,1.35fr) minmax(250px,.85fr) !important; }
+        .tara-hourly-row { margin-top: 2px; }
+        @media (min-width: 1181px) and (max-width: 1400px) {
+          .tara-header > div { flex-wrap: nowrap !important; gap: 10px !important; }
+          .tara-brand-lockup { min-width: 0; gap: 7px !important; flex-shrink: 1; }
+          .tara-brand-copy small { font-size: 8px; letter-spacing: .1em; }
+          .tara-modebar { flex-shrink: 1; }
+          .tara-modebar > button { min-width: 64px; padding: 0 8px !important; }
+          .tara-status-chips { gap: 5px; }
+          .tara-status-chips span { padding: 6px 8px; font-size: 8px; }
+          .tara-header > div > .flex-1 { min-width: 0; }
+        }
+        @media (max-width: 1180px) {
+          .tara-header { padding: 0 16px !important; }
+          .tara-brand-lockup { min-width: 175px; }
+          .tara-modebar > button { min-width: 64px; padding: 0 8px !important; }
+          .tara-status-chips { display: none; }
+          .tara-approved-columns { grid-template-columns: minmax(0,1fr); }
+          .tara-approved-rail { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+          .tara-rail-card { margin-bottom: 0; }
+          .tara-rail-capabilities { grid-column: 1 / -1; }
+        }
+        @media (max-width: 760px) {
+          .tara-header { min-height: 64px; padding: 8px 14px !important; }
+          .tara-header > div { flex-wrap: wrap; }
+          .tara-brand-lockup { min-width: 145px; }
+          .tara-brand-copy small { font-size: 8px; }
+          .tara-modebar { order: 3; width: 100%; height: 40px; overflow-x: auto; border-top: 1px solid #252d31; }
+          .tara-modebar > button { min-width: 74px; height: 40px; }
+          .tara-call-ledger__topline, .tara-call-ledger__hero { display: block; }
+          .tara-call-ledger__badges { justify-content: flex-start; margin-top: 12px; }
+          .tara-call-ledger__truth { padding-top: 12px; text-align: left; }
+          .tara-call-ledger__metrics { grid-template-columns: repeat(2,1fr); }
+          .tara-call-ledger__timeline { flex-wrap: wrap; line-height: 1.6; }
+          .tara-call-ledger__details { grid-template-columns: 1fr; }
+          .tara-live-grid { grid-template-columns: 1fr !important; }
+          .tara-approved-rail { display: block; }
+          .tara-rail-card { margin-bottom: 12px; }
+          .tara-workspace-nav { margin-top: 2px; }
         }
       `}</style>
       {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
