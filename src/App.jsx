@@ -47101,6 +47101,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(autoOrderStateRef.current)return true;
       if(_manualKalshiEntryRef.current)return true;
       if(_userPositionRef.current)return true;
+      // V13.4.355: reload recovery. A live Kalshi position can outlive Tara's
+      // in-memory autoOrderState/userPosition (or AutoTrade can be disarmed
+      // after an entry). Once the active ticker is known, keep polling so an
+      // exchange-only position is surfaced instead of becoming invisible until
+      // the user manually recreates a local marker. This remains one positions
+      // read per 30s and does not submit or retry anything.
+      if(_kalshiActiveMarketRef.current?.ticker)return true;
       return false;
     };
     let _stopped=false;
