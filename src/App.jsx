@@ -53216,7 +53216,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 const _shadowLean=_shadowFresh&&_shadow.leanDir!=='NEUTRAL'?_shadow:null;
                 const _leanColor=_shadowLean?(_shadowLean.leanDir==='UP'?'rgb(35,185,129)':'rgb(232,69,94)'):null;
                 return(
-                  <button key={k} onClick={()=>setCurrentAsset(k)}
+                  <button key={k} onClick={()=>{setShowWeather(false);setShowSports(false);setCurrentAsset(k);}}
                     className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${_active?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                     style={_active?{background:_c.color+'22',color:_c.color,border:'1px solid '+_c.color+'66'}:{}}
                     title={_active?_c.label:_shadowLean?`${_c.label} — Tara leans ${_shadowLean.leanDir} ${_shadowLean.confidence}%`:_c.label}
