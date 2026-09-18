@@ -6134,6 +6134,18 @@ const _canonicalTrades=(callLog)=>{
   //   the lock timestamp; normalize once here so all downstream readers are whole.
   return _deduplicateByWindow(callLog).map(e=>(e&&!e.time&&e.id)?{...e,time:e.id}:e);
 };
+
+// V13.4.353: one display-safe record authority for the control room. The
+// existing scorecard already scopes to the active asset/window and excludes
+// no-trade overrides; the new shell reads that same result instead of recounting
+// raw log rows and quietly disagreeing with the legacy record card.
+const _taraRecordStats=(scorecard)=>{
+  const wins=Number(scorecard?.wins)||0;
+  const losses=Number(scorecard?.losses)||0;
+  const sitouts=Number(scorecard?.sitouts)||0;
+  const scored=wins+losses;
+  return{wins,losses,sitouts,scored,total:scored+sitouts,winRate:scored?Math.round(wins/scored*100):null};
+};
 // ════════════════════════════════════════════════════════════════════════════
 
 // Returns table in the same shape as V104_SEED_CALIBRATION.
@@ -10333,7 +10345,10 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
     `&symbol=${_tvExch}%3A${_tvSym}`,
     `&interval=${interval}`,
     '&hidesidetoolbar=1',
-    '&hidetoptoolbar=0',
+    // The control room owns the interval selector above the chart. Keep the
+    // TradingView canvas and its native range controls, but remove the second
+    // interval row that made the chart look like two products stacked together.
+    '&hidetoptoolbar=1',
     '&symboledit=0',
     '&saveimage=0',
     '&toolbarbg=0F0E0C',
@@ -10388,7 +10403,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
 //   controls, or AutoTrade settings. The important distinction is deliberate:
 //   Tara's committed lock is the record; AutoTrade is the execution layer; the
 //   exchange position/reconciliation state is the money-truth layer.
-const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosition,positionReconciliation,taraCallLog,todayData,timeState,windowType})=>{
+const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosition,positionReconciliation,taraScorecards,todayData,timeState,windowType})=>{
   const _snap=snapshot||null;
   const _lock=readLockState(_snap);
   const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
@@ -10397,20 +10412,16 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _autoLabel=_autoOn?(autoExecSettings?.dryRun===false?'ARMED · LIVE':'ARMED · DRY'):'OFF · SAFE';
   const _orderLabel=autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' ').toUpperCase():'WAITING';
   const _positionLabel=userPosition?'OPEN':positionReconciliation?.status==='drift'?'RECONCILE':'FLAT';
-  const _log=Array.isArray(taraCallLog)?taraCallLog:[];
-  const _won=_log.filter(e=>e?.result==='WIN').length;
-  const _lost=_log.filter(e=>e?.result==='LOSS').length;
-  const _sat=_log.filter(e=>e?.result==='SITOUT'||e?.result==='SAT_OUT').length;
-  const _resolved=_won+_lost+_sat;
   const _confidence=Number(_snap?.confidence??_snap?.posterior??taraCall?.confidence??0);
   const _edge=Number(_snap?.edgePts??_snap?.edge??taraCall?.edgePts??taraCall?.edge??0);
   const _edgeLabel=Number.isFinite(_edge)&&_edge!==0?`${_edge>0?'+':''}${Math.round(_edge)}pt`:'—';
   const _window=windowType||timeState?.windowType||'15m';
+  const _record=_taraRecordStats(taraScorecards?.[_window]);
   const _steps=[
     {n:'01',label:'Tara call',value:_callLabel,tone:_dir==='UP'?'up':_dir==='DOWN'?'down':'quiet'},
     {n:'02',label:'AutoTrade',value:_autoLabel,tone:_autoOn?'live':'quiet'},
     {n:'03',label:'Position truth',value:_positionLabel,tone:_positionLabel==='OPEN'?'live':_positionLabel==='RECONCILE'?'warn':'quiet'},
-    {n:'04',label:'Record',value:_resolved?`${_resolved} resolved`:'hourly + window log',tone:'quiet'},
+    {n:'04',label:'Record',value:_record.total?`${_record.total} windows`:'hourly + window log',tone:'quiet'},
   ];
   return(
     <section className="tara-page-brief tara-call-ledger" aria-label="Tara call and execution truth">
@@ -10439,7 +10450,7 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         <div><label>Call</label><strong className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_dir||'—'}</strong></div>
         <div><label>Confidence</label><strong>{_confidence>0?`${Math.round(_confidence)}%`:'—'}</strong></div>
         <div><label>Market edge</label><strong className={_edge>0?'is-up':_edge<0?'is-down':''}>{_edgeLabel}</strong></div>
-        <div><label>Call record</label><strong className="is-amber">{_won} · {_lost} · {_sat}</strong></div>
+        <div><label>Call record</label><strong className="is-amber">{_record.wins} · {_record.losses} · {_record.sitouts}</strong></div>
       </div>
       <div className="tara-call-ledger__timeline">
         <span>OBSERVE</span><i>→</i><span>LEAN</span><i>→</i><b>LOCKED</b><i>→</i><span>SETTLE</span><i>→</i><span>{_window.toUpperCase()} RECORD</span>
@@ -10453,10 +10464,10 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         </div>
         <div>
           <h4>RECORD TRUTH</h4>
-          <span><b>Won</b><strong>{_won}</strong></span>
-          <span><b>Lost</b><strong className="is-down">{_lost}</strong></span>
-          <span><b>Sat out</b><strong>{_sat}</strong></span>
-          <span><b>Window</b><strong>last {_resolved||'—'} calls</strong></span>
+          <span><b>Won</b><strong>{_record.wins}</strong></span>
+          <span><b>Lost</b><strong className="is-down">{_record.losses}</strong></span>
+          <span><b>Sat out</b><strong>{_record.sitouts}</strong></span>
+          <span><b>Scored</b><strong>{_record.scored||'—'}</strong></span>
         </div>
       </div>
       <div className="tara-page-brief__flow">
@@ -10468,36 +10479,37 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         ))}
       </div>
       <div className="tara-page-brief__meta">
-        <span>{_log.length} call records</span><span className="tara-page-brief__dot">·</span><span>hourly ladder stays independent below</span>
+        <span>{_record.total} recorded windows</span><span className="tara-page-brief__dot">·</span><span>{_record.winRate!=null?`${_record.winRate}% scored win rate · sit-outs excluded`: 'win rate starts after a scored outcome'}</span><span className="tara-page-brief__dot">·</span><span>hourly ladder stays independent below</span>
       </div>
     </section>
   );
 };
 
-const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow})=>{
-  const _scroll=()=>{if(typeof document!=='undefined')document.getElementById('tara-primary-surface')?.scrollIntoView({behavior:'smooth',block:'start'});};
+const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow,activeView,setActiveView})=>{
   const _items=[['overview','OVERVIEW'],['execution','EXECUTION'],['signals','SIGNALS'],['market','MARKET'],['analytics','ANALYTICS'],['news','NEWS & MACRO'],['memory','MEMORY'],['schedule','SCHEDULE & LADDER'],['logs','LOGS & SYNC']];
   const _click=(id)=>{
-    if(id==='analytics'){setShowAnalytics(true);return;}
-    if(id==='logs'){setShowHeaderOverflow(true);return;}
-    if(id==='overview'||id==='execution'||id==='signals'||id==='market'||id==='news'||id==='memory'||id==='schedule')_scroll();
+    if(id==='analytics'){setActiveView('analytics');setShowBrain(false);setShowAnalytics(true);return;}
+    if(id==='logs'){setActiveView('logs');setShowHeaderOverflow(true);return;}
+    const targets={overview:'tara-primary-surface',execution:'tara-execution-surface',signals:'tara-signals-surface',market:'tara-market-surface',news:'tara-context-surface',memory:'tara-context-surface',schedule:'tara-schedule-surface'};
+    setActiveView(id);
+    if(typeof document!=='undefined')document.getElementById(targets[id]||'tara-primary-surface')?.scrollIntoView({behavior:'smooth',block:'start'});
   };
-  return <nav className="tara-workspace-nav" aria-label="Workspace views">{_items.map(([id,label],i)=><button key={id} onClick={()=>_click(id)} className={i===0?'is-active':''}>{label}</button>)}<button onClick={()=>setShowBrain(true)}>BRAIN</button></nav>;
+  return <nav className="tara-workspace-nav" aria-label="Workspace views">{_items.map(([id,label])=><button key={id} onClick={()=>_click(id)} className={activeView===id?'is-active':''}>{label}</button>)}<button className={activeView==='brain'?'is-active':''} onClick={()=>{setActiveView('brain');setShowAnalytics(false);setShowBrain(true);}}>BRAIN</button></nav>;
 };
 
-const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,taraCallLog})=>{
+const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,taraScorecards,windowType})=>{
   const _auto=killSwitchEngaged?'KILLED · NEW ORDERS BLOCKED':autoExecSettings?.enabled?(autoExecSettings?.dryRun?'ARMED · DRY RUN':'ARMED · LIVE'):'DISARMED · SAFE';
   const _autoTone=killSwitchEngaged?'bad':autoExecSettings?.enabled?'ok':'muted';
   const _bank=Number(mission?.currentBankroll||mission?.startBankroll||0);
   const _risk=Number(autoExecSettings?.maxBetUsd||autoExecSettings?.betAmount||0);
   const _position=userPosition?'OPEN':positionReconciliation?.status==='drift'?'RECONCILE':'FLAT';
-  const _log=Array.isArray(taraCallLog)?taraCallLog:[];
-  const _record=_log.length;
-  const _won=_log.filter(e=>e?.result==='WIN').length;
-  const _lost=_log.filter(e=>e?.result==='LOSS').length;
-  const _sat=_log.filter(e=>e?.result==='SITOUT'||e?.result==='SAT_OUT').length;
-  const _resolved=_won+_lost+_sat;
-  const _winRate=_resolved?Math.round((_won/_resolved)*100):null;
+  const _record=_taraRecordStats(taraScorecards?.[windowType]);
+  const _recorded=_record.total;
+  const _won=_record.wins;
+  const _lost=_record.losses;
+  const _sat=_record.sitouts;
+  const _resolved=_record.scored;
+  const _winRate=_record.winRate;
   const _riskScore=Number(movementRisk?.score||0);
   return <aside className="tara-approved-rail" aria-label="Execution and record rail">
     <section className="tara-rail-card tara-rail-mission">
@@ -10513,7 +10525,7 @@ const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradi
       <div className="tara-rail-alert"><b className={_riskScore>=70?'tone-bad':_riskScore>=40?'tone-amber':'tone-ok'}>ϟ Movement risk</b><span>{_riskScore>=70?'Extreme movement risk.':_riskScore>=40?'Elevated movement risk.':'Normal movement risk.'} {_riskScore}/100.</span></div>
       <div className="tara-rail-alert"><b className="tone-muted">↕ AutoTrade</b><span>{autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' '):'No order lifecycle is active.'}</span></div>
     </section>
-    <section className="tara-rail-card tara-rail-record"><div className="tara-rail-kicker">LAST 1,000</div><strong>{_winRate!=null?`${_winRate}%`:'—'}</strong><div className="tara-rail-record__grid"><span>Won<b>{_won}</b></span><span>Lost<b>{_lost}</b></span><span>Sat out<b>{_sat}</b></span><span>Resolved<b>{_resolved||'—'}</b></span></div><div className="tara-rail-record__note">Hourly, sports, and weather records stay separate by design.</div></section>
+    <section className="tara-rail-card tara-rail-record"><div className="tara-rail-kicker">LAST 1,000 · TARA CALLS</div><strong>{_winRate!=null?`${_winRate}%`:'—'}</strong><div className="tara-rail-record__sub">scored win rate · sit-outs excluded</div><div className="tara-rail-record__grid"><span>Won<b>{_won}</b></span><span>Lost<b>{_lost}</b></span><span>Sat out<b>{_sat}</b></span><span>Scored<b>{_resolved||'—'}</b></span></div><div className="tara-rail-record__note">{_recorded||'No'} recorded windows · hourly, sports, and weather records stay separate.</div></section>
     <section className="tara-rail-card tara-rail-capabilities"><div className="tara-rail-card__head"><div><div className="tara-rail-kicker">CAPABILITIES LEDGER</div><h2>Everything remains reachable</h2></div><small>inventory</small></div><div className="tara-rail-cap-grid"><span><b>TRADE</b>signal · fills · exit</span><span><b>PROTECT</b>kill · reconcile · no-fill</span><span><b>READ</b>chart · depth · tape</span><span><b>LEARN</b>memory · analytics</span><span><b>CONTEXT</b>news · macro · weather</span><span><b>OPERATE</b>schedule · logs · export</span></div></section>
   </aside>;
 };
@@ -28921,6 +28933,19 @@ function sportsDateKey(start){
   const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
   return p;
 }
+// For the compact "what is coming up" lane, a date-only fixture still has
+// enough information to exclude dates that are already in the past. Same-day
+// date-only rows remain actionable because there is no reliable clock to
+// declare them started.
+function sportsIsFuture(start,nowMs=Date.now()){
+  if(!start)return false;
+  const{d,dateOnly}=sportsParseStart(start);
+  if(!d)return false;
+  if(!dateOnly)return d.getTime()>nowMs;
+  const key=sportsDateKey(start);
+  const today=sportsDateKey(new Date(nowMs).toISOString());
+  return Boolean(key&&today&&key>=today);
+}
 function sportsDateLabel(key){
   if(!key)return'Date TBC';
   const d=new Date(key+'T12:00:00Z');
@@ -29864,6 +29889,7 @@ function useWeatherPicks(){
 
 function WeatherView({onClose,weatherPicks}){
   const[cityId,setCityId]=React.useState('NYC');
+  const[weatherLane,setWeatherLane]=React.useState('live');
   const[state,setState]=React.useState({loading:true,err:null,rows:[],fc:null,runMax:null,obsN:0,obsAt:null,hourLocal:null,sigma:null,ready:false,biting:false});
   const city=_WX_CITIES.find(c=>c.id===cityId)||_WX_CITIES[0];
 
@@ -29957,6 +29983,38 @@ function WeatherView({onClose,weatherPicks}){
           })}
         </div>
 
+        {/* V13.4.353: make the three weather states navigable before the
+            evidence table. The full evidence and settled history remain below;
+            this strip simply makes live, paper, and record discoverable. */}
+        <div className="weather-lane-tabs" role="tablist" aria-label="Weather pick state">
+          {[['live','LIVE',P.openLive.length],['paper','PAPER',P.openPaper.length],['settled','SETTLED',P.recent.length]].map(([id,label,count])=>(
+            <button key={id} role="tab" aria-selected={weatherLane===id} onClick={()=>setWeatherLane(id)} className={weatherLane===id?'is-active':''}>
+              <span>{label}</span><b>{count}</b>
+            </button>
+          ))}
+          <span className="weather-lane-tabs__note">{P.scanAt?'last sweep '+new Date(P.scanAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'live scan every 5 min'}</span>
+        </div>
+
+        {weatherLane!=='live'&&(
+          <section className="weather-lane-preview" aria-label={weatherLane==='paper'?'Open paper picks':'Settled weather record'}>
+            <div className="weather-lane-preview__head">
+              <div><span>{weatherLane==='paper'?'PAPER PICKS':'SETTLED RECORD'}</span><h3>{weatherLane==='paper'?'Tracked for learning, not money':'What has resolved so far'}</h3></div>
+              <small>{weatherLane==='paper'?`${P.paper.w}–${P.paper.l} settled · ${P.paper.open} open`:`${P.live.w+P.paper.w}–${P.live.l+P.paper.l} settled across both lanes`}</small>
+            </div>
+            {(weatherLane==='paper'?P.openPaper:P.recent).slice(0,6).length?(
+              <div className="weather-lane-preview__list">
+                {(weatherLane==='paper'?P.openPaper:P.recent).slice(0,6).map(p=>(
+                  <div className="weather-lane-preview__row" key={_wxPickId(p)}>
+                    <span>{p.cityLabel||p.city||'City'} · {p.sub||'bucket'}</span>
+                    <b>{p.side||'—'} @{p.price==null?'—':p.price+'c'}</b>
+                    <em>{weatherLane==='paper'?'OPEN':(p.result||'VOID').toUpperCase()}</em>
+                  </div>
+                ))}
+              </div>
+            ):(<div className="weather-lane-preview__empty">No {weatherLane==='paper'?'paper picks are open':'settled weather picks yet'}. The lane is still visible below for the next scan.</div>)}
+          </section>
+        )}
+
         {/* V13.4.221: the answer to "what should I be on", above everything else.
             Scanned across every city whose day is underway, not just the pill
             that happens to be selected. */}
@@ -29966,7 +30024,7 @@ function WeatherView({onClose,weatherPicks}){
           <div className="flex items-baseline justify-between mb-2">
             <span className="uppercase tracking-[0.16em] font-bold text-[9px]"
                   style={{color:P.openLive.length?'#23B981':'#D4A03A'}}>
-              {P.openLive.length?'be on this':'nothing to be on'}
+              {P.openLive.length?'LIVE PICKS':'STANDING DOWN'}
             </span>
             <span className="text-[9px] uppercase tracking-[0.12em]" style={{color:'rgba(255,255,255,0.30)'}}>
               {P.scanAt?'scanned '+new Date(P.scanAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'scanning…'}
@@ -30000,7 +30058,7 @@ function WeatherView({onClose,weatherPicks}){
             </div>
           )):(
             <div className="text-[11px] leading-relaxed" style={{color:'rgba(255,255,255,0.60)'}}>
-              No city has a bucket that is both already passed and still paying. That is the normal answer most of the day — this lane only offers a trade when the arithmetic is there, and it refuses to invent one from the forecast. {P.openPaper.length>0&&<>The model has {P.openPaper.length} paper call{P.openPaper.length===1?'':'s'} running below; those are being scored, not traded.</>}
+              No city currently has a bucket that is both passed and still paying. That is the normal answer most of the day. Tara only offers a live trade when the arithmetic is there; paper calls remain visible for learning. {P.openPaper.length>0&&<>There are {P.openPaper.length} paper call{P.openPaper.length===1?'':'s'} below.</>}
             </div>
           )}
         </div>
@@ -30474,6 +30532,49 @@ function SportsView({onClose}){
                   re-price itself{started>0?<span> — <span style={{color:'#7CA6E8'}}>{started} fixture{started===1?' has':'s have'} already started</span> and {started===1?'is':'are'} marked STARTED rather than actionable</span>:null}.
                 </span>
               </div>
+            );
+          })()}
+
+          {/* V13.4.353: the board answers the user's first question before the
+              evidence lab. Keep the full grouped board below, but expose the
+              next actionable slice with tracked status and the lock-time price
+              in the first screen. */}
+          {tab==='board'&&(()=>{
+            const nextRows=rows.filter(r=>sportsIsFuture(r.start,nowMs)&&r.advice!=='STARTED').slice(0,6);
+            const tracked=nextRows.filter(r=>r.tracked).length;
+            const when=(start)=>{
+              const parsed=sportsParseStart(start);
+              if(parsed.dateOnly)return'all day';
+              return parsed.d?parsed.d.toLocaleString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'}):'time TBC';
+            };
+            return(
+              <section className="sports-next-glance" aria-label="Next sports picks">
+                <div className="sports-next-glance__head">
+                  <div>
+                    <div className="sports-next-glance__eyebrow">NEXT PICKS</div>
+                    <h3>What is coming up</h3>
+                  </div>
+                  <div className="sports-next-glance__count"><b>{nextRows.length}</b> shown · <b>{tracked}</b> tracked</div>
+                </div>
+                {nextRows.length?(
+                  <div className="sports-next-glance__list">
+                    {nextRows.map((r,i)=>(
+                      <div className="sports-next-glance__row" key={(r.id||r.match||r.event||'next')+'-'+i}>
+                        <span className="sports-next-glance__time">{when(r.start)}</span>
+                        <div className="sports-next-glance__pick">
+                          <strong>{r.pick||r.label||'Pick pending'}</strong>
+                          <span>{r.event||r.match||'Fixture'} · {r.sport_label||r.sport||'sport'}</span>
+                        </div>
+                        <span className="sports-next-glance__prob">{r.model==null?'—':Math.round(r.model*100)+'%'}<small> model</small></span>
+                        <span className={r.tracked?'sports-next-glance__tracked':'sports-next-glance__paper'}>{r.tracked?'TRACKED':'PAPER'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ):(
+                  <div className="sports-next-glance__empty">No future fixtures in this board. Open Record for settled picks or refresh when the next model run lands.</div>
+                )}
+                <div className="sports-next-glance__foot">Tracked picks are the only rows that count toward the Sports record. Paper rows stay visible for learning.</div>
+              </section>
             );
           })()}
 
@@ -34236,6 +34337,7 @@ function TaraApp(){
   const[showStats,setShowStats]=useState(false); // V2.7: full stats analytics modal
   const[showSports,setShowSports]=useState(false); // v13.4.149: sports prediction record
   const[showWeather,setShowWeather]=useState(false); // V13.4.217: weather lane — a market whose settlement number cannot be pushed around
+  const[workspaceFocus,setWorkspaceFocus]=useState('overview'); // V13.4.353: real workspace navigation, not a row of dead scroll buttons
   // V13.4.246: lifted out of WeatherView so its picks keep scanning and
   //   settling on the app's own 5-minute sweep even when the Weather tab is
   //   closed. It used to live inside WeatherView, whose state React destroys
@@ -53284,8 +53386,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
           </div>
 
-          {/* TODAY P&L */}
-          <TodayPnLPill todayData={todayData} onClick={_onTodayPnLClick}/>
+          {/* TODAY P&L belongs to the BTC execution lane. Keeping it in the
+              global header made Sports and Weather read like crypto tabs. */}
+          {!showSports&&!showWeather&&<TodayPnLPill todayData={todayData} onClick={_onTodayPnLClick}/>}
 
           {/* SPACER */}
           <div className="flex-1"/>
@@ -53303,7 +53406,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 const _shadowLean=_shadowFresh&&_shadow.leanDir!=='NEUTRAL'?_shadow:null;
                 const _leanColor=_shadowLean?(_shadowLean.leanDir==='UP'?'rgb(35,185,129)':'rgb(232,69,94)'):null;
                 return(
-                  <button key={k} onClick={()=>{setShowWeather(false);setShowSports(false);setCurrentAsset(k);}}
+                  <button key={k} onClick={()=>{setShowWeather(false);setShowSports(false);setShowBrain(false);setShowAnalytics(false);setAnalyticsPageOpen(false);setShowStats(false);setWorkspaceFocus('overview');setCurrentAsset(k);}}
                     className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${_active?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                     style={_active?{background:_c.color+'22',color:_c.color,border:'1px solid '+_c.color+'66'}:{}}
                     title={_active?_c.label:_shadowLean?`${_c.label} — Tara leans ${_shadowLean.leanDir} ${_shadowLean.confidence}%`:_c.label}
@@ -53326,7 +53429,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   behaved. Two booleans that could both be true is how Weather's
                   full-screen view ended up rendering on top of Sports instead of
                   replacing it. */}
-              <button onClick={()=>{setShowWeather(false);setShowSports(v=>!v);}}
+              <button onClick={()=>{setShowWeather(false);setShowBrain(false);setShowAnalytics(false);setAnalyticsPageOpen(false);setShowStats(false);setWorkspaceFocus('overview');setShowSports(v=>!v);}}
                 className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showSports?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                 style={showSports?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
                 title="Sports picks and record"
@@ -53335,7 +53438,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <span className="hidden sm:inline text-[10px]">Sports</span>
               </button>
               {/* V13.4.217: weather lane */}
-              <button onClick={()=>{setShowSports(false);setShowWeather(v=>!v);}}
+              <button onClick={()=>{setShowSports(false);setShowBrain(false);setShowAnalytics(false);setAnalyticsPageOpen(false);setShowStats(false);setWorkspaceFocus('overview');setShowWeather(v=>!v);}}
                 className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showWeather?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
                 style={showWeather?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
                 title="Daily-high temperature ladder"
@@ -53343,13 +53446,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <span className="text-sm leading-none" style={{color:showWeather?T2_GOLD:'inherit'}}>🌡</span>
                 <span className="hidden sm:inline text-[10px]">Weather</span>
               </button>
-              <button onClick={()=>{setShowBrain(true);setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Tara's Brain">BRAIN</button>
-              <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Analytics">ANALYTICS</button>
+              <button onClick={()=>{setShowSports(false);setShowWeather(false);setShowAnalytics(false);setAnalyticsPageOpen(false);setShowBrain(true);setWorkspaceFocus('brain');setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Tara's Brain">BRAIN</button>
+              <button onClick={()=>{setShowSports(false);setShowWeather(false);setShowBrain(false);setAnalyticsPageOpen(false);setShowAnalytics(true);setWorkspaceFocus('analytics');setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Analytics">ANALYTICS</button>
             </div>
 
             <div className="tara-status-chips" aria-label="Live feed status">
-              <span className={feedFrozen?'is-warn':'is-ok'}>● FEED {feedFrozen?'STALE':'NOMINAL'}</span>
-              <span className={kalshiPingState?.ok===false?'is-warn':'is-ok'}>↕ KALSHI {kalshiPingState?.ok===false?'CHECK':'SYNCED'}</span>
+              <span className={showSports||showWeather?'is-warn':feedFrozen?'is-warn':'is-ok'}>{showSports?'● SPORTS BOARD':showWeather?'● WEATHER SCAN':'● FEED '+(feedFrozen?'STALE':'NOMINAL')}</span>
+              <span className={showSports||showWeather?'is-ok':kalshiPingState?.ok===false?'is-warn':'is-ok'}>{showSports?'↕ SNAPSHOT MODEL':showWeather?'↕ NWS · KALSHI':'↕ KALSHI '+(kalshiPingState?.ok===false?'CHECK':'SYNCED')}</span>
             </div>
 
             {/* window fixed at 15m, 5m removed v13.3.0 */}
@@ -53574,6 +53677,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
       {/* V2.1: Top stat strip — sticky 3-stat indicator. Always visible: Posterior · Quality · FGT.
               Provides a constant pulse-check without scanning multiple panels. */}
+      {!showSports&&!showWeather&&(
       <div className="sticky top-[44px] sm:top-[52px] z-30 bg-[#050508] backdrop-blur-md border-b border-[#24242E] px-2 sm:px-4 py-1.5 shrink-0">
         <div className="max-w-[1600px] mx-auto flex items-center gap-3 sm:gap-5 text-[10px] sm:text-[11px]">
           {(()=>{
@@ -53622,6 +53726,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           })()}
         </div>
       </div>
+      )}
 
       {/* ── MAIN CONTENT ── */}
       {/* V9.16.4: Single layout for both modes. Same V9.15 grid structure, same
@@ -54338,6 +54443,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           setShowAnalytics={setShowAnalytics}
           setShowBrain={setShowBrain}
           setShowHeaderOverflow={setShowHeaderOverflow}
+          activeView={workspaceFocus}
+          setActiveView={setWorkspaceFocus}
         />
         <TaraPageBrief
           taraCall={taraCall}
@@ -54346,7 +54453,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           autoOrderState={autoOrderState}
           userPosition={userPosition}
           positionReconciliation={positionReconciliation}
-          taraCallLog={taraCallLog}
+          taraScorecards={taraScorecards}
           todayData={todayData}
           timeState={timeState}
           windowType={windowType}
@@ -54358,7 +54465,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             blank, right column ~22%, on a 2011px-tall left column). lg:items-start
             lets each column size to its own content instead -- the tradeoff is
             the columns' bottom edges no longer line up. */}
-        <div className="tara-live-grid grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:items-start min-w-0 pb-16 lg:pb-0">
+        <div className="tara-live-grid grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:items-start min-w-0 pb-16 lg:pb-0" id="tara-execution-surface">
           
           {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
               the first and largest thing on screen, because it is the only card that
@@ -54367,7 +54474,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               The wrapper is the grid child now, so the column count is unchanged --
               same pattern as the middle column. (V13.4.298: columns no longer
               height-match; each sizes to its own content.) */}
-          <div className="flex flex-col gap-3 min-w-0">
+           <div className="flex flex-col gap-3 min-w-0">
           {/* V13.4.320 — POSITION RECONCILIATION DRIFT BANNER, relocated here from
               inside the legacy "prediction card" (now hidden on desktop, see its
               wrapper below) so it stays visible regardless. Real safety check for
@@ -54699,7 +54806,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               v13.4.153: wrapped so News + Live Feeds can sit directly beneath
               Tara's Call. The wrapper is the grid child now, so the column
               count is unchanged. (V13.4.298: columns no longer height-match.) */}
-          <div className="flex flex-col gap-3 min-w-0">
+           <div className="flex flex-col gap-3 min-w-0" id="tara-signals-surface">
           {/* V13.4.263: stages 2 and 3 of the trade -- how it is going, and what
               the auto-exec did about it. Returns null with no open position, so it
               leads this column only while a trade is live, which is the one time
@@ -55161,7 +55268,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               project_tara_dashboard_mockup_rebuild memory for what's still not
               matched here (Risk banner not built yet; Hourly Ladder belongs in
               its own bottom row per the mockup, not column 3 -- deferred). */}
-          <div className="flex flex-col gap-3 min-w-0">
+           <div className="flex flex-col gap-3 min-w-0" id="tara-context-surface">
           {/* V13.4.298: this whole block (Record/Risk/News+LiveFeeds/Memory) is
               new to column 3 as of the dashboard-mockup-rebuild passes, and none
               of it had mobile-visibility gating -- it sat in a plain,
@@ -55235,13 +55342,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             RightPanel (column 3); ScheduleBySessionCard is new. lg:grid-cols-2
             so both are visible together on desktop; single column on mobile,
             same convention as the main grid above. */}
-        <div className="tara-hourly-row grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0">
+        <div className="tara-hourly-row grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0" id="tara-schedule-surface">
           <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
           <ScheduleBySessionCard taraCallLog={taraCallLog}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
-        <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/>
+        <div id="tara-market-surface" className="tara-market-surface"><ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/></div>
         </div>
         <TaraApprovedRail
           autoExecSettings={autoExecSettings}
@@ -55252,7 +55359,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           userPosition={userPosition}
           positionReconciliation={positionReconciliation}
           autoOrderState={autoOrderState}
-          taraCallLog={taraCallLog}
+          taraScorecards={taraScorecards}
+          windowType={windowType}
         />
         </div>
 
@@ -56731,6 +56839,69 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           .tara-approved-rail { display: block; }
           .tara-rail-card { margin-bottom: 12px; }
           .tara-workspace-nav { margin-top: 2px; }
+        }
+
+        /* V13.4.353: hierarchy pass after the live audit. The rail is a live
+           operating context, so it stays available while the long-form panels
+           remain reachable below. The content grid gets the width it needs for
+           depth, tape, and position labels instead of squeezing them into a
+           narrow three-column sliver. */
+        @media (min-width: 1181px) {
+          .tara-approved-columns { grid-template-columns: minmax(0,1.78fr) minmax(285px,.58fr); }
+          .tara-approved-rail { position: sticky; top: 94px; align-self: start; }
+        }
+        .tara-workspace-nav button { transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease; }
+        .tara-workspace-nav button:active, .tara-rail-action:active { transform: translateY(1px); }
+        .tara-call-ledger__meta, .tara-page-brief__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; }
+        .tara-rail-record__sub { margin-top: 5px; color: #82908d; font: 9px/1.3 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: .06em; }
+        #tara-execution-surface, #tara-signals-surface, #tara-context-surface, #tara-schedule-surface, #tara-market-surface { scroll-margin-top: 104px; }
+        #tara-market-surface .tv-chart-container { height: clamp(360px, 38vw, 520px) !important; }
+        .sports-next-glance { margin: 0 0 18px; border: 1px solid rgba(124,166,232,.28); background: linear-gradient(135deg, rgba(124,166,232,.08), rgba(10,10,14,.96) 60%); }
+        .sports-next-glance__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; padding: 15px 16px 12px; border-bottom: 1px solid rgba(124,166,232,.18); }
+        .sports-next-glance__eyebrow { color: #7CA6E8; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .16em; font-weight: 700; }
+        .sports-next-glance h3 { margin: 6px 0 0; color: #eef4f0; font: 600 20px/1 'Space Grotesk', sans-serif; letter-spacing: -.03em; }
+        .sports-next-glance__count { color: rgba(237,237,237,.48); font: 10px/1.4 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; text-align: right; }
+        .sports-next-glance__count b { color: #eef4f0; }
+        .sports-next-glance__row { display: grid; grid-template-columns: 70px minmax(0,1fr) 74px 64px; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid rgba(237,237,237,.07); }
+        .sports-next-glance__time { color: rgba(237,237,237,.46); font: 10px 'IBM Plex Mono', ui-monospace, monospace; }
+        .sports-next-glance__pick { min-width: 0; }
+        .sports-next-glance__pick strong { display: block; overflow: hidden; color: #eef4f0; font: 600 12px/1.25 'Space Grotesk', sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+        .sports-next-glance__pick span { display: block; overflow: hidden; margin-top: 3px; color: rgba(237,237,237,.40); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+        .sports-next-glance__prob { color: #eef4f0; font: 600 12px 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
+        .sports-next-glance__prob small { color: rgba(237,237,237,.32); font-size: 8px; font-weight: 400; }
+        .sports-next-glance__tracked, .sports-next-glance__paper { justify-self: end; padding: 4px 5px; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .06em; text-align: center; }
+        .sports-next-glance__tracked { color: #23B981; border: 1px solid rgba(35,185,129,.32); background: rgba(35,185,129,.08); }
+        .sports-next-glance__paper { color: #D4A03A; border: 1px solid rgba(212,160,58,.28); background: rgba(212,160,58,.07); }
+        .sports-next-glance__empty, .sports-next-glance__foot { padding: 12px 16px; color: rgba(237,237,237,.46); font-size: 11px; line-height: 1.5; }
+        .sports-next-glance__foot { color: rgba(237,237,237,.30); border-top: 1px solid rgba(237,237,237,.07); font: 9px/1.4 'IBM Plex Mono', ui-monospace, monospace; }
+        .weather-lane-tabs { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 4px; border: 1px solid rgba(255,255,255,.10); background: rgba(10,10,14,.78); }
+        .weather-lane-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid transparent; color: rgba(255,255,255,.42); background: transparent; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .11em; }
+        .weather-lane-tabs button:hover, .weather-lane-tabs button.is-active { color: #eef4f0; border-color: rgba(212,160,58,.32); background: rgba(212,160,58,.09); }
+        .weather-lane-tabs button b { color: #D4A03A; font-weight: 600; }
+        .weather-lane-tabs__note { margin-left: auto; padding-right: 8px; color: rgba(255,255,255,.28); font: 9px 'IBM Plex Mono', ui-monospace, monospace; }
+        .weather-lane-preview { margin: 0 0 12px; border: 1px solid rgba(212,160,58,.24); background: rgba(212,160,58,.05); }
+        .weather-lane-preview__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 13px 14px 10px; border-bottom: 1px solid rgba(212,160,58,.15); }
+        .weather-lane-preview__head span { color: #D4A03A; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .14em; font-weight: 700; }
+        .weather-lane-preview__head h3 { margin: 5px 0 0; color: #eef4f0; font: 600 18px/1 'Space Grotesk', sans-serif; }
+        .weather-lane-preview__head small { color: rgba(255,255,255,.38); font: 9px/1.4 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
+        .weather-lane-preview__row { display: grid; grid-template-columns: minmax(0,1fr) 110px 58px; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.07); color: rgba(255,255,255,.70); font-size: 11px; }
+        .weather-lane-preview__row b { color: #eef4f0; font: 11px 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
+        .weather-lane-preview__row em { color: #D4A03A; font: 9px 'IBM Plex Mono', ui-monospace, monospace; font-style: normal; text-align: right; }
+        .weather-lane-preview__empty { padding: 14px; color: rgba(255,255,255,.45); font-size: 11px; }
+        @media (max-width: 560px) {
+          .sports-next-glance__head { align-items: flex-start; flex-direction: column; }
+          .sports-next-glance__count { text-align: left; }
+          .sports-next-glance__row { grid-template-columns: 54px minmax(0,1fr) 58px; gap: 8px; padding: 10px 12px; }
+          .sports-next-glance__row > :last-child { grid-column: 2 / -1; justify-self: start; }
+          .weather-lane-tabs { overflow-x: auto; }
+          .weather-lane-tabs__note { min-width: max-content; }
+          .weather-lane-preview__head { align-items: flex-start; flex-direction: column; }
+          .weather-lane-preview__head small { text-align: left; }
+          .weather-lane-preview__row { grid-template-columns: minmax(0,1fr) auto; }
+          .weather-lane-preview__row em { grid-column: 2; grid-row: 1; }
+        }
+        @media (max-width: 1180px) {
+          .tara-approved-rail { position: static; }
         }
       `}</style>
       {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
