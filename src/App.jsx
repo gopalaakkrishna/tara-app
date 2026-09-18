@@ -2888,6 +2888,7 @@ const readExchangePositionTruth=({positionReconciliation,autoOrderState,userPosi
     :null;
   const _noFillConfirmed=_details.some(d=>d&&d.kind==='unknown-resolved-nofill')
     ||(autoOrderState?.status==='no-fill'&&autoOrderState?.noFillConfirmed===true);
+  const _exitFlatConfirmed=_details.some(d=>d&&d.kind==='exit-confirmed-flat');
   const _localExpectation=!!(userPosition||manualKalshiEntry||autoOrderState);
   const _hasUnmanagedConfirmedFill=_details.some(d=>d&&(
     d.kind==='unknown-resolved-filled'||d.kind==='unknown-to-tara'));
@@ -2904,8 +2905,13 @@ const readExchangePositionTruth=({positionReconciliation,autoOrderState,userPosi
       summary:'Kalshi confirmed no position for this AutoTrade attempt.',
       detail:'No duplicate retry is needed for this attempt.'};
   }
+  if(_exitFlatConfirmed&&!_hasUnmanagedConfirmedFill&&!_match){
+    return{state:'flat',label:'FLAT · EXIT CONFIRMED',tone:'quiet',match:null,count:0,
+      summary:'Kalshi showed no position on two consecutive checks after the exit attempt.',
+      detail:'Review the original exit order in exchange history; no duplicate exit was submitted.'};
+  }
   const _pendingOnly=_details.length>0&&_details.every(d=>d&&(
-    d.kind==='phantom-auto-pending'||d.kind==='unknown-nofill-pending'));
+    d.kind==='phantom-auto-pending'||d.kind==='unknown-nofill-pending'||d.kind==='exit-verification-pending'));
   if(_rec.status==='drift'&&_pendingOnly){
     return{state:'checking',label:'CHECKING',tone:'warn',match:null,count:0,
       summary:'Kalshi is being rechecked before Tara declares a fill or no-fill.',
@@ -15594,7 +15600,7 @@ function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitN
   //   second confirmation (see _driftMiss in the reconciliation poll) --
   //   amber, same as SIT-OUT's "watch, not alarmed, not confirmed" tier.
   //   Deliberately NOT the green a genuine 'confirmed no fill' gets.
-  const _kindColor=(k)=>k==='phantom-auto-pending'||k==='unknown-nofill-pending'?T2_SITOUT:k==='unknown-to-tara'||k==='unknown-resolved-nofill'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
+  const _kindColor=(k)=>k==='phantom-auto-pending'||k==='unknown-nofill-pending'||k==='exit-verification-pending'?T2_SITOUT:k==='unknown-to-tara'||k==='unknown-resolved-nofill'||k==='exit-confirmed-flat'?'#23B981':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#23B981':'#E8455E';
   const _kindLabel=(k)=>{
     if(k==='phantom-auto')return 'phantom (auto)';
     if(k==='phantom-auto-pending')return 'verifying — recheck pending';
@@ -15608,19 +15614,24 @@ function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitN
     if(k==='unknown-ticker-mismatch')return 'ticker mismatch — verify';
     if(k==='ticker-mismatch-auto')return 'ticker mismatch — verify';
     if(k==='side-mismatch-auto')return 'side mismatch — verify';
+    if(k==='exit-unconfirmed-open')return 'exit unconfirmed — still open';
+    if(k==='exit-verification-pending')return 'exit check pending';
+    if(k==='exit-confirmed-flat')return 'exit confirmed flat';
     return k;
   };
   const _isConfirmedNoFill=_rec.driftDetails.length>0&&_rec.driftDetails.every(d=>d&&d.kind==='unknown-resolved-nofill');
+  const _isConfirmedExitFlat=_rec.driftDetails.length>0&&_rec.driftDetails.every(d=>d&&d.kind==='exit-confirmed-flat');
   const _isPending=_rec.driftDetails.length>0&&_rec.driftDetails.every(d=>d&&(
-    d.kind==='phantom-auto-pending'||d.kind==='unknown-nofill-pending'));
-  const _bannerColor=_isConfirmedNoFill?'#23B981':_isPending?T2_SITOUT:'#E8455E';
-  const _bannerBg=_isConfirmedNoFill?'rgba(35,185,129,0.07)':_isPending?'rgba(212,162,76,0.08)':'rgba(232,69,94,0.08)';
-  const _bannerBorder=_isConfirmedNoFill?'rgba(35,185,129,0.28)':_isPending?'rgba(212,162,76,0.30)':'rgba(232,69,94,0.35)';
+    d.kind==='phantom-auto-pending'||d.kind==='unknown-nofill-pending'||d.kind==='exit-verification-pending'));
+  const _isConfirmedFlat=_isConfirmedNoFill||_isConfirmedExitFlat;
+  const _bannerColor=_isConfirmedFlat?'#23B981':_isPending?T2_SITOUT:'#E8455E';
+  const _bannerBg=_isConfirmedFlat?'rgba(35,185,129,0.07)':_isPending?'rgba(212,162,76,0.08)':'rgba(232,69,94,0.08)';
+  const _bannerBorder=_isConfirmedFlat?'rgba(35,185,129,0.28)':_isPending?'rgba(212,162,76,0.30)':'rgba(232,69,94,0.35)';
   return (
     <div className="mb-2 p-2.5 rounded-lg" style={{background:_bannerBg,border:`1px solid ${_bannerBorder}`}}>
       <div className="flex items-baseline justify-between mb-1.5">
         <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:_bannerColor}}>
-          {_isConfirmedNoFill?'✓ No fill confirmed':_isPending?'◌ Position check pending':'⚠ Position drift detected'}
+          {_isConfirmedNoFill?'✓ No fill confirmed':_isConfirmedExitFlat?'✓ Position flat confirmed':_isPending?'◌ Position check pending':'⚠ Position drift detected'}
         </span>
         <div className="flex items-center gap-2.5">
           {onRetryNow&&(
@@ -15645,6 +15656,8 @@ function PositionReconciliationBanner({positionReconciliation,onRetryNow,onExitN
       <div className="text-[10px] mb-1.5 leading-relaxed" style={{color:'rgba(237,237,237,0.65)'}}>
         {_isConfirmedNoFill
           ?`Kalshi confirms this AutoTrade attempt did not create a live position. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`
+          :_isConfirmedExitFlat
+          ?`Kalshi shows no position on two consecutive checks after the uncertain exit. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`
           :_isPending
           ?`Kalshi is rechecking the position before Tara declares a fill or no-fill. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`
           :`Tara's tracked position${_rec.driftDetails.length===1?'':'s'} ${_rec.driftDetails.length===1?'doesn\'t':'don\'t'} match what Kalshi shows. Last checked ${Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.`}
@@ -47232,7 +47245,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   failure with no HTTP call ever made) is not a fill-uncertain state
       //   and stays out of scope -- only 'no-fill' specifically represents
       //   "we sent real orders and are not sure what happened to them."
-      if(_aos&&!_aos.dryRun&&(_aos.status==='unknown'||(_aos.status==='error'&&_aos.reason==='no-fill'))&&_aos.ticker){
+      if(_aos&&!_aos.dryRun&&((_aos.status==='unknown'&&_aos.reason!=='exit-unconfirmed-verify-kalshi-directly')||(_aos.status==='error'&&_aos.reason==='no-fill'))&&_aos.ticker){
         const _match=positions.find(p=>p.ticker===_aos.ticker);
         if(_match&&_match.count>0){
           _driftHit('unknown-nofill:'+_aos.ticker);
@@ -47297,6 +47310,48 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               note:`Kalshi shows no position under the tracked ticker (${_aos.ticker}), but ${_sameSideOpen.length} other open ${_expectedSide.toUpperCase()} position(s) exist: ${_sameSideOpen.map(p=>p.ticker+' x'+p.count).join(', ')}. This may be a ticker mismatch, not a genuine non-fill -- check Kalshi directly before assuming this is safe to ignore.`,
             });
           }
+        }
+      }
+      // V13.4.354: EXIT-UNCERTAINTY RECONCILIATION. An exit can be accepted
+      // without filling, or the response can fail after Kalshi has accepted it.
+      // _runExit correctly records that as unknown/error and refuses to retry,
+      // but the old reconciler only watched filled/exiting states. That left a
+      // real open position with no banner after an uncertain exit. Use the
+      // exchange position snapshot as the safety backstop: an open match stays
+      // urgent; two consecutive empty snapshots are required before calling it
+      // flat. This never places a second exit order.
+      const _exitReason=String(_aos?.reason||'');
+      const _exitUncertain=!!(_aos&&!_aos.dryRun&&_aos.ticker&&(
+        (_aos.status==='unknown'&&_exitReason==='exit-unconfirmed-verify-kalshi-directly')
+        ||(_aos.status==='error'&&(_exitReason.startsWith('exit failed:')||_exitReason.startsWith('exit threw:')))
+      ));
+      if(_exitUncertain){
+        const _exitMatch=positions.find(p=>p.ticker===_aos.ticker&&p.count>0);
+        const _exitRec=readOrderState(_aos);
+        const _exitExpectedSide=_aos.side||(_aos.dir==='UP'?'yes':'no');
+        const _exitKey='exit-unconfirmed:'+_aos.ticker;
+        if(_exitMatch){
+          _driftHit(_exitKey);
+          _details.push({
+            kind:'exit-unconfirmed-open',
+            ticker:_aos.ticker,
+            taraCount:_exitRec.count,
+            kalshiCount:_exitMatch.count,
+            side:_exitMatch.side,
+            note:`Exit is not confirmed, and Kalshi still shows ${_exitMatch.count} ${_exitMatch.side.toUpperCase()} contract(s). Do not submit a duplicate exit until the original order is verified directly.` ,
+          });
+        }else{
+          const _misses=_driftMiss(_exitKey);
+          _details.push({
+            kind:_misses<2?'exit-verification-pending':'exit-confirmed-flat',
+            ticker:_aos.ticker,
+            taraCount:_exitRec.count,
+            kalshiCount:0,
+            side:_exitExpectedSide,
+            note:_misses<2
+              ?'Kalshi shows no position on this check after an uncertain exit — rechecking before declaring it closed.'
+              :'Kalshi shows no position on two consecutive checks after the uncertain exit. Treat the position as flat, but review the original exit order in the exchange history.',
+          });
         }
       }
       // PHANTOM: manualKalshiEntry stale (user closed but didn't tell Tara)
