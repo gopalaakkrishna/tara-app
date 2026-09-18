@@ -10383,6 +10383,55 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
   );
 };
 
+// V13.4.352: A compact orientation rail for the live board. This is additive:
+//   it names the authority chain without replacing any of the existing cards,
+//   controls, or AutoTrade settings. The important distinction is deliberate:
+//   Tara's committed lock is the record; AutoTrade is the execution layer; the
+//   exchange position/reconciliation state is the money-truth layer.
+const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosition,positionReconciliation,taraCallLog,todayData,timeState,windowType})=>{
+  const _snap=snapshot||null;
+  const _lock=readLockState(_snap);
+  const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
+  const _callLabel=_dir?`${_dir} locked`:taraCall?.call==='SIT_OUT'?'sitting out':'scanning';
+  const _autoOn=!!autoExecSettings?.enabled;
+  const _autoLabel=_autoOn?(autoExecSettings?.dryRun===false?'live armed':'dry-run armed'):'off';
+  const _orderLabel=autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' '):'waiting';
+  const _positionLabel=userPosition?'open':positionReconciliation?.status==='drift'?'verify':'none';
+  const _resolved=(todayData?.wins||0)+(todayData?.losses||0);
+  const _window=windowType||timeState?.windowType||'15m';
+  const _steps=[
+    {n:'01',label:'Tara call',value:_callLabel,tone:_dir==='UP'?'up':_dir==='DOWN'?'down':'quiet'},
+    {n:'02',label:'AutoTrade',value:_autoLabel,tone:_autoOn?'live':'quiet'},
+    {n:'03',label:'Position truth',value:_positionLabel,tone:_positionLabel==='open'?'live':_positionLabel==='verify'?'warn':'quiet'},
+    {n:'04',label:'Record',value:_resolved?`${_resolved} resolved`:'hourly + window log',tone:'quiet'},
+  ];
+  return(
+    <section className="tara-page-brief" aria-label="Tara decision flow">
+      <div className="tara-page-brief__intro">
+        <div className="tara-page-brief__eyebrow">CONTROL ROOM · {_window.toUpperCase()} · LIVE</div>
+        <h2>Tara Call <span>→</span> AutoTrade <span>→</span> Position truth</h2>
+        <p>Tara’s locked call is the decision recorded for this window. AutoTrade places the order from that lock; the exchange position and reconciliation check decide what actually exists.</p>
+      </div>
+      <div className="tara-page-brief__flow">
+        {_steps.map(step=>(
+          <div key={step.n} className={'tara-page-brief__step tara-page-brief__step--'+step.tone}>
+            <span className="tara-page-brief__step-no">{step.n}</span>
+            <div className="tara-page-brief__step-copy">
+              <span>{step.label}</span>
+              <strong>{step.value}</strong>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="tara-page-brief__meta">
+        <span>{Array.isArray(taraCallLog)?taraCallLog.length:0} call records</span>
+        <span className="tara-page-brief__dot">·</span>
+        <span>hourly ladder stays visible below</span>
+      </div>
+    </section>
+  );
+};
+
 
 
 // ═══════════════════════════════════════
@@ -19862,9 +19911,16 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   const _isManual=!_haveAutoFill&&_haveManFill;
   const _fill=_haveAutoFill?_autoFill:(_haveManFill?_manFill:NaN);
   const _haveFill=_haveAutoFill||_haveManFill;
+  // V13.4.351: a confirmed Kalshi no-fill is terminal for this auto attempt.
+  // The auto-follow marker is intentionally advisory, so it must not keep making
+  // this card look occupied after reconciliation has proved that the order never
+  // created a real position.
+  const _confirmedNoFill=!!(!_haveManFill&&autoOrderState&&(
+    autoOrderState.status==='no-fill'||autoOrderState.noFillConfirmed===true
+  ));
   // marked in, but we do not know what was paid -- worth saying, not worth guessing
-  const _markedOnly=!_haveFill&&(userPosition==='UP'||userPosition==='DOWN');
-  const _side=_ord.dir||(manualKalshiEntry&&manualKalshiEntry.side)||userPosition||dir;
+  const _markedOnly=!_confirmedNoFill&&!_haveFill&&(userPosition==='UP'||userPosition==='DOWN');
+  const _side=_ord.dir||(manualKalshiEntry&&manualKalshiEntry.side)||(!_confirmedNoFill?userPosition:null)||dir;
   const _worth=(_kValid&&_side)?Math.round(_side==='UP'?_k:(100-_k)):null;
   const _delta=(_haveFill&&_worth!=null)?(_worth-_fill):null;
   const _peak=Number(trailPeakCents);
@@ -19985,12 +20041,18 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 
       {/* ── 2 ── */}
       <Stage n="2" title="how it's going"
-             badge={_autoExited?(_realized==null?'closed':_realized>0?'closed · won':_realized<0?'closed · lost':'closed · flat')
+             badge={_confirmedNoFill?'no fill confirmed'
+                    :_autoExited?(_realized==null?'closed':_realized>0?'closed · won':_realized<0?'closed · lost':'closed · flat')
                     :_placed?(_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat')
                     :_markedOnly?'in · unpriced':'not in'}
-             badgeTone={_autoExited?(_realized>0?GREEN:_realized<0?RED:DIM)
+             badgeTone={_confirmedNoFill?GREEN
+                    :_autoExited?(_realized>0?GREEN:_realized<0?RED:DIM)
                     :_placed?(_delta>0?GREEN:_delta<0?RED:DIM):_markedOnly?GOLD:DIM}>
-        {_autoExited?(
+        {_confirmedNoFill?(
+          <div className="text-[13px] leading-snug" style={{color:'rgba(237,237,237,0.62)'}}>
+            Kalshi confirmed no fill. This auto-trade is flat; there is no real position to manage.
+          </div>
+        ):_autoExited?(
           <div className="text-[15px] leading-snug text-[#EDEDED]/85">
             Closed. {_exitWorth!=null&&<>Sold at <span className="font-semibold tabular-nums">{_exitWorth}¢</span>, </>}
             {_realized!=null&&<>realized <span className="font-semibold tabular-nums" style={{color:_realized>0?GREEN:_realized<0?RED:'#EDEDED'}}>{_realized>0?'+':''}{_realized}¢</span>/contract from a {_fill}¢ entry.</>}
@@ -20032,14 +20094,20 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
 
       {/* ── 3 ── */}
       <Stage n="3" title="what it did"
-             badge={_autoExited?(_realized==null?'exited':_realized>0?'exited · profit':_realized<0?'exited · loss':'exited · flat')
+             badge={_confirmedNoFill?'no fill confirmed'
+                    :_autoExited?(_realized==null?'exited':_realized>0?'exited · profit':_realized<0?'exited · loss':'exited · flat')
                     :_autoExitErrored?'⚠ exit failed'
                     :_placed?(_isManual?'you · manual':_dry?'simulated':'filled · live')
                     :_markedOnly?'no fill logged':(_st?_st.toUpperCase():'nothing yet')}
-             badgeTone={_autoExited?(_realized>0?GREEN:_realized<0?RED:'#EDEDED')
+             badgeTone={_confirmedNoFill?GREEN
+                    :_autoExited?(_realized>0?GREEN:_realized<0?RED:'#EDEDED')
                     :_autoExitErrored?RED
                     :_placed?(_isManual?'#EDEDED':_dry?GOLD:GREEN):_markedOnly?GOLD:DIM}>
-        {_placed?(
+        {_confirmedNoFill?(
+          <div className="text-[13px] text-[#EDEDED]/55 leading-snug">
+            No order filled on Kalshi. The stale advisory marker was cleared automatically.
+          </div>
+        ):_placed?(
           <div className="text-[15px] leading-snug text-[#EDEDED]/85">
             {/* V13.4.278: say WHO bought. A manual fill is his own order, and calling
                 it "Bought" as though the machine did it is the kind of small lie that
@@ -20726,6 +20794,15 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
               return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap'},
                 React.createElement('span',{className:'text-rose-400 font-bold'},'⚠ FILL STATUS UNKNOWN'),
                 React.createElement('span',{className:'text-[#EDEDED]/65 text-[10px]'},_o.dir,' @ ',_entry,'¢ — check Kalshi directly'),
+              );
+            }
+            // V13.4.351: reconciliation has verified this attempt did not fill.
+            // Keep it visibly distinct from an unresolved order and never render
+            // the misleading placing/0-contracts fallback for a terminal no-fill.
+            if(_s==='no-fill'){
+              return React.createElement('span',{className:'flex items-baseline gap-2 flex-wrap'},
+                React.createElement('span',{className:'text-emerald-400 font-bold'},'NO FILL CONFIRMED'),
+                React.createElement('span',{className:'text-[#EDEDED]/65 text-[10px]'},'Kalshi shows no open position'),
               );
             }
             // PLACING / SUBMITTED / RESTING / PARTIALLY_FILLED — order out, no fill yet
@@ -29745,6 +29822,18 @@ function WeatherView({onClose,weatherPicks}){
   return (
     <div className="w-full min-h-0">
       <div className="max-w-[1000px] mx-auto">
+        <section className="tara-specialist-brief tara-specialist-brief--weather" aria-label="Weather picks flow">
+          <div>
+            <div className="tara-specialist-brief__eyebrow">SPECIALIST LANE · WEATHER</div>
+            <h2>Forecast <span>→</span> bucket <span>→</span> record</h2>
+            <p>Live picks are the buckets that can actually be traded now. Paper picks stay visible for learning; settled picks are the record.</p>
+          </div>
+          <div className="tara-specialist-brief__legend">
+            <span><i className="tara-legend-dot tara-legend-dot--live"/>live</span>
+            <span><i className="tara-legend-dot tara-legend-dot--paper"/>paper</span>
+            <span><i className="tara-legend-dot tara-legend-dot--record"/>settled</span>
+          </div>
+        </section>
         <div className="flex items-center justify-between mb-5">
           <div>
             {/* The ladder's day is on screen permanently now. A wrong-day ladder
@@ -30223,6 +30312,18 @@ function SportsView({onClose}){
   return(
     <div className="w-full min-h-0">
       <div className="max-w-[1200px] mx-auto">
+        <section className="tara-specialist-brief tara-specialist-brief--sports" aria-label="Sports picks flow">
+          <div>
+            <div className="tara-specialist-brief__eyebrow">SPECIALIST LANE · SPORTS</div>
+            <h2>Upcoming picks <span>→</span> tracked picks <span>→</span> record</h2>
+            <p>Board shows every fixture Tara priced. A tracked badge means it counts toward the record; Record shows settled picks only.</p>
+          </div>
+          <div className="tara-specialist-brief__legend">
+            <span><i className="tara-legend-dot tara-legend-dot--upcoming"/>upcoming</span>
+            <span><i className="tara-legend-dot tara-legend-dot--tracked"/>tracked</span>
+            <span><i className="tara-legend-dot tara-legend-dot--record"/>record</span>
+          </div>
+        </section>
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-baseline gap-2 mb-1">
@@ -35686,6 +35787,11 @@ function TaraApp(){
   // Values: null=no trade, 'WIN'=user cashed out profit, 'LOSS'=user cut losses
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
+  // V13.4.351: positionEntry is an advisory marker, not proof of a Kalshi fill.
+  // The reconciliation poll needs the marker's source so a confirmed auto no-fill
+  // can clear only the auto-follow marker, never a real manually logged position.
+  const _positionEntryRef=useRef(null);
+  _positionEntryRef.current=positionEntry;
   // V7.10.5: scorecards now persist to localStorage AND sync to cloud. Previously the
   //   user's personal W/L tally was in-memory only — reset every reload AND inconsistent
   //   across devices. Initial value reads localStorage seed (cached from last session).
@@ -39900,7 +40006,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   detection should have been keyed on from the start.
 
   // Position status
-  const positionStatus=useMemo(()=>{if(!positionEntry||!currentPrice)return null;const{price:entry,side}=positionEntry;const pnlPct=side==='UP'?((currentPrice-entry)/entry)*100:((entry-currentPrice)/entry)*100;return{entry,side,pnlPct,isStopHit:pnlPct<=-30};},[positionEntry,currentPrice,betAmount]);
+  // V13.4.351: positionEntry is advisory (and is also used by auto-follow), so a
+  // confirmed auto no-fill must suppress it immediately. Otherwise the header can
+  // say POSITION UP while reconciliation has already proved Tara:0/Kalshi:0.
+  const _confirmedNoFillForPosition=!!(positionReconciliation&&positionReconciliation.status==='drift'
+    &&Array.isArray(positionReconciliation.driftDetails)
+    &&positionEntry&&positionEntry.source==='auto-follow'
+    &&positionReconciliation.driftDetails.some(d=>d&&d.kind==='unknown-resolved-nofill'));
+  const positionStatus=useMemo(()=>{
+    if(_confirmedNoFillForPosition)return null;
+    if(!positionEntry||!currentPrice)return null;
+    const{price:entry,side}=positionEntry;
+    const pnlPct=side==='UP'?((currentPrice-entry)/entry)*100:((entry-currentPrice)/entry)*100;
+    return{entry,side,pnlPct,isStopHit:pnlPct<=-30};
+  },[positionEntry,currentPrice,betAmount,_confirmedNoFillForPosition]);
 
   // V9.1.9: updateScore is a no-op stub. Was incrementing scorecards state directly
   //   but with derive-from-log the log itself drives the count. Legacy callers pass
@@ -46075,7 +46194,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(_entryFiredForRef.current===lockKey)return{ok:false,reason:'already-fired'};
 
     const st=autoOrderState&&autoOrderState.status;
-    if(st&&st!=='exited'&&st!=='error')return{ok:false,reason:'order-in-flight:'+st};
+    // V13.4.351: reconciliation's terminal no-fill outcome is retryable for
+    // this still-open lock, just like the original clean error state. It is a
+    // confirmed absence of a position, not an order that remains in flight.
+    if(st&&st!=='exited'&&st!=='error'&&st!=='no-fill')return{ok:false,reason:'order-in-flight:'+st};
 
     // Executable cost per contract on the side we are actually taking.
     const costCents=_execCostCents(dir,30000);
@@ -46951,6 +47073,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           return;
         }
         const _details=_computeDrift(_res.positions);
+        // V13.4.351: confirmed auto no-fill must retire the local advisory marker.
+        // Before this, auto-follow called handleManualSync() and created a visible
+        // UP/DOWN position before Kalshi had confirmed a fill. When the order later
+        // resolved as a genuine no-fill, the banner correctly said Tara:0/Kalshi:0
+        // but the header still rendered that stale marker as a live position.
+        const _confirmedNoFill=_details.filter(d=>d&&d.kind==='unknown-resolved-nofill');
+        const _aosNow=autoOrderStateRef.current;
+        const _entryNow=_positionEntryRef.current;
+        if(_confirmedNoFill.length>0&&_aosNow&&(_aosNow.status==='unknown'||(_aosNow.status==='error'&&_aosNow.reason==='no-fill'))){
+          const _autoFollowMarker=!!(_entryNow&&_entryNow.source==='auto-follow'
+            &&_entryNow.side===_aosNow.dir
+            &&_userPositionRef.current===_aosNow.dir);
+          if(_autoFollowMarker){
+            setUserPosition(null);
+            setPositionEntry(null);
+            setCurrentOffer('');
+            try{console.info('[V13.4.351] confirmed auto no-fill: cleared advisory auto-follow marker',_aosNow.ticker);}catch(_e){}
+          }
+          // Keep the terminal outcome in the order state so every consumer agrees
+          // that this attempt is flat and no longer treats it as an unresolved fill.
+          setAutoOrderState(prev=>{
+            if(!prev||prev.ticker!==_aosNow.ticker||!(prev.status==='unknown'||(prev.status==='error'&&prev.reason==='no-fill')))return prev;
+            return{...prev,status:'no-fill',noFillConfirmed:true,noFillConfirmedAt:Date.now()};
+          });
+        }
         setPositionReconciliation({
           status:_details.length>0?'drift':'in-sync',
           driftCount:_details.length,
@@ -47223,7 +47370,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(typeof tiltLockUntil!=='undefined'&&tiltLockUntil>Date.now())return;
       if(typeof handleManualSync!=='function')return;
       _autoFollowedWindowRef.current=_wid;
-      handleManualSync(_afCall);
+      handleManualSync(_afCall,{autoFollow:true});
     }catch(_eR){}
   },[_afLocked,_afCall,userPosition,windowType]);
   // V9.2.3: Expose widget data on window for the popup to read.
@@ -52332,6 +52479,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // already gates on userPosition===null upstream).
     const _autoExec=!!(opts&&opts.autoExec);
     const _force=!!(opts&&opts.force);
+    const _autoFollow=!!(opts&&opts.autoFollow);
     // V8.2: Anti-tilt cooldown gate. If active and direction is a new entry (not a flip
     //   on existing position), block it with a confirm. EXIT/flip actions are unblocked.
     // V9.3.0: skip the confirm() prompt when autoExec — guardrails already blocked it
@@ -52375,7 +52523,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(userPosition===dir&&!_force){taraAdviceRef.current='SEARCHING...';setUserPosition(null);setPositionEntry(null);setForceRender(p=>p+1);return;}
     taraAdviceRef.current=String(dir);setUserPosition(String(dir));
     if(currentPrice){
-      setPositionEntry({price:currentPrice,side:dir,time:Date.now()});
+      setPositionEntry({price:currentPrice,side:dir,time:Date.now(),source:_autoFollow?'auto-follow':'manual'});
       const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
       // V145: Expanded trade telemetry. Previously only stored {id, dir, posterior, regime,
       //       clockAtLock, hour, session, windowType, signals, result, betAmt, maxPay}.
@@ -52781,7 +52929,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const advisor=analysis?.advisor||{label:'CONNECTING...',reason:'Fetching market data...',color:'zinc',animate:false,hasAction:false};
 
   return(
-    <div data-tara-theme={simpleMode?'simple':'advanced'} className={'min-h-screen bg-[#050508] text-[#EDEDED] font-sans flex flex-col selection:bg-[#EDEDED]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
+    <div data-tara-theme={simpleMode?'simple':'advanced'} data-tara-view={showSports?'sports':showWeather?'weather':'home'} className={'tara-live-shell min-h-screen bg-[#050508] text-[#EDEDED] font-sans flex flex-col selection:bg-[#EDEDED]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       {/* V9.8.18: Toast notifications — pump/dump + velocity-flip alerts. Fixed
           top-right, auto-close after a few seconds, dismiss on outside-click or
           tap. Stack capped at 3 concurrent. */}
@@ -52974,7 +53122,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
       {/* V134: Learning toast removed — was crashing on minified prod build, will revisit */}
       {/* ── STICKY HEADER — V10.7.44b CLEAN ── */}
-      <header className={'sticky top-0 z-40 bg-[#050508] backdrop-blur-md border-b border-[#24242E] px-2 sm:px-4 py-2 shrink-0'}>
+      <header className={'tara-header sticky top-0 z-40 bg-[#050508] backdrop-blur-md border-b border-[#24242E] px-2 sm:px-4 py-2 shrink-0'}>
         {/* V13.4.224: wraps instead of clipping. At 375px this row holds "Tara"
             (27px), the P&L pill (102px) and five icon buttons (230px) = 359px of
             content in 323px of space, and the excess was being cut off by the
@@ -53873,7 +54021,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       `}</style>
       <main
-        className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
+        className="tara-main flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
       >
 
         {/* v13.4.152: SPORTS is a view swap, not an overlay — the header toggle
@@ -53894,6 +54042,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           currentAsset={currentAsset}
           analysis={analysis}
           currentStreak={currentStreak}
+        />
+
+        <TaraPageBrief
+          taraCall={taraCall}
+          snapshot={taraCallSnapshotRef.current||null}
+          autoExecSettings={autoExecSettings}
+          autoOrderState={autoOrderState}
+          userPosition={userPosition}
+          positionReconciliation={positionReconciliation}
+          taraCallLog={taraCallLog}
+          todayData={todayData}
+          timeState={timeState}
+          windowType={windowType}
         />
 
         {/* V13.4.293: Today card moved to the center column. */}
@@ -56142,6 +56303,162 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           .signal-weights-grid { grid-template-columns: repeat(2, 1fr) !important; }
           .calibration-grid { grid-template-columns: repeat(5, 1fr) !important; }
           .session-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+
+        /* ── V13.4.352 ORIENTATION RAILS ───────────────────────────────
+           These rails make the existing information architecture legible at a
+           glance. They do not replace a control or collapse a data surface. */
+        .tara-page-brief,
+        .tara-specialist-brief {
+          position: relative;
+          overflow: hidden;
+          border: 1px solid rgba(237,237,237,0.12);
+          background: linear-gradient(120deg, rgba(17,17,23,0.98), rgba(9,9,13,0.98));
+          box-shadow: 0 16px 42px rgba(0,0,0,0.16);
+        }
+        .tara-page-brief::before,
+        .tara-specialist-brief::before {
+          content: '';
+          position: absolute;
+          inset: 0 auto auto 0;
+          width: 100%;
+          height: 1px;
+          background: linear-gradient(90deg, rgba(35,185,129,0.78), rgba(35,185,129,0.08) 58%, transparent);
+        }
+        .tara-page-brief {
+          display: grid;
+          grid-template-columns: minmax(0,1.05fr) minmax(380px,1fr);
+          gap: 20px;
+          padding: 19px 20px 13px;
+          border-radius: 12px;
+        }
+        .tara-page-brief__eyebrow,
+        .tara-specialist-brief__eyebrow {
+          color: rgba(237,237,237,0.46);
+          font: 600 9px/1.2 'IBM Plex Mono', ui-monospace, monospace;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+        }
+        .tara-page-brief h2,
+        .tara-specialist-brief h2 {
+          margin: 7px 0 6px;
+          color: rgba(255,255,255,0.96);
+          font: 600 clamp(20px, 2vw, 28px)/1.04 'Space Grotesk', 'Instrument Sans', ui-sans-serif, sans-serif;
+          letter-spacing: -0.035em;
+        }
+        .tara-page-brief h2 span,
+        .tara-specialist-brief h2 span {
+          color: rgba(35,185,129,0.84);
+          font-weight: 400;
+        }
+        .tara-page-brief p,
+        .tara-specialist-brief p {
+          max-width: 660px;
+          color: rgba(237,237,237,0.53);
+          font-size: 11px;
+          line-height: 1.55;
+        }
+        .tara-page-brief__flow {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0,1fr));
+          align-self: center;
+          gap: 1px;
+          overflow: hidden;
+          border: 1px solid rgba(237,237,237,0.10);
+          border-radius: 9px;
+          background: rgba(237,237,237,0.10);
+        }
+        .tara-page-brief__step {
+          min-width: 0;
+          min-height: 72px;
+          padding: 11px 10px 10px;
+          background: rgba(10,10,14,0.94);
+        }
+        .tara-page-brief__step-no {
+          display: block;
+          margin-bottom: 9px;
+          color: rgba(237,237,237,0.26);
+          font: 500 9px/1 'IBM Plex Mono', ui-monospace, monospace;
+          letter-spacing: 0.08em;
+        }
+        .tara-page-brief__step-copy {
+          display: flex;
+          min-width: 0;
+          flex-direction: column;
+          gap: 5px;
+        }
+        .tara-page-brief__step-copy > span {
+          overflow: hidden;
+          color: rgba(237,237,237,0.42);
+          font-size: 9px;
+          font-weight: 600;
+          letter-spacing: 0.09em;
+          text-overflow: ellipsis;
+          text-transform: uppercase;
+          white-space: nowrap;
+        }
+        .tara-page-brief__step-copy strong {
+          overflow: hidden;
+          color: rgba(237,237,237,0.88);
+          font: 600 11px/1.15 'IBM Plex Mono', ui-monospace, monospace;
+          text-overflow: ellipsis;
+          text-transform: uppercase;
+          white-space: nowrap;
+        }
+        .tara-page-brief__step--up .tara-page-brief__step-copy strong,
+        .tara-page-brief__step--live .tara-page-brief__step-copy strong { color: #23B981; }
+        .tara-page-brief__step--down .tara-page-brief__step-copy strong { color: #E8455E; }
+        .tara-page-brief__step--warn .tara-page-brief__step-copy strong { color: #D4A03A; }
+        .tara-page-brief__meta {
+          grid-column: 1 / -1;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding-top: 10px;
+          border-top: 1px solid rgba(237,237,237,0.08);
+          color: rgba(237,237,237,0.32);
+          font: 500 9px/1.2 'IBM Plex Mono', ui-monospace, monospace;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+        }
+        .tara-page-brief__dot { color: rgba(35,185,129,0.78); }
+        .tara-specialist-brief {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 18px;
+          margin-bottom: 17px;
+          padding: 16px 18px 15px;
+          border-radius: 11px;
+        }
+        .tara-specialist-brief__legend {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 8px 13px;
+          color: rgba(237,237,237,0.50);
+          font: 600 9px/1.2 'IBM Plex Mono', ui-monospace, monospace;
+          letter-spacing: 0.09em;
+          text-transform: uppercase;
+          white-space: nowrap;
+        }
+        .tara-specialist-brief__legend span { display: inline-flex; align-items: center; gap: 6px; }
+        .tara-legend-dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: rgba(237,237,237,0.35); }
+        .tara-legend-dot--live,
+        .tara-legend-dot--tracked { background: #23B981; box-shadow: 0 0 0 3px rgba(35,185,129,0.10); }
+        .tara-legend-dot--paper { background: #D4A03A; box-shadow: 0 0 0 3px rgba(212,160,58,0.10); }
+        .tara-legend-dot--record { background: rgba(237,237,237,0.65); }
+        .tara-legend-dot--upcoming { background: #7CA6E8; box-shadow: 0 0 0 3px rgba(124,166,232,0.10); }
+        @media (max-width: 980px) {
+          .tara-page-brief { grid-template-columns: 1fr; gap: 14px; }
+          .tara-page-brief__flow { width: 100%; }
+        }
+        @media (max-width: 560px) {
+          .tara-page-brief { padding: 16px 14px 12px; }
+          .tara-page-brief__flow { grid-template-columns: repeat(2, minmax(0,1fr)); }
+          .tara-page-brief__step { min-height: 66px; }
+          .tara-specialist-brief { align-items: flex-start; flex-direction: column; gap: 12px; padding: 15px 14px 13px; }
+          .tara-specialist-brief__legend { justify-content: flex-start; }
         }
       `}</style>
       {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
