@@ -5888,8 +5888,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.18-v13.4.358-unified-workspaces';
-const TARA_VERSION_DISPLAY='Tara 13.4.358';
+const TARA_BUILD_VERSION='2026.09.20-v13.4.359-layout-density-pass';
+const TARA_VERSION_DISPLAY='Tara 13.4.359';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28791,6 +28791,12 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
                      taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition,onHourlyLock}){
   // V9.1.1: full-schedule popup state
   const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
+  // The coach is intentionally placed beside the signals by users who enable
+  // taraCoachLeft. In that state this legacy wrapper was rendering as an empty
+  // second context column, creating a dead slab of page with only its stamp.
+  // Schedule and hourly data are already rendered below in their dedicated row.
+  const _coachLeft=(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})();
+  if(_coachLeft)return null;
   // v13.4.153: tape/bloomberg/whale derivations moved with the Live Feeds card.
 
   return(
@@ -28799,7 +28805,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       {/* V13.4.148: Trade Coach + Hourly ladder relocated here from the middle column
           so everything read during a live window sits in one place, no scrolling.
           Hidden when localStorage 'taraCoachLeft'='1' (they render in ProjectionsCard). */}
-      {!(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
+      {!_coachLeft&&(
         <div className="shrink-0">
           {/* V13.4.295: HourlyLadderPanel moved out of here into its own bottom
               row alongside the new Schedule card, matching the mockup (Hourly +

@@ -256,7 +256,7 @@ iframe { max-width:100%; }
 .tara-main { max-width:1760px!important; padding:22px 28px!important; overflow:visible!important; }
 .tara-approved-primary { min-width:0; }
 .tara-live-grid > :first-child { grid-column:1/-1; }
-#tara-context-surface { grid-column:1/-1; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+#tara-context-surface { grid-column:1/-1; display:block; }
 .tara-context-stack { min-width:0; }
 .tara-chart-card { min-width:0; border:1px solid var(--line); background:var(--panel); }
 .tara-section-heading { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:16px; border-bottom:1px solid var(--line); font:11px "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.08em; }
@@ -271,6 +271,14 @@ iframe { max-width:100%; }
 .tara-rail-capabilities { display:none; } /* Static feature list duplicates the working navigation. */
 .tara-workspace-nav { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:thin; }
 .tara-workspace-nav button { white-space:nowrap; min-height:42px; flex-shrink:0; }
+
+/* The primary column is deliberately narrower than the safety rail. A desktop
+   scroller made the last workspace views look missing; make the full inventory
+   visible as a compact two-row index instead. Phone layouts keep the swipe row. */
+@media (min-width:761px) {
+ .tara-workspace-nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); overflow:visible; gap:6px; padding-bottom:14px; }
+ .tara-workspace-nav button { width:100%; min-width:0; min-height:38px; padding:7px 6px; white-space:normal; line-height:1.25; }
+}
 .tara-header .tara-modebar button.shadow-md { color:var(--workspace-accent)!important; box-shadow:inset 0 -2px var(--workspace-accent)!important; }
 .tara-modebar .text-sm { display:none; }
 .tara-call-ledger__details { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
@@ -300,7 +308,9 @@ iframe { max-width:100%; }
  .tara-modebar { order:0!important; flex:1; width:auto!important; min-width:0; }
  .tara-modebar > button { min-width:60px!important; padding:0 8px!important; letter-spacing:0!important; }
  .tara-live-grid { grid-template-columns:1fr; }
- #tara-context-surface { grid-template-columns:1fr; }
+ #tara-context-surface { display:block; }
+ .tara-workspace-nav { display:flex; overflow-x:auto; }
+ .tara-workspace-nav button { width:auto; white-space:nowrap; }
  .tara-live-grid > :first-child > .hidden.lg\:flex { display:flex; }
  .tara-specialist-brief { grid-template-columns:1fr; gap:16px; padding:18px; }
  .tara-specialist-brief h2 { font-size:26px; }
