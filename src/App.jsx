@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import taraDesignStyles from './tara-design.css?raw';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -5887,8 +5888,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.18-v13.4.357-autoexec-rollover-safety';
-const TARA_VERSION_DISPLAY='Tara 13.4.357';
+const TARA_BUILD_VERSION='2026.09.18-v13.4.358-unified-workspaces';
+const TARA_VERSION_DISPLAY='Tara 13.4.358';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10487,7 +10488,7 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _snap=snapshot||null;
   const _lock=readLockState(_snap);
   const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
-  const _callLabel=_dir?`${_dir} · locked`:taraCall?.call==='SIT_OUT'?'SITTING OUT':'SCANNING';
+  const _callLabel=_dir?`${_dir} · locked`:_snap?.call==='SIT_OUT'?'SITTING OUT':'SCANNING';
   const _autoOn=!!autoExecSettings?.enabled;
   const _autoLabel=_autoOn?(autoExecSettings?.dryRun===false?'ARMED · LIVE':'ARMED · DRY'):'OFF · SAFE';
   const _orderLabel=autoOrderState?.status?String(autoOrderState.status).replaceAll('-',' ').toUpperCase():'WAITING';
@@ -10506,21 +10507,11 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   ];
   return(
     <section className="tara-page-brief tara-call-ledger" aria-label="Tara call and execution truth">
-      <div className="tara-call-ledger__topline">
-        <div className="tara-page-brief__intro">
-          <div className="tara-page-brief__eyebrow">OPERATE · LIVE CONTROL ROOM</div>
-          <h2>Tara Call + execution truth</h2>
-          <p>One window. Four truths kept separate.</p>
-        </div>
-        <div className="tara-call-ledger__badges">
-          <span>15m call record</span><span>AutoTrade audit</span><span>TradingView market</span>
-        </div>
-      </div>
       <div className="tara-call-ledger__hero">
         <div>
           <div className="tara-call-ledger__kicker">TARA'S CALL · PRIMARY {_window.toUpperCase()} DECISION LEDGER</div>
           <h3 className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_callLabel}</h3>
-          <p>This is Tara’s recorded decision for this window. It settles into the Tara Call record whether AutoTrade acts, rests, fills, or stays dry.</p>
+          <p>Locked calls count toward Tara’s record. AutoTrade orders and fills are tracked separately.</p>
         </div>
         <div className="tara-call-ledger__truth">
           <strong>{_lock.tradeable?'CALL LOCKED':'CALLING ONLY'}</strong>
@@ -10533,38 +10524,7 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         <div><label>Market edge</label><strong className={_edge>0?'is-up':_edge<0?'is-down':''}>{_edgeLabel}</strong></div>
         <div><label>Call record</label><strong className="is-amber">{_record.wins} · {_record.losses} · {_record.sitouts}</strong></div>
       </div>
-      <div className="tara-call-ledger__timeline">
-        <span>OBSERVE</span><i>→</i><span>LEAN</span><i>→</i><b>LOCKED</b><i>→</i><span>SETTLE</span><i>→</i><span>{_window.toUpperCase()} RECORD</span>
-      </div>
-       <div className="tara-call-ledger__details">
-        <div>
-          <h4>WHAT TARA LOCKED</h4>
-          <strong>{_dir||'NO DIRECTION'}</strong>
-          <span>BTC {_window} · {timeState?.nextWindow||'window active'}</span>
-          <span>Decision gates remain visible in the live panels below.</span>
-        </div>
-         <div>
-           <h4>RECORD TRUTH</h4>
-          <span><b>Won</b><strong>{_record.wins}</strong></span>
-          <span><b>Lost</b><strong className="is-down">{_record.losses}</strong></span>
-          <span><b>Sat out</b><strong>{_record.sitouts}</strong></span>
-           <span><b>Scored</b><strong>{_record.scored||'—'}</strong></span>
-         </div>
-         <div>
-           <h4>EXCHANGE POSITION</h4>
-           <strong className={_positionTruth.state==='open'?'is-up':_positionTruth.tone==='warn'?'is-amber':''}>{_positionTruth.label}</strong>
-           <span>{_positionTruth.summary}</span>
-           <span>{_positionTruth.detail}</span>
-         </div>
-       </div>
-      <div className="tara-page-brief__flow">
-        {_steps.map(step=>(
-          <div key={step.n} className={'tara-page-brief__step tara-page-brief__step--'+step.tone}>
-            <span className="tara-page-brief__step-no">{step.n}</span>
-            <div className="tara-page-brief__step-copy"><span>{step.label}</span><strong>{step.value}</strong></div>
-          </div>
-        ))}
-      </div>
+      <div className="tara-exchange-summary"><span>EXCHANGE POSITION <b className={_positionTruth.tone==='warn'?'is-amber':''}>{_positionTruth.label}</b></span><span>{_positionTruth.summary} {_positionTruth.detail}</span></div>
       <div className="tara-page-brief__meta">
         <span>{_record.total} recorded windows</span><span className="tara-page-brief__dot">·</span><span>{_record.winRate!=null?`${_record.winRate}% scored win rate · sit-outs excluded`: 'win rate starts after a scored outcome'}</span><span className="tara-page-brief__dot">·</span><span>hourly ladder stays independent below</span>
       </div>
@@ -10573,15 +10533,15 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
 };
 
 const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow,activeView,setActiveView})=>{
-  const _items=[['overview','OVERVIEW'],['execution','EXECUTION'],['signals','SIGNALS'],['market','MARKET'],['analytics','ANALYTICS'],['news','NEWS & MACRO'],['memory','MEMORY'],['schedule','SCHEDULE & LADDER'],['logs','LOGS & SYNC']];
-  const _click=(id)=>{
-    if(id==='analytics'){setActiveView('analytics');setShowBrain(false);setShowAnalytics(true);return;}
-    if(id==='logs'){setActiveView('logs');setShowHeaderOverflow(true);return;}
-    const targets={overview:'tara-primary-surface',execution:'tara-execution-surface',signals:'tara-signals-surface',market:'tara-market-surface',news:'tara-context-surface',memory:'tara-context-surface',schedule:'tara-schedule-surface'};
+  const items=[['overview','Overview'],['execution','Execution'],['signals','Signals'],['market','TradingView'],['analytics','Analytics'],['news','News & macro'],['memory','Memory'],['schedule','Hourly & schedule'],['logs','Tools & sync']];
+  const select=(id)=>{
     setActiveView(id);
-    if(typeof document!=='undefined')document.getElementById(targets[id]||'tara-primary-surface')?.scrollIntoView({behavior:'smooth',block:'start'});
+    if(id==='analytics'){setShowBrain(false);setShowAnalytics(true);return;}
+    if(id==='logs'){setShowHeaderOverflow(true);return;}
+    const targets={overview:'tara-primary-surface',execution:'tara-execution-surface',signals:'tara-signals-surface',market:'tara-market-surface',news:'tara-context-surface',memory:'tara-context-surface',schedule:'tara-schedule-surface'};
+    document.getElementById(targets[id])?.scrollIntoView({behavior:'smooth',block:'start'});
   };
-  return <nav className="tara-workspace-nav" aria-label="Workspace views">{_items.map(([id,label])=><button key={id} onClick={()=>_click(id)} className={activeView===id?'is-active':''}>{label}</button>)}<button className={activeView==='brain'?'is-active':''} onClick={()=>{setActiveView('brain');setShowAnalytics(false);setShowBrain(true);}}>BRAIN</button></nav>;
+  return <nav className="tara-workspace-nav" aria-label="Workspace views">{items.map(([id,label])=><button key={id} onClick={()=>select(id)} aria-current={activeView===id?'location':undefined} className={activeView===id?'is-active':''}>{label}</button>)}</nav>;
 };
 
 const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,manualKalshiEntry,activeTicker,taraScorecards,windowType})=>{
@@ -10602,10 +10562,10 @@ const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradi
   return <aside className="tara-approved-rail" aria-label="Execution and record rail">
     <section className="tara-rail-card tara-rail-mission">
       <div className="tara-rail-card__head"><div><div className="tara-rail-kicker">AUTOTRADE MISSION</div><h2>Execution guardrails</h2></div><small>single control surface</small></div>
-      <div className="tara-rail-arm"><div><strong className={'tone-'+_autoTone}>{_auto}</strong><small>AutoExecSimplePanel · safe mode</small></div><span className={'tara-rail-toggle '+(autoExecSettings?.enabled&&!killSwitchEngaged?'is-on':'')}><i/></span></div>
+      <div className="tara-rail-arm"><div><strong className={'tone-'+_autoTone}>{_auto}</strong><small>Orders follow the locked Tara call</small></div><span className="tara-rail-status">{autoExecSettings?.enabled&&!killSwitchEngaged?'ON':'OFF'}</span></div>
        <div className="tara-rail-rows"><span>Mission bankroll <b>{_bank>0?`$${_bank.toFixed(2)}`:'not set'}</b></span><span>Risk per trade <b>{_risk>0?`$${_risk.toFixed(2)}`:'settings'}</b></span><span>Position state <b>{_position}</b></span><span>Entry gates <b className="tone-ok">reconciliation on</b></span></div>
       <div className="tara-rail-riskbar">{Array.from({length:10},(_,i)=><i key={i} className={i<Math.ceil(Math.max(0,_riskScore)/10)?'is-hot':''}/>)}</div><div className="tara-rail-kicker">risk state · {_riskScore}/100 movement</div>
-      <div className="tara-rail-actions"><button className="tara-rail-action" onClick={()=>setShowTradingSettings(true)}>CONFIGURE</button><button className="tara-rail-action tara-rail-action--secondary" onClick={()=>setShowTradingSettings(true)}>DRY RUN</button></div>
+      <div className="tara-rail-actions"><button className="tara-rail-action" onClick={()=>setShowTradingSettings(true)}>EXECUTION SETTINGS</button></div>
     </section>
     <section className="tara-rail-card">
       <div className="tara-rail-card__head"><div><div className="tara-rail-kicker">ALERT CENTER</div><h2>What needs attention</h2></div><small>live</small></div>
@@ -20184,7 +20144,7 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
     <div className="border border-[#1B1B22] bg-[#0A0A0E] rounded-[10px] overflow-hidden">
       <div className="px-4 py-2.5 border-b border-[#16161c] flex items-baseline justify-between gap-2"
            style={{background:dirTone+'0A'}}>
-        <span className="text-[9.5px] uppercase font-bold tracking-[0.15em]" style={{color:dirTone+'BB'}}>this trade</span>
+        <span className="text-[9.5px] uppercase font-bold tracking-[0.15em]" style={{color:dirTone+'BB'}}>AutoTrade · execution</span>
         <span className="text-[9.5px] uppercase font-bold tracking-[0.12em] text-[#EDEDED]/30 tabular-nums">
           {String(windowType||'').toUpperCase()}{_closeLabel?' · closes '+_closeLabel:''}
         </span>
@@ -21114,7 +21074,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
       React.createElement('div',{className:'flex justify-between items-baseline mb-4'},
         React.createElement('div',null,
           React.createElement('h2',{className:'text-lg font-serif text-white tracking-tight'},'Trading Settings'),
-          React.createElement('p',{className:'text-[10px] uppercase tracking-wider text-[#EDEDED]/45 mt-0.5'},'per-device · localStorage'),
+          React.createElement('p',{className:'text-[10px] uppercase tracking-wider text-[#EDEDED]/45 mt-0.5'},'Settings for this device'),
         ),
         React.createElement('button',{onClick:onClose,className:'text-[#EDEDED]/40 hover:text-white text-xl leading-none'},'×'),
       ),
@@ -26310,7 +26270,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
+    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 '}>
       <T2Stamp code="PROJ · 042"/>
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
@@ -26495,7 +26455,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
   const wr=totalGames>0?((sc.wins/totalGames)*100).toFixed(1):'—';
 
   return(
-    <div className={'fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-3 sm:p-6'} onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="Tara Brain" className={'tara-brain-page fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-3 sm:p-6'} onClick={onClose}>
       <div className={'bg-[#050508] border border-[#2A2A34] rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto'} onClick={e=>e.stopPropagation()}>
         <div className="sticky top-0 bg-[#050508] backdrop-blur border-b border-[#24242E] px-5 py-4 flex items-center justify-between">
           <div>
@@ -28447,7 +28407,8 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
     );
   };
   return React.createElement('div',{
-    className:'fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto',
+    role:'dialog','aria-modal':true,'aria-label':'Tara Analytics',
+    className:'tara-analytics-page fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto',
     style:{background:'rgba(0,0,0,0.88)',backdropFilter:'blur(6px)'},
     onClick:onClose,
   },
@@ -28833,7 +28794,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   // v13.4.153: tape/bloomberg/whale derivations moved with the Live Feeds card.
 
   return(
-    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
+    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0 '}>
       <T2Stamp code="SCR · 008"/>
       {/* V13.4.148: Trade Coach + Hourly ladder relocated here from the middle column
           so everything read during a live window sits in one place, no scrolling.
@@ -28898,24 +28859,11 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
 }
 
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
-function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource}){
-  return(
-    <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
-      <div className="flex justify-between items-center mb-2 shrink-0">
-        <span className={'text-xs uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold'}>Live Chart</span>
-        <div className="flex gap-1">
-          {['1m','5m','15m','1h'].map(r=>{
-            const active=resolution===r;
-            const cls='px-2 py-0.5 text-[10px] font-bold rounded-lg uppercase tracking-wide '+(active?'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70 border border-transparent');
-            return(<button key={r} onClick={()=>setResolution(r)} className={cls}>{r}</button>);
-          })}
-        </div>
-      </div>
-      <div className="flex-1 min-h-[280px] sm:min-h-[360px] lg:min-h-[440px]">
-        <TradingViewChart resolution={resolution} onResolutionChange={setResolution} asset={asset} priceSource={priceSource}/>
-      </div>
-    </div>
-  );
+function ChartBottomCard({resolution,setResolution,asset,priceSource}){
+  return <section className="tara-chart-card" aria-label="TradingView live chart">
+    <div className="tara-section-heading"><span>Market / TradingView</span><small>Live chart · {asset}</small></div>
+    <TradingViewChart resolution={resolution} onResolutionChange={setResolution} asset={asset} priceSource={priceSource}/>
+  </section>;
 }
 
 
@@ -30045,7 +29993,7 @@ function WeatherView({onClose,weatherPicks}){
         <section className="tara-specialist-brief tara-specialist-brief--weather" aria-label="Weather picks flow">
           <div>
             <div className="tara-specialist-brief__eyebrow">SPECIALIST LANE · WEATHER</div>
-            <h2>Forecast <span>→</span> bucket <span>→</span> record</h2>
+            <h2>Weather intelligence</h2>
             <p>Live picks are the buckets that can actually be traded now. Paper picks stay visible for learning; settled picks are the record.</p>
           </div>
           <div className="tara-specialist-brief__legend">
@@ -30063,7 +30011,6 @@ function WeatherView({onClose,weatherPicks}){
               {S.ladderDay&&<span style={{color:'rgba(255,255,255,0.38)'}}> · {S.ladderDay} in {city.label}</span>}
               {S.otherDayRows>0&&<span style={{color:'#D4A03A'}}> · {S.otherDayRows} other-day contract{S.otherDayRows===1?'':'s'} excluded</span>}
             </div>
-            <h2 className="font-serif text-3xl text-white tracking-tight">Temperature <span style={{color:'rgba(255,255,255,0.3)'}}>·</span> Ladder</h2>
           </div>
           <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-colors" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}>← Back to BTC</button>
         </div>
@@ -30111,7 +30058,7 @@ function WeatherView({onClose,weatherPicks}){
             </div>
             {(weatherLane==='paper'?P.openPaper:P.recent).slice(0,6).length?(
               <div className="weather-lane-preview__list">
-                {(weatherLane==='paper'?P.openPaper:P.recent).slice(0,6).map(p=>(
+                {(weatherLane==='paper'?P.openPaper:P.recent).map(p=>(
                   <div className="weather-lane-preview__row" key={_wxPickId(p)}>
                     <span>{p.cityLabel||p.city||'City'} · {p.sub||'bucket'}</span>
                     <b>{p.side||'—'} @{p.price==null?'—':p.price+'c'}</b>
@@ -30126,7 +30073,7 @@ function WeatherView({onClose,weatherPicks}){
         {/* V13.4.221: the answer to "what should I be on", above everything else.
             Scanned across every city whose day is underway, not just the pill
             that happens to be selected. */}
-        <div className="rounded-xl p-4 mb-4"
+        {weatherLane==='live'&&<div className="rounded-xl p-4 mb-4"
              style={P.openLive.length?{background:'rgba(35,185,129,0.09)',border:'1px solid rgba(35,185,129,0.34)'}
                                      :{background:'rgba(212,160,58,0.07)',border:'1px solid rgba(212,160,58,0.26)'}}>
           <div className="flex items-baseline justify-between mb-2">
@@ -30169,8 +30116,10 @@ function WeatherView({onClose,weatherPicks}){
               No city currently has a bucket that is both passed and still paying. That is the normal answer most of the day. Tara only offers a live trade when the arithmetic is there; paper calls remain visible for learning. {P.openPaper.length>0&&<>There are {P.openPaper.length} paper call{P.openPaper.length===1?'':'s'} below.</>}
             </div>
           )}
-        </div>
+        </div>}
 
+        <details key={weatherLane} className="tara-research" open={weatherLane==='live'}>
+        <summary>City forecast · bucket ladder · methodology & complete history</summary>
         {S.err?(
           <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 text-[12px]" style={{color:'#E8455E'}}>{S.err}</div>
         ):S.loading&&!S.rows.length?(
@@ -30396,6 +30345,7 @@ function WeatherView({onClose,weatherPicks}){
             </div>
           </div>
         )}
+        </details>
       </div>
     </div>
   );
@@ -30404,7 +30354,7 @@ function WeatherView({onClose,weatherPicks}){
 function SportsView({onClose}){
   const[data,setData]=React.useState(null);
   const[err,setErr]=React.useState(null);
-  const[tab,setTab]=React.useState('board');
+  const[tab,setTab]=React.useState('upcoming');
   const[sportFilter,setSportFilter]=React.useState('all');
   // Which date groups the user has explicitly opened or closed. Anything not
   // in here falls back to the default (nearest few open) — so changing tab or
@@ -30494,8 +30444,10 @@ function SportsView({onClose}){
     // upcoming, the same pick twice with two framings. Tracked-or-not is a
     // property of a row (a badge in SportsRow), not a filter any more — the
     // board tab shows everything the model priced, sliced only by sport.
-    const src=tab==='board'?(data.board||data.upcoming):data.settled;
+const src=tab==='record'?data.settled:(data.board||data.upcoming);
     let list=(src||[]);
+    if(tab==='upcoming')list=list.filter(r=>sportsIsFuture(r.start,nowMs));
+    if(tab==='tracked')list=list.filter(r=>r.tracked);
     if(tab!=='record'){
       // Re-stamp advice from the CURRENT time before anything filters on it.
       // The export said TAKE at 19:23; by 19:50 two of those had first pitch
@@ -30567,7 +30519,7 @@ function SportsView({onClose}){
         <section className="tara-specialist-brief tara-specialist-brief--sports" aria-label="Sports picks flow">
           <div>
             <div className="tara-specialist-brief__eyebrow">SPECIALIST LANE · SPORTS</div>
-            <h2>Upcoming picks <span>→</span> tracked picks <span>→</span> record</h2>
+            <h2>Sports picks & record</h2>
             <p>Board shows every fixture Tara priced. A tracked badge means it counts toward the record; Record shows settled picks only.</p>
           </div>
           <div className="tara-specialist-brief__legend">
@@ -30584,7 +30536,6 @@ function SportsView({onClose}){
                 {data&&data.generated?'updated '+new Date(data.generated).toLocaleString('en-US',{day:'2-digit',month:'short',hour:'numeric',minute:'2-digit',timeZone:'America/New_York'})+' ET':'prediction record'}
               </span>
             </div>
-            <h2 className="font-serif text-3xl text-white tracking-tight">Picks <span style={{color:T2_GOLD}}>·</span> Record</h2>
           </div>
           {/* Returns to the BTC board — same thing the header toggle does. */}
           <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-colors" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}>← Back to BTC</button>
@@ -30696,6 +30647,7 @@ function SportsView({onClose}){
               rate on 70c favourites still loses after fees. The bar that
               matters is win rate minus breakeven, and a point estimate is not
               evidence — at n=11 an 82% run carries a ±23% interval. */}
+          <details className="tara-research"><summary>Model evidence · readiness, results & experiments</summary>
           {data.readiness&&(()=>{
             const r=data.readiness;
             const pct=Math.min(100,Math.round(100*r.n/Math.max(r.needed||r.n,1)));
@@ -30854,9 +30806,10 @@ function SportsView({onClose}){
             </div>
           )}
 
+          </details>
           <div className="flex flex-wrap items-center gap-1 mb-4">
             <div className="flex gap-1 p-1 rounded-lg bg-[#101014] w-fit border border-[#24242E]">
-              {[['board','Board'],['record','Record']].map(([id,lab])=>(
+{[['upcoming','Upcoming'],['tracked','Tracked'],['record','Record'],['board','All fixtures']].map(([id,lab])=>(
                 <button key={id} onClick={()=>setTab(id)} className={'px-3 py-1.5 text-xs uppercase font-bold tracking-wider rounded-lg transition-colors '+(tab===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
               ))}
             </div>
@@ -30868,7 +30821,9 @@ function SportsView({onClose}){
               which picks actually count toward the record is still visible,
               just not something you filter down to. */}
           <div className="text-[11px] text-[#EDEDED]/40 mb-4 leading-relaxed">
-            {tab==='board'&&<span><b className="text-white/70">Board</b> is every fixture the model priced, across every sport it covers. A <span className="text-white/70 font-bold">tracked</span> badge means that pick is committed to the record; everything else is shown but not scored.</span>}
+            {tab==='upcoming'&&<span><b className="text-white/70">Upcoming</b> shows future fixtures with a known date. Prices are snapshots, not live quotes. Unknown dates remain in All fixtures.</span>}
+            {tab==='tracked'&&<span><b className="text-white/70">Tracked</b> shows committed picks awaiting a result, including games already underway. Settled picks move to Record.</span>}
+            {tab==='board'&&<span><b className="text-white/70">All fixtures</b> includes every unresolved fixture the model priced. Only tracked picks count toward the record.</span>}
             {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}</div>
 
           {/* Split by strategy. The headline record was hiding two different
@@ -53619,7 +53574,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className={'tara-modebar flex bg-[#0A0A0E] border border-[#1B1B22] rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
-                const _active=currentAsset===k;
+const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analyticsPageOpen;
                 const _shadow=!_active?shadowTaraByAssetRef.current?.[k]:null;
                 const _shadowFresh=_shadow&&(Date.now()-(_shadow.updatedAt||0))<15000;
                 const _shadowLean=_shadowFresh&&_shadow.leanDir!=='NEUTRAL'?_shadow:null;
@@ -53631,7 +53586,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     title={_active?_c.label:_shadowLean?`${_c.label} — Tara leans ${_shadowLean.leanDir} ${_shadowLean.confidence}%`:_c.label}
                   >
                     <span className="text-sm leading-none" style={{color:_active?_c.color:'inherit'}}>{_c.icon}</span>
-                    <span className="hidden sm:inline text-[10px]">{_c.label}</span>
+                    <span className="text-[10px]">{_c.label}</span>
                     {_shadowLean&&<span className="ml-0.5 text-[8px] font-bold tabular-nums leading-none" style={{color:_leanColor}}>{_shadowLean.leanDir==='UP'?'▲':'▼'}{_shadowLean.confidence}</span>}
                   </button>
                 );
@@ -53654,7 +53609,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 title="Sports picks and record"
               >
                 <span className="text-sm leading-none" style={{color:showSports?T2_GOLD:'inherit'}}>🏆</span>
-                <span className="hidden sm:inline text-[10px]">Sports</span>
+                <span className="text-[10px]">Sports</span>
               </button>
               {/* V13.4.217: weather lane */}
               <button onClick={()=>{setShowSports(false);setShowBrain(false);setShowAnalytics(false);setAnalyticsPageOpen(false);setShowStats(false);setWorkspaceFocus('overview');setShowWeather(v=>!v);}}
@@ -53663,10 +53618,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 title="Daily-high temperature ladder"
               >
                 <span className="text-sm leading-none" style={{color:showWeather?T2_GOLD:'inherit'}}>🌡</span>
-                <span className="hidden sm:inline text-[10px]">Weather</span>
+                <span className="text-[10px]">Weather</span>
               </button>
               <button onClick={()=>{setShowSports(false);setShowWeather(false);setShowAnalytics(false);setAnalyticsPageOpen(false);setShowBrain(true);setWorkspaceFocus('brain');setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Tara's Brain">BRAIN</button>
-              <button onClick={()=>{setShowSports(false);setShowWeather(false);setShowBrain(false);setAnalyticsPageOpen(false);setShowAnalytics(true);setWorkspaceFocus('analytics');setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Analytics">ANALYTICS</button>
+              <button onClick={()=>{setShowSports(false);setShowWeather(false);setShowBrain(false);setShowAnalytics(false);setAnalyticsPageOpen(true);setWorkspaceFocus('analytics');setShowHeaderOverflow(false);}} className="tara-header-mode-button" title="Analytics">ANALYTICS</button>
             </div>
 
             <div className="tara-status-chips" aria-label="Live feed status">
@@ -53955,489 +53910,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           (impossible to miss components when the JSX is the same) and lets us
           iterate visual polish without restructuring. */}
       <>
-      {/* V9.16.5: Aesthetic uplift. Same V9.15 layout, refined CSS theme:
-           - Cards lose hard borders, separate by tone-shift backgrounds
-           - Hero glow on Tara's Call card (subtle gold ambient pulse when locked)
-           - Number hierarchy: confidence is hero-sized, secondary is tabular medium
-           - Hairline dividers between data rows replace empty gaps
-           - Header pills get tighter, more uniform spacing + softer outlines
-           - Composed quietness: gold reserved for ONE thing per screen
-           - No emerald/indigo/purple rainbow gradient anywhere */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-
-        /* ── DESIGN TOKENS ───────────────────────────────────────── */
-        /* V13.4.189 OBSIDIAN: these were a second, independent palette that
-           could drift from the root one. They now DERIVE from the tokens in
-           index.html, so there is exactly one place a colour is defined. */
-        [data-tara-theme="simple"] {
-          --tara-bg-page: var(--bg-0);
-          --tara-bg-card: var(--bg-1);
-          --tara-bg-card-soft: var(--bg-2);
-          --tara-bg-card-elevated: var(--bg-3);
-          --tara-bg-header: rgba(8,8,11,0.86);
-          --tara-border: var(--line-1);
-          --tara-border-strong: var(--line-2);
-          --tara-text-primary: var(--ink-1);
-          --tara-text-secondary: var(--ink-2);
-          --tara-text-tertiary: var(--ink-3);
-          --tara-text-quaternary: var(--ink-4);
-          --tara-gold: var(--accent);
-          --tara-gold-soft: var(--accent-glow);
-          --tara-gold-edge: var(--accent-border);
-          --tara-green: var(--up);
-          --tara-pink: var(--down);
-          font-feature-settings: 'tnum' 1, 'ss01' 1, 'cv11' 1;
-        }
-        /* Frosted header instead of an opaque bar -- content passing underneath
-           is what makes the app read as layered rather than as flat panels. */
-        [data-tara-theme="simple"] header.sticky {
-          backdrop-filter: saturate(160%) blur(14px);
-          -webkit-backdrop-filter: saturate(160%) blur(14px);
-        }
-        /* (Card elevation is applied at the .shadow-* rule further down, which
-           is where cards actually carry their class -- putting it here also hit
-           buttons and pills, and lost to the !important flattening below.) */
-
-        /* ── PAGE BG & BASE ─────────────────────────────────────── */
-        [data-tara-theme="simple"].min-h-screen,
-        [data-tara-theme="simple"] {
-          background: var(--tara-bg-page) !important;
-        }
-
-        /* ── HEADER REFINEMENT ─────────────────────────────────── */
-        [data-tara-theme="simple"] header.sticky {
-          background: var(--tara-bg-header) !important;
-          backdrop-filter: blur(20px) saturate(140%);
-          -webkit-backdrop-filter: blur(20px) saturate(140%);
-          border-bottom: 1px solid var(--tara-border) !important;
-        }
-        /* Header pills — tighter, more uniform */
-        [data-tara-theme="simple"] header button,
-        [data-tara-theme="simple"] header [role="button"] {
-          transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
-        }
-        [data-tara-theme="simple"] header .border-\\[\\#EDEDED\\]\\/15,
-        [data-tara-theme="simple"] header .border-\\[\\#EDEDED\\]\\/20,
-        [data-tara-theme="simple"] header .border-\\[\\#EDEDED\\]\\/10 {
-          border-color: var(--tara-border-strong) !important;
-        }
-
-        /* ── STICKY 3-STAT STRIP UNDER HEADER ─────────────────── */
-        [data-tara-theme="simple"] .sticky.top-\\[44px\\],
-        [data-tara-theme="simple"] .sticky.top-\\[52px\\] {
-          background: var(--tara-bg-header) !important;
-          backdrop-filter: blur(20px) saturate(140%);
-          -webkit-backdrop-filter: blur(20px) saturate(140%);
-          border-bottom: 1px solid var(--tara-border) !important;
-        }
-
-        /* ── KILL RAINBOW GRADIENT STRIP ────────────────────── */
-        [data-tara-theme="simple"] .bg-gradient-to-r.from-emerald-500.via-indigo-500.to-purple-500 {
-          background: linear-gradient(90deg, rgba(35,185,129,0.50) 0%, rgba(35,185,129,0.12) 30%, rgba(35,185,129,0) 70%) !important;
-          height: 1px !important;
-          opacity: 0.70 !important;
-        }
-
-        /* ── CARD REFINEMENT — NO BORDERS, TONE-SHIFT ───────── */
-        /* V13.4.192 CARD SYSTEM. Seen on screen: every panel was the same flat
-           grey block, so nothing led the eye and the app read as a data dump.
-           Three things fix that, none of which touch layout:
-             1. a top-lit gradient, so the card reads as a lit surface;
-             2. a 1px gold top edge (inset shadow, not a pseudo-element, so no
-                position:relative and therefore no risk of shifting absolutely
-                positioned children) -- this is the only place the signature
-                colour appears at scale, and it is what gives the app an
-                identity instead of "generic dark dashboard";
-             3. a real ambient drop, so cards sit ON the page rather than in it. */
-        [data-tara-theme="simple"] .bg-\\[\\#101014\\] {
-          /* V13.4.201: the gradient + inset highlight WAS the "grey glass".
-             Nested cards stacked the film, so every panel picked up a milky
-             wash. Kalshi -- the source of this palette -- uses FLAT solid
-             surfaces with a hairline. Depth now comes from the fill step and
-             the border alone, not from a sheen laid over the content. */
-          background: var(--tara-bg-card) !important;
-          border: 1px solid var(--tara-border) !important;
-          box-shadow: none !important;
-        }
-        [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
-        [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
-        /* Card borders go from outline to barely-there divider */
-        [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/10,
-        [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/8,
-        [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/5 {
-          border-color: var(--tara-border) !important;
-        }
-        /* V13.4.189 OBSIDIAN: was box-shadow:none, which flattened every card
-           to a tone-shift. The intent (nothing heavy) is kept, but cards now get
-           a lit top edge + a soft ambient drop, which is what actually conveys
-           depth on a near-black page. */
-        [data-tara-theme="simple"] .shadow-md,
-        [data-tara-theme="simple"] .shadow-lg,
-        [data-tara-theme="simple"] .shadow-sm {
-          box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important;
-        }
-        /* Cards lift slightly toward the pointer. Desktop only -- no hover state
-           on touch, and it must never shift a tap target mid-trade. */
-        @media (hover:hover) and (pointer:fine) {
-          [data-tara-theme="simple"] .shadow-md:hover,
-          [data-tara-theme="simple"] .shadow-lg:hover {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.55) !important;
-            transition: box-shadow var(--dur-2) var(--ease-out);
-          }
-        }
-        /* V13.4.194: matched to the reference radii. This rule kept silently
-           winning over the global scale -- computed radius on live cards was
-           11px while the system said 22px -- because the theme block is injected
-           after the head styles. Cards are the app's main surface and carry
-           rounded-lg, so this is the line that actually controls how round the
-           app looks. */
-        /* V13.4.299: RETUNED to the approved mockup (hairline panels, not
-           pills). The note above is still the important part: because this block
-           is injected after the head styles AND carries a higher-specificity
-           selector, it beats index.html -- so index.html's radius scale alone
-           changed nothing on screen. Both had to move together.
-           The button pill rule is deleted outright: forcing every button to
-           9999px is what turned labels like "TEL 47/50" and "you · 64%" into
-           lozenges, which is precisely the "same-size rounded pills" the mockup
-           brief set out to remove. */
-        [data-tara-theme="simple"] .rounded-xl { border-radius: 12px !important; }
-        [data-tara-theme="simple"] .rounded-lg { border-radius: 10px !important; }
-
-        /* ── HERO GLOW ON TARA'S CALL CARD ──────────────────── */
-        /* Targets the first card under "Tara's Call" label. Since we can't easily
-           pinpoint just one card via CSS selectors, we apply a faint ambient
-           glow to any card containing the Tara's Call label via :has().
-           Browsers without :has support get no glow — graceful degradation. */
-        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(span:where(:contains("Tara's Call"))),
-        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(div:where(:contains("Tara's Call"))) {
-          background: radial-gradient(120% 80% at 50% 0%, rgba(35,185,129,0.04) 0%, var(--tara-bg-card) 60%) !important;
-          position: relative;
-        }
-        /* Subtle hairline accent at top of Tara's Call card */
-        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(span:where(:contains("Tara's Call"))):before,
-        [data-tara-theme="simple"] .bg-\\[\\#101014\\]:has(div:where(:contains("Tara's Call"))):before {
-          content: '';
-          position: absolute;
-          top: 0; left: 0; right: 0; height: 1px;
-          background: linear-gradient(90deg, transparent 0%, var(--tara-gold-edge) 50%, transparent 100%);
-          border-radius: 10px 10px 0 0;
-        }
-
-        /* ── TYPOGRAPHY HIERARCHY ───────────────────────────── */
-        /* Tabular numbers everywhere — digits don't jitter on update */
-        [data-tara-theme="simple"] * {
-          font-variant-numeric: tabular-nums;
-        }
-        /* V13.4.189: font-serif headlines are the DISPLAY face now. Previously
-           this forced Plex Mono, which is why every heading in the app read as
-           monospace -- the single biggest reason it looked utilitarian rather
-           than designed. */
-        [data-tara-theme="simple"] .font-serif {
-          font-family: 'Space Grotesk', 'Instrument Sans', ui-sans-serif, sans-serif !important;
-          font-weight: 600 !important;
-          letter-spacing: -0.022em !important;
-        }
-        /* The big confidence percentage is the hero — make it sing */
-        /* Hero numerals stay monospace on purpose -- tabular digits must not
-           jitter while a price ticks -- but take the new tracking + weight. */
-        /* Hero numerals stay monospace on purpose -- tabular digits must not
-           jitter while a price ticks -- and now inherit the V13.4.191 sizes
-           rather than being pinned small. */
-        [data-tara-theme="simple"] .text-2xl,
-        [data-tara-theme="simple"] .text-3xl,
-        [data-tara-theme="simple"] .text-4xl,
-        [data-tara-theme="simple"] .text-5xl,
-        [data-tara-theme="simple"] .text-6xl {
-          font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace !important;
-          font-weight: 300 !important;
-          letter-spacing: -0.042em !important;
-          font-variant-numeric: tabular-nums;
-          color: var(--ink-1);
-        }
-        /* Three tiers of ink instead of one flat white. Hierarchy through
-           colour costs no layout space, which matters in a dense UI. */
-        [data-tara-theme="simple"] .text-\\[9px\\],
-        [data-tara-theme="simple"] .text-\\[8px\\],
-        [data-tara-theme="simple"] .text-\\[7px\\] {
-          font-weight: 600 !important;
-          letter-spacing: 0.075em !important;
-        }
-        /* V13.4.192: micro-labels were the same grey as the values they label,
-           so every card read as one undifferentiated wash. Dimming the labels is
-           what lets the eye find the numbers. */
-        /* Non-header micro-labels stay dim, so the section headers above are the
-           only gold on screen and keep their meaning. :not() keeps these two
-           rules from fighting over the same elements. */
-        /* V13.4.226: must not repaint anything that chose its own colour. See the
-           note on the tracking rule below — these two !important rules were
-           stripping the colour off every WIN/LOSS/SITOUT pill in the app.
-           :not([style*="color"]) exempts elements with an inline colour, which is
-           exactly how every semantic pill sets its own. */
-        [data-tara-theme="simple"] .text-\\[9px\\].uppercase:not([class*="tracking-["]):not([style*="color"]),
-        [data-tara-theme="simple"] .text-\\[10px\\].uppercase:not([class*="tracking-["]):not([style*="color"]),
-        [data-tara-theme="simple"] .text-\\[8px\\].uppercase:not([class*="tracking-["]):not([style*="color"]) {
-          color: var(--ink-3) !important;
-        }
-        /* (Section-header colour is owned by the V13.4.193 rule further down --
-           a second, weaker rule here only created a specificity fight.) */
-        /* V13.4.194: controls become pills with real presence, the way the
-           reference nav/filter/legend chips do. Padding grows with the radius
-           so the label is not crushed against a round edge. */
-        /* V13.4.299: the extra 14px side padding existed only to stop labels
-           being "crushed against a round edge". With the round edge gone the
-           padding is just bloat, so it goes too and controls sit at whatever
-           padding their own class asks for. Border colour is kept. */
-        [data-tara-theme="simple"] button.rounded-lg,
-        [data-tara-theme="simple"] button.rounded-xl {
-          background-image: none;
-          border-color: var(--tara-border-strong) !important;
-        }
-        /* The page's own frame gets the reference's large outer radius. */
-        /* V13.4.299: 26px -> 14px; the mockup's page frame is square-edged and
-           its largest radius anywhere is the 10px panel. */
-        [data-tara-theme="simple"] main,
-        [data-tara-theme="simple"] .rounded-2xl { border-radius: 14px !important; }
-        @media (hover:hover) and (pointer:fine) {
-          [data-tara-theme="simple"] button.rounded-lg:hover,
-          [data-tara-theme="simple"] button.rounded-xl:hover {
-            background-image: none;
-            background-color: var(--bg-2);
-            border-color: var(--accent-border) !important;
-          }
-        }
-        /* ── V13.4.195 COMPOSITION ──────────────────────────────────────
-           Measured on the live page: <main> was gap:12px / padding:12px, while
-           every reference dashboard separates its blocks by 24-32px. That
-           tightness -- not the palette -- is what made the app read as a
-           terminal dump. Nothing is hidden and no data is removed; the eye is
-           simply given grouping. */
-        [data-tara-theme="simple"] main {
-          gap: 26px !important;
-          padding: 22px 26px !important;
-        }
-        /* Major blocks get real separation from each other. */
-        [data-tara-theme="simple"] main > * { margin-bottom: 0 !important; }
-        [data-tara-theme="simple"] main .grid { gap: 22px !important; }
-        /* V13.4.301: the blanket rule above is for LAYOUT grids, which do want
-           real separation. It was also hitting the mockup's hairline-divider
-           grids, where the gap is not space -- it IS the divider: the cells sit
-           on a #16161c ground and a 1px gap lets exactly one hairline through.
-           At 22px those "hairlines" rendered as fat grey bars across Smart
-           Money, Entry Pricing and Live Feeds. Opting out by the gap-px class
-           keeps the layout rule intact for everything else. */
-        [data-tara-theme="simple"] main .grid.gap-px { gap: 1px !important; }
-
-        /* Cards breathe. Dense data needs margin more than it needs small type. */
-        [data-tara-theme="simple"] .p-3 { padding: 18px !important; }
-        [data-tara-theme="simple"] .p-4 { padding: 24px !important; }
-        [data-tara-theme="simple"] .p-2 { padding: 13px !important; }
-        [data-tara-theme="simple"] .px-5 { padding-left: 26px !important; padding-right: 26px !important; }
-        [data-tara-theme="simple"] .px-4 { padding-left: 22px !important; padding-right: 22px !important; }
-        [data-tara-theme="simple"] .px-3 { padding-left: 17px !important; padding-right: 17px !important; }
-        [data-tara-theme="simple"] .py-3 { padding-top: 17px !important; padding-bottom: 17px !important; }
-        [data-tara-theme="simple"] .mb-5 { margin-bottom: 26px !important; }
-        [data-tara-theme="simple"] .mb-4 { margin-bottom: 22px !important; }
-        [data-tara-theme="simple"] .gap-3 { gap: 17px !important; }
-        [data-tara-theme="simple"] .gap-2 { gap: 12px !important; }
-
-        /* ── V13.4.196 HIERARCHY ────────────────────────────────────────
-           Everything on screen currently sits within a few px of everything
-           else, so nothing leads. These rules push the primaries up hard and
-           the incidental chrome down, which is the actual difference between
-           the reference dashboards and this one. No values are hidden. */
-
-        /* THE HERO. Tara's call is the reason the app exists; it should own the
-           screen the way the reference titles do. */
-        [data-tara-theme="simple"] .text-3xl,
-        [data-tara-theme="simple"] .text-4xl {
-          font-size: 38px !important;
-          line-height: 1.02 !important;
-          font-weight: 300 !important;
-          letter-spacing: -0.045em !important;
-        }
-        [data-tara-theme="simple"] .text-5xl,
-        [data-tara-theme="simple"] .text-6xl {
-          font-size: 48px !important;
-          line-height: 1.0 !important;
-          font-weight: 300 !important;
-          letter-spacing: -0.05em !important;
-        }
-        /* Secondary headline numerals (record W/L/SO, prices). */
-        [data-tara-theme="simple"] .text-2xl {
-          font-size: 26px !important;
-          line-height: 1.08 !important;
-          letter-spacing: -0.035em !important;
-        }
-
-        /* Corner stamps (PRED-015 / PROJ-042 / SCR-008) are provenance marks,
-           not information to read. They were competing with real values at the
-           same weight. Recede, do not remove. */
-        [data-tara-theme="simple"] .absolute.top-2.right-2,
-        [data-tara-theme="simple"] .absolute.top-3.right-3 {
-          opacity: 0.28 !important;
-        }
-
-        /* Supporting prose sits behind the numbers it explains. */
-        [data-tara-theme="simple"] .text-\\[11px\\]:not(.uppercase):not([class*="text-emerald"]):not([class*="text-rose"]),
-        [data-tara-theme="simple"] .text-\\[12px\\]:not(.uppercase):not([class*="text-emerald"]):not([class*="text-rose"]) {
-          color: var(--ink-2);
-        }
-
-        /* ── APP BAR ─────────────────────────────────────────────────────
-           A 52px strip with a 16px wordmark is a toolbar, not an identity. The
-           references all lead with a confident mark. */
-        [data-tara-theme="simple"] header.sticky {
-          padding: 16px 26px !important;
-          border-bottom: 1px solid var(--tara-border) !important;
-        }
-        /* V13.4.193 SECTION HEADERS. This rule previously did the opposite of
-           its name: it removed text-transform and crushed 0.22em tracking down
-           to 0.02em, so every card header in the app rendered as plain grey body
-           text. Verified on the live page -- computed letter-spacing was 0.22px
-           where the class asks for ~2.4px.
-           Restored as real headers: uppercase, generous tracking (which is what
-           makes small caps legible rather than cramped), and the signature
-           colour. Together with the card top-edge from V13.4.192 this is where
-           the app's identity actually comes from -- one accent, used in exactly
-           two structural places, rather than sprinkled around. */
-        [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.22em\\],
-        [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.20em\\],
-        [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.2em\\],
-        [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.18em\\],
-        [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.16em\\],
-        [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.14em\\] {
-          text-transform: uppercase !important;
-          letter-spacing: 0.12em !important;
-          font-weight: 600 !important;
-          /* V13.4.206: MEASURED, not guessed. Counting coloured text on the live
-             page: 111 green elements against 18 red -- 55 of the greens were
-             THIS rule. Two different greens (#4FC79E chrome, #23B981 win) on
-             86% of all coloured text meant green had stopped meaning anything;
-             a WIN no longer stood out because the labels around it were green
-             too. v199 was the wrong call and this reverses it.
-             Headers go neutral but BRIGHT -- the v198 mistake was dim grey, not
-             neutrality. At 0.85 white with uppercase + 0.12em tracking + weight
-             600 they read as authored headers, and green is handed back to the
-             only thing that should own it: an actual result. */
-          color: rgba(255,255,255,0.85) !important;
-          opacity: 1;
-        }
-        /* V13.4.193: the same softening applied to Tailwind's NAMED tracking
-           utilities, so headers using tracking-wide/wider (Depth of Market, Tape
-           Flow, Loss recap, ...) stayed grey lowercase while the arbitrary-value
-           ones became headers. Brought in line so the header treatment is
-           consistent no matter which utility a component happened to use. */
-        /* V13.4.194: small tracked caps do not need the V13.4.191 size bump --
-           uppercase + 0.12em tracking already gives them presence, and at 11px
-           they were overflowing tight flex rows (seen live: "ENTRY WINDOW"
-           colliding with the value beside it). Back to their declared size, which
-           is also the more refined label treatment. */
-        [data-tara-theme="simple"] .text-\[10px\].uppercase[class*="tracking-"],
-        [data-tara-theme="simple"] .text-\[9px\].uppercase[class*="tracking-"],
-        [data-tara-theme="simple"] .text-\[8px\].uppercase[class*="tracking-"] {
-          font-size: 9.5px !important;
-        }
-        /* V13.4.226: :not([style*="color"]) added. This rule is for section
-           HEADERS, but it matched every small uppercase tracked element — which
-           includes the WIN / LOSS / SITOUT status pills in the log. Each of those
-           sets its own colour inline (WIN carries #23B981), and a
-           stylesheet !important beats an inline style, so all three pills computed
-           to the SAME muted white. Measured on the live page: WIN, LOSS and SITOUT
-           all rendered rgba(255,255,255,0.58) at 10px, separated only by a
-           background tint at 0.10-0.13 alpha that is nearly invisible on this
-           ground. That is the whole reason the colours were hard to tell apart —
-           the outcome pills had no colour at all. Fixing v193's headers is what
-           broke them, and this is the narrowest correction: chrome still gets
-           neutralised, anything that deliberately colours itself is left alone. */
-        /* Typography applies to ALL of them — pills should stay tracked caps. */
-        [data-tara-theme="simple"] .uppercase.tracking-wider,
-        [data-tara-theme="simple"] .uppercase.tracking-widest,
-        [data-tara-theme="simple"] .uppercase.tracking-wide {
-          text-transform: uppercase !important;
-          letter-spacing: 0.12em !important;
-          font-weight: 600 !important;
-          opacity: 1;
-        }
-        /* Colour is the part that must skip self-coloured elements.
-           V13.4.206: MEASURED, not guessed. Counting coloured text on the live
-             page: 111 green elements against 18 red -- 55 of the greens were
-             THIS rule. Two different greens (#4FC79E chrome, #23B981 win) on
-             86% of all coloured text meant green had stopped meaning anything;
-             a WIN no longer stood out because the labels around it were green
-             too. v199 was the wrong call and this reverses it.
-             Headers go neutral but BRIGHT -- the v198 mistake was dim grey, not
-             neutrality. At 0.85 white with uppercase + 0.12em tracking + weight
-             600 they read as authored headers, and green is handed back to the
-             only thing that should own it: an actual result. */
-        [data-tara-theme="simple"] .uppercase.tracking-wider:not([style*="color"]),
-        [data-tara-theme="simple"] .uppercase.tracking-widest:not([style*="color"]),
-        [data-tara-theme="simple"] .uppercase.tracking-wide:not([style*="color"]) {
-          color: rgba(255,255,255,0.85) !important;
-        }
-
-        /* ── ACCENT COLORS — KNOCK BACK 8-12% ─────────────── */
-        [data-tara-theme="simple"] .text-rose-500 { color: #E8455E !important; }
-        [data-tara-theme="simple"] .text-rose-400 { color: #E8455E !important; }
-        [data-tara-theme="simple"] .text-rose-300 { color: rgba(232,69,94,0.78) !important; }
-        [data-tara-theme="simple"] .text-emerald-400 { color: #23B981 !important; }
-        [data-tara-theme="simple"] .text-emerald-300 { color: #23B981 !important; }
-        [data-tara-theme="simple"] .text-amber-300 { color: #23B981 !important; }
-        [data-tara-theme="simple"] .text-amber-400 { color: #23B981 !important; }
-        [data-tara-theme="simple"] .text-indigo-300 { color: rgba(176,176,176,0.85) !important; }
-        [data-tara-theme="simple"] .text-indigo-400 { color: rgba(129,140,248,0.85) !important; }
-
-        /* Calm the colored backgrounds — subtle wash, not strong tint */
-        [data-tara-theme="simple"] .bg-rose-500\\/5,
-        [data-tara-theme="simple"] .bg-rose-500\\/10 { background: rgba(232,69,94,0.05) !important; }
-        [data-tara-theme="simple"] .bg-emerald-500\\/5,
-        [data-tara-theme="simple"] .bg-emerald-500\\/10 { background: rgba(35,185,129,0.05) !important; }
-        [data-tara-theme="simple"] .bg-amber-500\\/5,
-        [data-tara-theme="simple"] .bg-amber-500\\/10 { background: rgba(35,185,129,0.05) !important; }
-        [data-tara-theme="simple"] .bg-indigo-500\\/5,
-        [data-tara-theme="simple"] .bg-indigo-500\\/10 { background: rgba(129,140,248,0.05) !important; }
-
-        /* Calm colored borders too */
-        [data-tara-theme="simple"] .border-rose-500\\/30,
-        [data-tara-theme="simple"] .border-rose-500\\/20,
-        [data-tara-theme="simple"] .border-rose-500\\/40 { border-color: rgba(232,69,94,0.18) !important; }
-        [data-tara-theme="simple"] .border-emerald-500\\/30,
-        [data-tara-theme="simple"] .border-emerald-500\\/20,
-        [data-tara-theme="simple"] .border-emerald-500\\/40 { border-color: rgba(35,185,129,0.18) !important; }
-        [data-tara-theme="simple"] .border-amber-500\\/30,
-        [data-tara-theme="simple"] .border-amber-500\\/20,
-        [data-tara-theme="simple"] .border-amber-500\\/40 { border-color: rgba(35,185,129,0.20) !important; }
-        [data-tara-theme="simple"] .border-indigo-500\\/40,
-        [data-tara-theme="simple"] .border-indigo-500\\/30 { border-color: rgba(129,140,248,0.18) !important; }
-
-        /* ── SPACING & RHYTHM ───────────────────────────────── */
-        /* Main grid gets generous breathing space between major cards */
-        [data-tara-theme="simple"] main > * + * { margin-top: 4px; }
-        /* But within cards, tighten things up slightly for cluster feel */
-        [data-tara-theme="simple"] .p-3 { padding: 12px 14px !important; }
-        [data-tara-theme="simple"] .p-4 { padding: 14px 16px !important; }
-        [data-tara-theme="simple"] .p-2 { padding: 8px 10px !important; }
-
-        /* ── INNER DIVIDERS — HAIRLINES, NOT EMPTY GAPS ────── */
-        [data-tara-theme="simple"] .border-t.border-\\[\\#EDEDED\\]\\/5 { border-top-color: var(--tara-border) !important; }
-        [data-tara-theme="simple"] .border-b.border-\\[\\#EDEDED\\]\\/5 { border-bottom-color: var(--tara-border) !important; }
-
-        /* ── PROGRESS / TIMER BARS ─────────────────────────── */
-        /* Quality / FGT / posterior pulse bars — keep functional but calmer color */
-        [data-tara-theme="simple"] .bg-gradient-to-r.from-amber-500 {
-          background: linear-gradient(90deg, rgba(35,185,129,0.6), rgba(35,185,129,0.3)) !important;
-        }
-
-        /* ── INTERACTIVE HOVER REFINEMENT ──────────────────── */
-        [data-tara-theme="simple"] button:hover:not(:disabled) {
-          transition: all 140ms ease;
-        }
-
-        /* ── KILL THE V2.0 BADGE GLOW IN LOGO ─────────────── */
-        [data-tara-theme="simple"] .animate-pulse {
-          animation-duration: 3s !important;
-        }
-      `}</style>
       <main
         className="tara-main flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
       >
@@ -54571,40 +54043,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           onClose={()=>setShowBestPractices(false)}
         />
 
-        {/* MOBILE TAB NAV */}
-        {/* V13.4.224: this bar is `lg:hidden` -- it exists FOR phones -- and on a
-            phone it was cutting its own contents off. Six items in one row wanted
-            533px inside a 321px box, so FLOW, THEORY and the Discord link sat past
-            the edge, clipped by an ancestor's overflow-x:hidden. Not scrolled off,
-            not squeezed: unreachable. Measured at 375px.
-
-            Two causes. `flex-1` children have min-width:auto by default, so they
-            refuse to shrink below their own label ("Analytics" being the long
-            one) no matter how little room there is. And six targets never fit one
-            375px row at a legible size anyway.
-
-            Fixed by splitting the roles that were already distinct: the three
-            view tabs get their own row, the three utilities get another. Nothing
-            is clipped at any width, and each target keeps a real tap area. */}
-        <div className={'flex lg:hidden flex-col gap-1 shrink-0'}>
-          <div className={'flex bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-1 gap-1'}>
-            {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4 shrink-0"/>},
-              {id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4 shrink-0"/>},
-              {id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4 shrink-0"/>}].map(tab=>(
-              <button key={tab.id} onClick={()=>setMobileTab(tab.id)}
-                className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}>
-                {tab.icon}<span className="truncate">{tab.label}</span>
-              </button>
-            ))}
-          </div>
-          <div className={'flex bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-1 gap-1'}>
-            <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex flex-1 min-w-0 justify-center"/>
-            <TheoryLabBtn active={showTheoryLab} onClick={()=>setShowTheoryLab(!showTheoryLab)} cls="flex flex-1 min-w-0 justify-center"/>
-            <button onClick={()=>setShowSettings(true)} className={'flex-1 min-w-0 flex items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide text-[#EDEDED]/40 hover:text-indigo-400 transition-all'} title="Discord settings">
-              <IC.Link className="w-4 h-4 shrink-0"/><span className="truncate">Discord</span>
-            </button>
-          </div>
-        </div>
 
         {/* V5.3: pendingStrike confirmation banner removed per user request.
             Strike auto-confirms at window open (live spot) and Kalshi overrides when its data
@@ -54659,7 +54097,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="tara-approved-columns">
         <div className="tara-approved-primary" id="tara-primary-surface">
         <TaraWorkspaceNav
-          setShowAnalytics={setShowAnalytics}
+          setShowAnalytics={setAnalyticsPageOpen}
           setShowBrain={setShowBrain}
           setShowHeaderOverflow={setShowHeaderOverflow}
           activeView={workspaceFocus}
@@ -54686,7 +54124,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             blank, right column ~22%, on a 2011px-tall left column). lg:items-start
             lets each column size to its own content instead -- the tradeoff is
             the columns' bottom edges no longer line up. */}
-        <div className="tara-live-grid grid grid-cols-1 lg:grid-cols-[1.35fr_1.71fr_1fr] gap-3 shrink-0 lg:items-start min-w-0 pb-16 lg:pb-0" id="tara-execution-surface">
+<div className="tara-live-grid" id="tara-execution-surface">
           
           {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
               the first and largest thing on screen, because it is the only card that
@@ -54819,7 +54257,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               was relocated above THIS TRADE so it stays visible. Mobile is
               untouched: this remains the "signal" tab's primary content there,
               same as before -- only lg:hidden is new. */}
-          <div className={`bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col relative min-w-0 ${mobileTab==='signal'?'flex':'hidden'} lg:hidden`}>
+          <details className="tara-research"><summary>Manual position controls & detailed call evidence</summary>
+          <div className="flex flex-col relative min-w-0">
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
@@ -55021,6 +54460,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 anything to push against now that columns aren't stretched.) */}
             <div className="mt-auto pt-3 min-w-0"/>
           </div>
+          </details>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ──
@@ -55489,6 +54929,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               project_tara_dashboard_mockup_rebuild memory for what's still not
               matched here (Risk banner not built yet; Hourly Ladder belongs in
               its own bottom row per the mockup, not column 3 -- deferred). */}
+           <div id="tara-market-surface" className="tara-market-surface"><ChartBottomCard resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/></div>
            <div className="flex flex-col gap-3 min-w-0" id="tara-context-surface">
           {/* V13.4.298: this whole block (Record/Risk/News+LiveFeeds/Memory) is
               new to column 3 as of the dashboard-mockup-rebuild passes, and none
@@ -55500,8 +54941,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               own copies). hidden lg:block restricts this block to desktop,
               where it's genuinely additive, restoring what every commit message
               for these passes already claimed: mobile is unaffected. */}
-          <div className="hidden lg:flex lg:flex-col gap-3 min-w-0">
-          <RecordCard taraScorecards={taraScorecards} windowType={windowType}/>
+          <div className="tara-context-stack flex flex-col gap-3 min-w-0">
           <RiskBannerCard movementRisk={movementRisk}/>
           {/* V13.4.294: News + Live Feeds, relocated here from column 2. */}
           <div className={'bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0'}>
@@ -55569,7 +55009,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
-        <div id="tara-market-surface" className="tara-market-surface"><ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/></div>
         </div>
         <TaraApprovedRail
           autoExecSettings={autoExecSettings}
@@ -56668,465 +56107,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       )}
 
 
-      <style>{`
-        /* ── Tara V101 Global Reset & Responsive Base ── */
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html {
-          font-size: 16px;
-          -webkit-text-size-adjust: 100%;
-          text-size-adjust: 100%;
-          overflow-x: hidden;
-        }
-        body {
-          overflow-x: hidden;
-          min-height: 100dvh;
-          -webkit-font-smoothing: antialiased;
-        }
-        /* Remove number input spinners */
-        input[type=number]::-webkit-inner-spin-button,
-        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        input[type=number] { -moz-appearance: textfield; }
-        /* Scrollbars */
-        ::-webkit-scrollbar { width: 3px; height: 3px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(237,237,237,0.12); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(237,237,237,0.22); }
-        /* Mobile tap highlight */
-        * { -webkit-tap-highlight-color: transparent; }
-        /* Safe area insets for notched phones */
-        .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
-
-        /* ── Fluid prediction heading ── */
-        .prediction-heading { font-size: clamp(1.8rem, 8vw, 3.5rem) !important; line-height: 1 !important; }
-
-        /* ── Breakpoint-specific font tuning ── */
-        @media (max-width: 360px) {
-          html { font-size: 13px; }
-        }
-        @media (min-width: 361px) and (max-width: 480px) {
-          html { font-size: 14px; }
-        }
-        @media (min-width: 481px) and (max-width: 768px) {
-          html { font-size: 15px; }
-        }
-        @media (min-width: 769px) and (max-width: 1024px) {
-          html { font-size: 15.5px; }
-        }
-        @media (min-width: 1025px) {
-          html { font-size: 16px; }
-        }
-        @media (min-width: 1400px) {
-          html { font-size: 17px; }
-        }
-
-        /* ── Prevent any element causing horizontal scroll ── */
-        main, header, section, div {
-          max-width: 100%;
-        }
-
-        /* ── TradingView iframe responsive ── */
-        iframe {
-          max-width: 100%;
-        }
-
-        /* ── Chart height adapts to screen ── */
-        @media (max-width: 480px) {
-          .tv-chart-container { height: 300px !important; }
-        }
-        @media (min-width: 481px) and (max-width: 768px) {
-          .tv-chart-container { height: 360px !important; }
-        }
-        @media (min-width: 769px) {
-          .tv-chart-container { height: 430px !important; }
-        }
-
-        /* ── Analytics grid adapts ── */
-        @media (max-width: 480px) {
-          .signal-weights-grid { grid-template-columns: repeat(2, 1fr) !important; }
-          .calibration-grid { grid-template-columns: repeat(5, 1fr) !important; }
-          .session-grid { grid-template-columns: repeat(2, 1fr) !important; }
-        }
-
-        /* ── V13.4.352 ORIENTATION RAILS ───────────────────────────────
-           These rails make the existing information architecture legible at a
-           glance. They do not replace a control or collapse a data surface. */
-        .tara-page-brief,
-        .tara-specialist-brief {
-          position: relative;
-          overflow: hidden;
-          border: 1px solid rgba(237,237,237,0.12);
-          background: linear-gradient(120deg, rgba(17,17,23,0.98), rgba(9,9,13,0.98));
-          box-shadow: 0 16px 42px rgba(0,0,0,0.16);
-        }
-        .tara-page-brief::before,
-        .tara-specialist-brief::before {
-          content: '';
-          position: absolute;
-          inset: 0 auto auto 0;
-          width: 100%;
-          height: 1px;
-          background: linear-gradient(90deg, rgba(35,185,129,0.78), rgba(35,185,129,0.08) 58%, transparent);
-        }
-        .tara-page-brief {
-          display: grid;
-          grid-template-columns: minmax(0,1.05fr) minmax(380px,1fr);
-          gap: 20px;
-          padding: 19px 20px 13px;
-          border-radius: 12px;
-        }
-        .tara-page-brief__eyebrow,
-        .tara-specialist-brief__eyebrow {
-          color: rgba(237,237,237,0.46);
-          font: 600 9px/1.2 'IBM Plex Mono', ui-monospace, monospace;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-        }
-        .tara-page-brief h2,
-        .tara-specialist-brief h2 {
-          margin: 7px 0 6px;
-          color: rgba(255,255,255,0.96);
-          font: 600 clamp(20px, 2vw, 28px)/1.04 'Space Grotesk', 'Instrument Sans', ui-sans-serif, sans-serif;
-          letter-spacing: -0.035em;
-        }
-        .tara-page-brief h2 span,
-        .tara-specialist-brief h2 span {
-          color: rgba(35,185,129,0.84);
-          font-weight: 400;
-        }
-        .tara-page-brief p,
-        .tara-specialist-brief p {
-          max-width: 660px;
-          color: rgba(237,237,237,0.53);
-          font-size: 11px;
-          line-height: 1.55;
-        }
-        .tara-page-brief__flow {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0,1fr));
-          align-self: center;
-          gap: 1px;
-          overflow: hidden;
-          border: 1px solid rgba(237,237,237,0.10);
-          border-radius: 9px;
-          background: rgba(237,237,237,0.10);
-        }
-        .tara-page-brief__step {
-          min-width: 0;
-          min-height: 72px;
-          padding: 11px 10px 10px;
-          background: rgba(10,10,14,0.94);
-        }
-        .tara-page-brief__step-no {
-          display: block;
-          margin-bottom: 9px;
-          color: rgba(237,237,237,0.26);
-          font: 500 9px/1 'IBM Plex Mono', ui-monospace, monospace;
-          letter-spacing: 0.08em;
-        }
-        .tara-page-brief__step-copy {
-          display: flex;
-          min-width: 0;
-          flex-direction: column;
-          gap: 5px;
-        }
-        .tara-page-brief__step-copy > span {
-          overflow: hidden;
-          color: rgba(237,237,237,0.42);
-          font-size: 9px;
-          font-weight: 600;
-          letter-spacing: 0.09em;
-          text-overflow: ellipsis;
-          text-transform: uppercase;
-          white-space: nowrap;
-        }
-        .tara-page-brief__step-copy strong {
-          overflow: hidden;
-          color: rgba(237,237,237,0.88);
-          font: 600 11px/1.15 'IBM Plex Mono', ui-monospace, monospace;
-          text-overflow: ellipsis;
-          text-transform: uppercase;
-          white-space: nowrap;
-        }
-        .tara-page-brief__step--up .tara-page-brief__step-copy strong,
-        .tara-page-brief__step--live .tara-page-brief__step-copy strong { color: #23B981; }
-        .tara-page-brief__step--down .tara-page-brief__step-copy strong { color: #E8455E; }
-        .tara-page-brief__step--warn .tara-page-brief__step-copy strong { color: #D4A03A; }
-        .tara-page-brief__meta {
-          grid-column: 1 / -1;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding-top: 10px;
-          border-top: 1px solid rgba(237,237,237,0.08);
-          color: rgba(237,237,237,0.32);
-          font: 500 9px/1.2 'IBM Plex Mono', ui-monospace, monospace;
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-        }
-        .tara-page-brief__dot { color: rgba(35,185,129,0.78); }
-        .tara-specialist-brief {
-          display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
-          gap: 18px;
-          margin-bottom: 17px;
-          padding: 16px 18px 15px;
-          border-radius: 11px;
-        }
-        .tara-specialist-brief__legend {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: flex-end;
-          gap: 8px 13px;
-          color: rgba(237,237,237,0.50);
-          font: 600 9px/1.2 'IBM Plex Mono', ui-monospace, monospace;
-          letter-spacing: 0.09em;
-          text-transform: uppercase;
-          white-space: nowrap;
-        }
-        .tara-specialist-brief__legend span { display: inline-flex; align-items: center; gap: 6px; }
-        .tara-legend-dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: rgba(237,237,237,0.35); }
-        .tara-legend-dot--live,
-        .tara-legend-dot--tracked { background: #23B981; box-shadow: 0 0 0 3px rgba(35,185,129,0.10); }
-        .tara-legend-dot--paper { background: #D4A03A; box-shadow: 0 0 0 3px rgba(212,160,58,0.10); }
-        .tara-legend-dot--record { background: rgba(237,237,237,0.65); }
-        .tara-legend-dot--upcoming { background: #7CA6E8; box-shadow: 0 0 0 3px rgba(124,166,232,0.10); }
-        @media (max-width: 980px) {
-          .tara-page-brief { grid-template-columns: 1fr; gap: 14px; }
-          .tara-page-brief__flow { width: 100%; }
-        }
-        @media (max-width: 560px) {
-          .tara-page-brief { padding: 16px 14px 12px; }
-          .tara-page-brief__flow { grid-template-columns: repeat(2, minmax(0,1fr)); }
-          .tara-page-brief__step { min-height: 66px; }
-          .tara-specialist-brief { align-items: flex-start; flex-direction: column; gap: 12px; padding: 15px 14px 13px; }
-          .tara-specialist-brief__legend { justify-content: flex-start; }
-        }
-
-        /* ── APPROVED CONTROL-ROOM SHELL ───────────────────────────────
-           The approved Tara mockup is a two-column operating surface: a
-           decision ledger on the left, and execution guardrails/alerts/record
-           on the right. Existing live panels remain inside the primary column;
-           this shell changes hierarchy and navigation, not the data model. */
-        .tara-live-shell {
-          background:
-            radial-gradient(78% 54% at 54% -18%, rgba(28,49,43,0.42), transparent 60%),
-            #07090b !important;
-          color: #eef4f0;
-        }
-        .tara-header {
-          min-height: 76px;
-          padding: 0 28px !important;
-          background: rgba(7,9,11,0.92) !important;
-          border-bottom-color: #252d31 !important;
-          box-shadow: 0 1px 0 rgba(255,255,255,0.025);
-        }
-        .tara-header > div { max-width: 1760px !important; width: 100%; gap: 18px !important; }
-        .tara-brand-lockup { gap: 10px !important; min-width: 205px; }
-        .tara-brandmark { width: 27px; height: 27px; border: 1px solid #5a6b63; display: grid; place-items: center; flex: 0 0 auto; }
-        .tara-brandmark i { width: 10px; height: 10px; display: block; background: #62e39a; transform: rotate(45deg); }
-        .tara-brand-copy { display: flex; flex-direction: column; min-width: 0; }
-        .tara-brand-copy h1 { font: 600 22px/1 'Space Grotesk', sans-serif !important; letter-spacing: -0.07em; }
-        .tara-brand-copy h1 span { color: #62e39a; }
-        .tara-brand-copy small { margin-top: 4px; color: #82908d; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .14em; white-space: nowrap; }
-        .tara-modebar { align-self: stretch; display: flex; gap: 0 !important; margin-left: 0; border-left: 1px solid #252d31; background: transparent !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; }
-        .tara-modebar > button { min-width: 72px; height: 100%; padding: 0 13px !important; border: 0 !important; border-right: 1px solid #252d31 !important; border-radius: 0 !important; background: transparent !important; color: #82908d !important; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace !important; letter-spacing: .13em !important; text-transform: uppercase; }
-        .tara-modebar > button:first-child { border-left: 0 !important; }
-        .tara-modebar > button:hover, .tara-modebar > button[style*="rgb(212"] { color: #eef4f0 !important; }
-        .tara-header-mode-button { position: relative; }
-        .tara-header-mode-button:hover { color: #eef4f0 !important; }
-        .tara-status-chips { display: flex; align-items: center; gap: 8px; margin-left: auto; white-space: nowrap; }
-        .tara-status-chips span { border: 1px solid #252d31; border-radius: 999px; padding: 7px 10px; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .09em; text-transform: uppercase; }
-        .tara-status-chips .is-ok { color: #62e39a; border-color: #27523e; background: #0d1a14; }
-        .tara-status-chips .is-warn { color: #e0b765; border-color: #594a2c; background: #1a160d; }
-        .tara-workspace-nav { display: flex; gap: 7px; overflow-x: auto; padding: 1px 0 15px; border-bottom: 1px solid #252d31; }
-        .tara-workspace-nav button { flex: 0 0 auto; padding: 9px 11px; border: 1px solid #252d31; color: #82908d; background: transparent; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
-        .tara-workspace-nav button:hover, .tara-workspace-nav button.is-active { color: #eef4f0; border-color: #577264; background: #101915; }
-        .tara-approved-columns { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(300px,.72fr); gap: 18px; align-items: start; padding-top: 2px; }
-        .tara-approved-primary, .tara-approved-rail { min-width: 0; }
-        .tara-page-brief.tara-call-ledger { display: block; padding: 0; border-color: #3a5146; border-radius: 0; background: linear-gradient(130deg, #0d1214, #0a0d10); box-shadow: 0 18px 60px rgba(0,0,0,.28); }
-        .tara-page-brief.tara-call-ledger::before { background: linear-gradient(90deg, #62e39a, rgba(98,227,154,.08) 58%, transparent); height: 2px; }
-        .tara-call-ledger__topline { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 18px 20px 15px; border-bottom: 1px solid #252d31; background: linear-gradient(90deg, #101a15, #0b1012); }
-        .tara-call-ledger__topline .tara-page-brief__intro h2 { margin: 6px 0 4px; font-size: 22px; }
-        .tara-call-ledger__topline .tara-page-brief__intro p { color: #82908d; font-size: 12px; }
-        .tara-call-ledger__badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-        .tara-call-ledger__badges span { border: 1px solid #313b3f; padding: 7px 9px; color: #82908d; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
-        .tara-call-ledger__hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 18px 20px 16px; }
-        .tara-call-ledger__kicker, .tara-rail-kicker { color: #82908d; font: 10px/1.2 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; }
-        .tara-call-ledger__hero h3 { margin: 8px 0 7px; color: #eef4f0; font: 600 clamp(30px,4vw,50px)/.98 'Space Grotesk', sans-serif; letter-spacing: -.07em; text-transform: uppercase; }
-        .tara-call-ledger__hero h3.is-up { color: #62e39a; }
-        .tara-call-ledger__hero h3.is-down { color: #ee6d72; }
-        .tara-call-ledger__hero p { max-width: 650px; color: #82908d; font-size: 12px; line-height: 1.45; }
-        .tara-call-ledger__truth { min-width: 175px; padding-top: 6px; text-align: right; }
-        .tara-call-ledger__truth strong { display: block; color: #e0b765; font: 600 14px 'Space Grotesk', sans-serif; }
-        .tara-call-ledger__truth small { display: block; margin-top: 5px; color: #82908d; font: 9px/1.6 'IBM Plex Mono', ui-monospace, monospace; }
-        .tara-call-ledger__metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #252d31; border-top: 1px solid #252d31; border-bottom: 1px solid #252d31; }
-        .tara-call-ledger__metrics > div { min-width: 0; padding: 14px 17px; background: #0b1012; }
-        .tara-call-ledger__metrics label { display: block; color: #82908d; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
-        .tara-call-ledger__metrics strong { display: block; margin-top: 7px; color: #eef4f0; font: 600 22px/1 'Space Grotesk', sans-serif; }
-        .tara-call-ledger__metrics strong.is-up { color: #62e39a; }
-        .tara-call-ledger__metrics strong.is-down { color: #ee6d72; }
-        .tara-call-ledger__metrics strong.is-amber { color: #e0b765; }
-        .tara-call-ledger__timeline { display: flex; align-items: center; gap: 8px; padding: 16px 20px; color: #56625f; font: 8px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
-        .tara-call-ledger__timeline b { color: #62e39a; font-weight: 500; }
-        .tara-call-ledger__timeline i { color: #56625f; font-style: normal; }
-        .tara-call-ledger__details { display: grid; grid-template-columns: 1.05fr .95fr; gap: 1px; background: #252d31; border-top: 1px solid #252d31; }
-        .tara-call-ledger__details > div { min-width: 0; padding: 16px 18px; background: #0b1012; }
-        .tara-call-ledger__details h4 { margin: 0 0 13px; color: #82908d; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
-        .tara-call-ledger__details > div > strong { display: block; color: #62e39a; font: 600 30px/1 'Space Grotesk', sans-serif; }
-        .tara-call-ledger__details > div > span { display: block; padding-top: 8px; color: #82908d; font-size: 11px; }
-        .tara-call-ledger__details > div:last-child > span { display: flex; justify-content: space-between; border-bottom: 1px solid #1b2426; }
-        .tara-call-ledger__details > div:last-child > span:last-child { border-bottom: 0; }
-        .tara-call-ledger__details > div:last-child b { color: #82908d; font-weight: 400; }
-        .tara-call-ledger__details > div:last-child strong { color: #eef4f0; font: 500 11px 'IBM Plex Mono', ui-monospace, monospace; }
-        .tara-call-ledger__details .is-down { color: #ee6d72 !important; }
-        .tara-call-ledger .tara-page-brief__flow { margin: 0; border: 0; border-radius: 0; border-top: 1px solid #252d31; }
-        .tara-call-ledger .tara-page-brief__step { min-height: 64px; }
-        .tara-call-ledger .tara-page-brief__meta { padding: 11px 18px 13px; border-top: 1px solid #252d31; }
-        .tara-rail-card { margin-bottom: 18px; border: 1px solid #252d31; background: #0c1113; }
-        .tara-rail-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 15px 16px; border-bottom: 1px solid #252d31; }
-        .tara-rail-card__head h2 { margin: 5px 0 0; color: #eef4f0; font: 600 13px/1.1 'Space Grotesk', sans-serif; }
-        .tara-rail-card__head small { color: #82908d; font: 9px 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
-        .tara-rail-mission { border-color: #3a5146; }
-        .tara-rail-arm { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; border-bottom: 1px solid #252d31; }
-        .tara-rail-arm strong { display: block; font: 600 22px/1.05 'Space Grotesk', sans-serif; }
-        .tara-rail-arm small { display: block; margin-top: 4px; color: #82908d; font: 9px 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
-        .tara-rail-toggle { width: 43px; height: 23px; padding: 3px; border: 1px solid #313b3f; border-radius: 20px; background: #202629; }
-        .tara-rail-toggle i { display: block; width: 15px; height: 15px; border-radius: 50%; background: #82908d; }
-        .tara-rail-toggle.is-on { border-color: #397451; background: #23332b; }
-        .tara-rail-toggle.is-on i { margin-left: 17px; background: #62e39a; }
-        .tone-ok { color: #62e39a !important; }
-        .tone-bad { color: #ee6d72 !important; }
-        .tone-amber { color: #e0b765 !important; }
-        .tone-muted { color: #82908d !important; }
-        .tara-rail-rows { padding: 7px 16px 3px; }
-        .tara-rail-rows span { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1b2426; color: #82908d; font-size: 12px; }
-        .tara-rail-rows span:last-child { border-bottom: 0; }
-        .tara-rail-rows b { color: #eef4f0; font: 500 10px 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
-        .tara-rail-actions { display: flex; gap: 8px; padding: 0 16px 16px; }
-        .tara-rail-mission > .tara-rail-kicker { display: block; padding: 0 16px 12px; }
-        .tara-rail-riskbar { display: flex; gap: 3px; height: 5px; margin: 10px 16px 8px; }
-        .tara-rail-riskbar i { flex: 1; background: #27302e; }
-        .tara-rail-riskbar i.is-hot { background: #62e39a; }
-        .tara-rail-action { flex: 1; margin: 0; padding: 9px 12px; border: 1px solid #3c9567; background: #173d2c; color: #62e39a; font: 9px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
-        .tara-rail-action--secondary { border-color: #394346; background: #151b1d; color: #c1ceca; }
-        .tara-rail-alert { display: grid; grid-template-columns: minmax(0,.7fr) minmax(0,1.3fr); gap: 10px; padding: 11px 16px; border-bottom: 1px solid #1c2426; }
-        .tara-rail-alert:last-child { border-bottom: 0; }
-        .tara-rail-alert b { font: 500 11px 'Space Grotesk', sans-serif; }
-        .tara-rail-alert span { color: #82908d; font-size: 10px; line-height: 1.35; }
-        .tara-rail-record { padding: 15px 16px; }
-        .tara-rail-record > strong { display: block; margin-top: 6px; color: #62e39a; font: 600 45px/1 'Space Grotesk', sans-serif; }
-        .tara-rail-record__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 15px -16px -15px; background: #252d31; }
-        .tara-rail-record__grid span { min-height: 60px; padding: 12px; background: #0b1012; color: #82908d; font: 9px 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
-        .tara-rail-record__grid b { display: block; margin-top: 5px; color: #eef4f0; font-size: 11px; font-weight: 500; text-transform: none; }
-        .tara-rail-record__note { padding-top: 12px; color: #56625f; font: 9px/1.4 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; }
-        .tara-rail-cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #252d31; }
-        .tara-rail-cap-grid span { min-height: 64px; padding: 12px 13px; background: #0b1012; color: #82908d; font-size: 10px; }
-        .tara-rail-cap-grid b { display: block; color: #eef4f0; font: 10px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .06em; }
-        .tara-live-grid { grid-template-columns: minmax(0,1.05fr) minmax(0,1.35fr) minmax(250px,.85fr) !important; }
-        .tara-hourly-row { margin-top: 2px; }
-        @media (min-width: 1181px) and (max-width: 1400px) {
-          .tara-header > div { flex-wrap: nowrap !important; gap: 10px !important; }
-          .tara-brand-lockup { min-width: 0; gap: 7px !important; flex-shrink: 1; }
-          .tara-brand-copy small { font-size: 8px; letter-spacing: .1em; }
-          .tara-modebar { flex-shrink: 1; }
-          .tara-modebar > button { min-width: 64px; padding: 0 8px !important; }
-          .tara-status-chips { gap: 5px; }
-          .tara-status-chips span { padding: 6px 8px; font-size: 8px; }
-          .tara-header > div > .flex-1 { min-width: 0; }
-        }
-        @media (max-width: 1180px) {
-          .tara-header { padding: 0 16px !important; }
-          .tara-brand-lockup { min-width: 175px; }
-          .tara-modebar > button { min-width: 64px; padding: 0 8px !important; }
-          .tara-status-chips { display: none; }
-          .tara-approved-columns { grid-template-columns: minmax(0,1fr); }
-          .tara-approved-rail { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
-          .tara-rail-card { margin-bottom: 0; }
-          .tara-rail-capabilities { grid-column: 1 / -1; }
-        }
-        @media (max-width: 760px) {
-          .tara-header { min-height: 64px; padding: 8px 14px !important; }
-          .tara-header > div { flex-wrap: wrap; }
-          .tara-brand-lockup { min-width: 145px; }
-          .tara-brand-copy small { font-size: 8px; }
-          .tara-modebar { order: 3; width: 100%; height: 40px; overflow-x: auto; border-top: 1px solid #252d31; }
-          .tara-modebar > button { min-width: 74px; height: 40px; }
-          .tara-call-ledger__topline, .tara-call-ledger__hero { display: block; }
-          .tara-call-ledger__badges { justify-content: flex-start; margin-top: 12px; }
-          .tara-call-ledger__truth { padding-top: 12px; text-align: left; }
-          .tara-call-ledger__metrics { grid-template-columns: repeat(2,1fr); }
-          .tara-call-ledger__timeline { flex-wrap: wrap; line-height: 1.6; }
-          .tara-call-ledger__details { grid-template-columns: 1fr; }
-          .tara-live-grid { grid-template-columns: 1fr !important; }
-          .tara-approved-rail { display: block; }
-          .tara-rail-card { margin-bottom: 12px; }
-          .tara-workspace-nav { margin-top: 2px; }
-        }
-
-        /* V13.4.353: hierarchy pass after the live audit. The rail is a live
-           operating context, so it stays available while the long-form panels
-           remain reachable below. The content grid gets the width it needs for
-           depth, tape, and position labels instead of squeezing them into a
-           narrow three-column sliver. */
-        @media (min-width: 1181px) {
-          .tara-approved-columns { grid-template-columns: minmax(0,1.78fr) minmax(285px,.58fr); }
-          .tara-approved-rail { position: sticky; top: 94px; align-self: start; }
-        }
-        .tara-workspace-nav button { transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease; }
-        .tara-workspace-nav button:active, .tara-rail-action:active { transform: translateY(1px); }
-        .tara-call-ledger__meta, .tara-page-brief__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 9px; }
-        .tara-rail-record__sub { margin-top: 5px; color: #82908d; font: 9px/1.3 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: .06em; }
-        #tara-execution-surface, #tara-signals-surface, #tara-context-surface, #tara-schedule-surface, #tara-market-surface { scroll-margin-top: 104px; }
-        #tara-market-surface .tv-chart-container { height: clamp(360px, 38vw, 520px) !important; }
-        .sports-next-glance { margin: 0 0 18px; border: 1px solid rgba(124,166,232,.28); background: linear-gradient(135deg, rgba(124,166,232,.08), rgba(10,10,14,.96) 60%); }
-        .sports-next-glance__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; padding: 15px 16px 12px; border-bottom: 1px solid rgba(124,166,232,.18); }
-        .sports-next-glance__eyebrow { color: #7CA6E8; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .16em; font-weight: 700; }
-        .sports-next-glance h3 { margin: 6px 0 0; color: #eef4f0; font: 600 20px/1 'Space Grotesk', sans-serif; letter-spacing: -.03em; }
-        .sports-next-glance__count { color: rgba(237,237,237,.48); font: 10px/1.4 'IBM Plex Mono', ui-monospace, monospace; text-transform: uppercase; text-align: right; }
-        .sports-next-glance__count b { color: #eef4f0; }
-        .sports-next-glance__row { display: grid; grid-template-columns: 70px minmax(0,1fr) 74px 64px; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid rgba(237,237,237,.07); }
-        .sports-next-glance__time { color: rgba(237,237,237,.46); font: 10px 'IBM Plex Mono', ui-monospace, monospace; }
-        .sports-next-glance__pick { min-width: 0; }
-        .sports-next-glance__pick strong { display: block; overflow: hidden; color: #eef4f0; font: 600 12px/1.25 'Space Grotesk', sans-serif; text-overflow: ellipsis; white-space: nowrap; }
-        .sports-next-glance__pick span { display: block; overflow: hidden; margin-top: 3px; color: rgba(237,237,237,.40); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-        .sports-next-glance__prob { color: #eef4f0; font: 600 12px 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
-        .sports-next-glance__prob small { color: rgba(237,237,237,.32); font-size: 8px; font-weight: 400; }
-        .sports-next-glance__tracked, .sports-next-glance__paper { justify-self: end; padding: 4px 5px; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .06em; text-align: center; }
-        .sports-next-glance__tracked { color: #23B981; border: 1px solid rgba(35,185,129,.32); background: rgba(35,185,129,.08); }
-        .sports-next-glance__paper { color: #D4A03A; border: 1px solid rgba(212,160,58,.28); background: rgba(212,160,58,.07); }
-        .sports-next-glance__empty, .sports-next-glance__foot { padding: 12px 16px; color: rgba(237,237,237,.46); font-size: 11px; line-height: 1.5; }
-        .sports-next-glance__foot { color: rgba(237,237,237,.30); border-top: 1px solid rgba(237,237,237,.07); font: 9px/1.4 'IBM Plex Mono', ui-monospace, monospace; }
-        .weather-lane-tabs { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 4px; border: 1px solid rgba(255,255,255,.10); background: rgba(10,10,14,.78); }
-        .weather-lane-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid transparent; color: rgba(255,255,255,.42); background: transparent; font: 10px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .11em; }
-        .weather-lane-tabs button:hover, .weather-lane-tabs button.is-active { color: #eef4f0; border-color: rgba(212,160,58,.32); background: rgba(212,160,58,.09); }
-        .weather-lane-tabs button b { color: #D4A03A; font-weight: 600; }
-        .weather-lane-tabs__note { margin-left: auto; padding-right: 8px; color: rgba(255,255,255,.28); font: 9px 'IBM Plex Mono', ui-monospace, monospace; }
-        .weather-lane-preview { margin: 0 0 12px; border: 1px solid rgba(212,160,58,.24); background: rgba(212,160,58,.05); }
-        .weather-lane-preview__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 13px 14px 10px; border-bottom: 1px solid rgba(212,160,58,.15); }
-        .weather-lane-preview__head span { color: #D4A03A; font: 9px/1 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .14em; font-weight: 700; }
-        .weather-lane-preview__head h3 { margin: 5px 0 0; color: #eef4f0; font: 600 18px/1 'Space Grotesk', sans-serif; }
-        .weather-lane-preview__head small { color: rgba(255,255,255,.38); font: 9px/1.4 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
-        .weather-lane-preview__row { display: grid; grid-template-columns: minmax(0,1fr) 110px 58px; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.07); color: rgba(255,255,255,.70); font-size: 11px; }
-        .weather-lane-preview__row b { color: #eef4f0; font: 11px 'IBM Plex Mono', ui-monospace, monospace; text-align: right; }
-        .weather-lane-preview__row em { color: #D4A03A; font: 9px 'IBM Plex Mono', ui-monospace, monospace; font-style: normal; text-align: right; }
-        .weather-lane-preview__empty { padding: 14px; color: rgba(255,255,255,.45); font-size: 11px; }
-        @media (max-width: 560px) {
-          .sports-next-glance__head { align-items: flex-start; flex-direction: column; }
-          .sports-next-glance__count { text-align: left; }
-          .sports-next-glance__row { grid-template-columns: 54px minmax(0,1fr) 58px; gap: 8px; padding: 10px 12px; }
-          .sports-next-glance__row > :last-child { grid-column: 2 / -1; justify-self: start; }
-          .weather-lane-tabs { overflow-x: auto; }
-          .weather-lane-tabs__note { min-width: max-content; }
-          .weather-lane-preview__head { align-items: flex-start; flex-direction: column; }
-          .weather-lane-preview__head small { text-align: left; }
-          .weather-lane-preview__row { grid-template-columns: minmax(0,1fr) auto; }
-          .weather-lane-preview__row em { grid-column: 2; grid-row: 1; }
-        }
-        @media (max-width: 1180px) {
-          .tara-approved-rail { position: static; }
-        }
-      `}</style>
+      <style>{taraDesignStyles}</style>
       {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
               displaying context that doesn't change minute-to-minute. Wraps gracefully on mobile. */}
       <div className="bg-[#0A0B0A] border-t border-[#24242E] px-3 sm:px-4 py-1.5 mt-2 -mx-2 sm:-mx-3 lg:-mx-4 -mb-2 sm:-mb-3 shrink-0">
