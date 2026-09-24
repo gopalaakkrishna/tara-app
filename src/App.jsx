@@ -5900,8 +5900,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.24-v13.4.362-control-room-and-position-parser';
-const TARA_VERSION_DISPLAY='Tara 13.4.362';
+const TARA_BUILD_VERSION='2026.09.24-v13.4.363-layout-composition';
+const TARA_VERSION_DISPLAY='Tara 13.4.363';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10605,9 +10605,9 @@ const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow,act
   return <nav id="tara-workspace-nav" className="tara-workspace-nav" aria-label="Workspace views">{items.map(([id,label])=><button key={id} onClick={()=>select(id)} aria-current={activeView===id?'page':undefined} className={activeView===id?'is-active':''}>{label}</button>)}</nav>;
 };
 
-const TaraWorkspaceHeading=({view})=>{
+const TaraWorkspaceHeading=({view,analysis,qualityGate,newsSentiment,pendingKalshiCount=0})=>{
   const copy={
-    overview:['OPERATE / LIVE CONTROL ROOM','Tara Call + execution truth','One window. Four truths kept separate: the Call, execution, exchange position, and independent records.'],
+    overview:['OPERATE / LIVE CONTROL ROOM','Tara Call + execution truth','One window. Four truths kept separate.'],
     execution:['EXECUTION / CURRENT WINDOW','AutoTrade, order state, and position truth','The locked Tara Call is the input. Only exchange-confirmed fills are positions.'],
     signals:['SIGNALS / MARKET READ','Why the call looks the way it does','Price, strike, depth, tape, and the evidence behind this window.'],
     market:['MARKET / TRADINGVIEW','The full market lens','TradingView stays intact, with Tara’s live market context close by.'],
@@ -10618,7 +10618,23 @@ const TaraWorkspaceHeading=({view})=>{
     logs:['OPERATE / SYSTEM','Logs, sync, and controls','Inspect local AutoTrade events and reach the existing settings and sync tools.'],
     brain:['TARA / BRAIN','Why she made the call','The Brain explains the locked Call and its evidence; it is not an exchange-position screen.'],
   }[view];
-  return copy?<div className="tara-workspace-heading"><span>{copy[0]}</span><h2>{copy[1]}</h2><p>{copy[2]}</p></div>:null;
+  if(!copy)return null;
+  const post=Number(analysis?.confidence)||50;
+  const dir=analysis?.prediction?.includes('UP')?'UP':analysis?.prediction?.includes('DOWN')?'DOWN':'';
+  const quality=qualityGate?.score;
+  const fgtRaw=Number(analysis?.mtfAlignment)||0;
+  const fgt=`${Math.abs(fgtRaw)<.05?'0':Math.abs(fgtRaw).toFixed(1).replace(/\.0$/,'')}/4${fgtRaw>.05?' UP':fgtRaw<-.05?' DN':''}`;
+  const geoRisk=Number(newsSentiment?.geoRisk)||0;
+  return <div className="tara-workspace-heading">
+    <div className="tara-workspace-heading__copy"><span>{copy[0]}</span><h2>{copy[1]}</h2><p>{copy[2]}</p></div>
+    <div className="tara-workspace-heading__pulse" aria-label="Live signal status">
+      <span title="Live posterior; not a locked call">POST <b>{post.toFixed(0)}%{dir?` ${dir}`:''}</b></span>
+      <span title="Current signal quality">QUALITY <b>{quality!=null?Math.round(quality):'—'}/100</b></span>
+      <span title="Multi-timeframe FGT alignment">FGT <b>{fgt}</b></span>
+      {geoRisk>=.3&&<span title="Current geographic news risk">GEO <b>{geoRisk>=.7?'HIGH':geoRisk>=.5?'ELEVATED':'WATCH'}</b></span>}
+      {pendingKalshiCount>0&&<span title="Trades awaiting Kalshi resolution">PENDING <b>{pendingKalshiCount}</b></span>}
+    </div>
+  </div>;
 };
 
 const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,manualKalshiEntry,activeTicker,taraScorecards,windowType})=>{
@@ -24021,7 +24037,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
     return(_o[a.severity]||3)-(_o[b.severity]||3);
   })[0];
   return React.createElement('div',{
-    className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
+    className:'tara-context-strip rounded-lg overflow-hidden mb-2 sm:mb-3',
     style:{
       border:'1px solid '+_borderColor,
       background:_bgGradient,
@@ -54010,58 +54026,9 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
         </div>
       )}
 
-      {/* V2.1: Top stat strip — sticky 3-stat indicator. Always visible: Posterior · Quality · FGT.
-              Provides a constant pulse-check without scanning multiple panels. */}
-      {!showSports&&!showWeather&&(
-      <div className="sticky top-[44px] sm:top-[52px] z-30 bg-[#050508] backdrop-blur-md border-b border-[#24242E] px-2 sm:px-4 py-1.5 shrink-0">
-        <div className="max-w-[1600px] mx-auto flex items-center gap-3 sm:gap-5 text-[10px] sm:text-[11px]">
-          {(()=>{
-            const post=Number(analysis?.confidence)||50;
-            const dirLabel=analysis?.prediction?.includes('UP')?'UP':analysis?.prediction?.includes('DOWN')?'DOWN':'';
-            const postCls=dirLabel==='UP'?'text-emerald-300':dirLabel==='DOWN'?'text-rose-300':'text-[#EDEDED]/60';
-            const qScore=qualityGate?.score;
-            const qCls=qScore==null?'text-[#EDEDED]/30':qScore>=70?'text-emerald-300':qScore>=50?'text-white':'text-amber-300';
-            const fgtRaw=analysis?.mtfAlignment||0;
-            // V3.1.7: V2.9 weighted FGT voting produces fractional values (e.g. 0.3, 1.7).
-            //         JS floating point shows 0.30000000000000004 — round to 1 decimal at display.
-            const fgt=Math.abs(fgtRaw)<0.05?'0':Math.abs(fgtRaw).toFixed(1).replace(/\.0$/,'');
-            const fgtSign=fgtRaw>0.05?'UP':fgtRaw<-0.05?'DN':'';
-            const fgtCls=fgt>=4?(analysis.mtfAlignment>0?'text-emerald-300':'text-rose-300'):fgt>=2?'text-white':'text-[#EDEDED]/40';
-            const geoRisk=newsSentiment?.geoRisk||0;
-            return(
-              <>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="uppercase font-bold tracking-[0.10em] text-[#EDEDED]/40 text-[8px] sm:text-[9px]">Post</span>
-                  <span style={T2_MONO_STYLE} className={'font-medium '+postCls}>{post.toFixed(0)}%</span>
-                  {dirLabel&&<span className={'text-[8px] sm:text-[9px] '+postCls}>{dirLabel}</span>}
-                </div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="uppercase font-bold tracking-[0.10em] text-[#EDEDED]/40 text-[8px] sm:text-[9px]">Quality</span>
-                  <span style={T2_MONO_STYLE} className={'font-medium '+qCls}>{qScore!=null?qScore.toFixed(0):'—'}<span className="opacity-40 hidden sm:inline">/100</span></span>
-                </div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="uppercase font-bold tracking-[0.10em] text-[#EDEDED]/40 text-[8px] sm:text-[9px]">FGT</span>
-                  <span style={T2_MONO_STYLE} className={'font-medium '+fgtCls}>{fgt}/4{fgtSign&&<span className="opacity-50 ml-0.5">{fgtSign}</span>}</span>
-                </div>
-                {geoRisk>=0.3&&(
-                  <div className="hidden sm:flex items-center gap-1 ml-auto" style={{color:T2_COPPER}}>
-                    <span className="inline-block w-1.5 h-1.5 rounded-full" style={{background:T2_COPPER}}></span>
-                    <span className="font-bold uppercase tracking-wider text-[9px]">Geo {geoRisk>=0.7?'high':geoRisk>=0.5?'elevated':'watch'}</span>
-                  </div>
-                )}
-                {/* V2.6: Pending Kalshi resolution badge */}
-                {tradeLog.filter(t=>t.result==='PENDING-VERIFY').length>0&&(
-                  <div className="flex items-center gap-1" style={{color:T2_GOLD}}>
-                    <span className="inline-block w-1.5 h-1.5 rounded-full animate-pulse" style={{background:T2_GOLD}}></span>
-                    <span className="font-bold uppercase tracking-wider text-[9px]">Pending Kalshi · {tradeLog.filter(t=>t.result==='PENDING-VERIFY').length}</span>
-                  </div>
-                )}
-              </>
-            );
-          })()}
-        </div>
-      </div>
-      )}
+      {/* The live posterior, quality, FGT, geo and pending-resolution indicators
+          now share the workspace heading instead of taking a second full-width
+          header row. A live posterior is never presented as the locked Call. */}
 
       {/* ── MAIN CONTENT ── */}
       {/* V9.16.4: Single layout for both modes. Same V9.15 grid structure, same
@@ -54255,6 +54222,8 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
+        <div className="tara-approved-columns">
+        <div className="tara-approved-primary" id="tara-primary-surface" data-workspace={workspaceFocus}>
         <TaraWorkspaceNav
           setShowAnalytics={setAnalyticsPageOpen}
           setShowBrain={setShowBrain}
@@ -54262,9 +54231,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           activeView={workspaceFocus}
           setActiveView={setWorkspaceFocus}
         />
-        <div className="tara-approved-columns">
-        <div className="tara-approved-primary" id="tara-primary-surface" data-workspace={workspaceFocus}>
-        <TaraWorkspaceHeading view={workspaceFocus}/>
+        <TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length}/>
         {workspaceFocus==='overview'&&<TaraPageBrief
           taraCall={taraCall}
           snapshot={taraCallSnapshotRef.current||null}

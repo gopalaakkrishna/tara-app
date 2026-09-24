@@ -1,4 +1,4 @@
-/* Tara 13.4.362 — approved control-room design, shared across every surface. */
+/* Tara 13.4.363 — approved control-room composition, shared across every surface. */
 :root { color-scheme: dark; --bg:#07090b; --panel:#0d1114; --panel2:#12171b; --line:#252d31; --text:#eef4f0; --muted:#82908d; --green:#62e39a; --red:#ee6d72; --amber:#e0b765; --cyan:#8fd9e4; --dur-3:180ms; --ease-out:ease-out; }
 * { box-sizing:border-box; }
 html { font-size:16px; -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
@@ -31,6 +31,8 @@ iframe { max-width:100%; }
     radial-gradient(78% 54% at 54% -18%, rgba(28,49,43,0.42), transparent 60%),
     #07090b !important;
   color: #eef4f0;
+  overflow-x:clip !important;
+  overflow-y:visible !important;
 }
 .tara-header {
   min-height: 76px;
@@ -651,6 +653,82 @@ iframe { max-width:100%; }
   .tara-tools-workspace__actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .tara-tools-workspace__log > div { grid-template-columns:1fr 1fr; }
   .tara-tools-workspace__log > div span { grid-column:1/-1; }
-  .tara-approved-primary[data-workspace="overview"] .tara-live-grid > :not(:first-child) { display:block!important; }
-  .tara-approved-primary[data-workspace="overview"] .tara-hourly-row { display:grid!important; }
+}
+
+/* 13.4.363 — return to the approved two-column composition. The operating
+   index lives over the Call (not over both columns), the rail starts beside
+   it, and the live chart/signals/hourly stack remains on desktop Overview. */
+@media (min-width:761px) {
+  .tara-main { padding:0 28px 24px!important; gap:14px; }
+  .tara-context-strip { margin-bottom:0!important; }
+  .tara-approved-columns { padding-top:0; }
+  .tara-approved-primary { gap:14px; }
+  .tara-main .tara-approved-primary > .tara-workspace-nav {
+    display:flex; align-items:stretch; gap:6px; width:100%; min-width:0;
+    overflow:visible; padding:0; margin:0; border:0;
+  }
+  .tara-main .tara-approved-primary > .tara-workspace-nav button {
+    flex:1 1 auto; width:auto; min-width:0; min-height:31px;
+    padding:7px 6px; white-space:nowrap; font-size:8.5px; line-height:1.1;
+  }
+  .tara-workspace-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:80px; padding:12px 16px; }
+  .tara-approved-primary[data-workspace="overview"] .tara-workspace-heading { padding:12px 16px; }
+  .tara-workspace-heading__copy { min-width:0; }
+  .tara-workspace-heading__copy > span { display:block; font:9px/1 'IBM Plex Mono',monospace; }
+  .tara-workspace-heading__copy h2 { margin:4px 0 3px; font-size:20px; }
+  .tara-workspace-heading__copy p { margin:0; font-size:11px; }
+  .tara-workspace-heading__pulse { display:flex; justify-content:flex-end; align-items:center; gap:5px; flex-wrap:wrap; max-width:48%; }
+  .tara-workspace-heading__pulse > span { flex:0 0 auto; padding:6px 7px; border:1px solid #35443b; color:#82908d; font:8.5px/1 'IBM Plex Mono',monospace; white-space:nowrap; }
+  .tara-workspace-heading__pulse b { color:#d3e8d9; font-weight:600; }
+  .tara-approved-rail { top:86px; max-height:calc(100dvh - 98px); overflow-y:auto; scrollbar-width:thin; }
+}
+@media (min-width:761px) and (max-width:1180px) {
+  .tara-approved-rail { position:static; max-height:none; overflow:visible; }
+}
+@media (min-width:900px) and (max-width:1180px) {
+  .tara-approved-columns { grid-template-columns:minmax(0,1fr) minmax(288px,.5fr); }
+  .tara-approved-rail { display:block; position:sticky; top:86px; max-height:calc(100dvh - 98px); overflow-y:auto; }
+  .tara-rail-card { margin-bottom:12px; }
+  .tara-main .tara-approved-primary > .tara-workspace-nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); }
+  .tara-main .tara-approved-primary > .tara-workspace-nav button { white-space:normal; min-height:32px; }
+  .tara-live-grid { grid-template-columns:minmax(0,1fr); }
+  .tara-live-grid > :first-child,#tara-context-surface { grid-column:1; }
+}
+@media (max-width:760px) {
+  .tara-workspace-heading { display:block; }
+  .tara-workspace-heading__pulse { display:flex; gap:5px; flex-wrap:wrap; margin-top:11px; }
+  .tara-workspace-heading__pulse > span { padding:5px 6px; border:1px solid #35443b; color:#82908d; font:8px/1 'IBM Plex Mono',monospace; }
+  .tara-workspace-heading__pulse b { color:#d3e8d9; }
+  .tara-context-strip { margin-bottom:0!important; }
+  .tara-approved-primary { gap:12px; }
+  .tara-workspace-nav { position:sticky; top:108px; z-index:30; scroll-margin-top:160px; }
+  .tara-specialist-brief { padding:15px; margin-bottom:10px; gap:8px; }
+  .tara-specialist-brief h2 { margin:5px 0; font-size:25px; }
+  .tara-specialist-brief p { margin:0; line-height:1.4; }
+  .tara-specialist-brief__legend { justify-content:flex-start; gap:10px; }
+  .tara-specialist-brief + .flex.items-center.justify-between { margin-bottom:10px; }
+  .weather-city-strip { margin-bottom:7px!important; padding-bottom:5px!important; }
+  .weather-record-strip > div { padding:10px; }
+  .weather-record-strip strong { margin:5px 0 2px; font-size:20px; }
+}
+#tara-workspace-nav { scroll-margin-top:88px; }
+@media (max-width:760px) { #tara-workspace-nav { scroll-margin-top:160px; } }
+
+/* Specialist modes keep their complete boards, but the explanatory banner
+   yields the first screen to actionable pick states and the current record. */
+@media (min-width:761px) {
+  .tara-live-shell[data-tara-view="sports"] .tara-main,
+  .tara-live-shell[data-tara-view="weather"] .tara-main { padding-top:15px!important; }
+  .tara-specialist-brief { padding:17px 21px; margin-bottom:10px; gap:16px; }
+  .tara-specialist-brief h2 { margin:4px 0; font-size:28px; }
+  .tara-specialist-brief p { margin:0; max-width:780px; font-size:12px; line-height:1.45; }
+  .tara-specialist-brief__legend { font-size:10px; }
+  .tara-specialist-brief + .flex.items-center.justify-between { margin-bottom:10px; }
+  .weather-city-strip { margin-bottom:6px!important; padding-bottom:4px!important; }
+  .weather-city-strip button { min-height:32px; }
+  .weather-lane-tabs { min-height:40px; }
+  .weather-record-strip { margin-bottom:8px; }
+  .weather-record-strip > div { padding:10px 14px; }
+  .weather-record-strip strong { margin:5px 0 2px; font-size:20px; }
+  .sports-next-glance__row { min-height:52px; }
 }
