@@ -5888,8 +5888,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.20-v13.4.359-layout-density-pass';
-const TARA_VERSION_DISPLAY='Tara 13.4.359';
+const TARA_BUILD_VERSION='2026.09.24-v13.4.360-full-workspace-pass';
+const TARA_VERSION_DISPLAY='Tara 13.4.360';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10535,13 +10535,24 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
 const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow,activeView,setActiveView})=>{
   const items=[['overview','Overview'],['execution','Execution'],['signals','Signals'],['market','TradingView'],['analytics','Analytics'],['news','News & macro'],['memory','Memory'],['schedule','Hourly & schedule'],['logs','Tools & sync']];
   const select=(id)=>{
+    if(id==='logs'){setShowHeaderOverflow(true);return;}
     setActiveView(id);
     if(id==='analytics'){setShowBrain(false);setShowAnalytics(true);return;}
-    if(id==='logs'){setShowHeaderOverflow(true);return;}
-    const targets={overview:'tara-primary-surface',execution:'tara-execution-surface',signals:'tara-signals-surface',market:'tara-market-surface',news:'tara-context-surface',memory:'tara-context-surface',schedule:'tara-schedule-surface'};
-    document.getElementById(targets[id])?.scrollIntoView({behavior:'smooth',block:'start'});
+    document.getElementById('tara-workspace-nav')?.scrollIntoView({behavior:'smooth',block:'start'});
   };
-  return <nav className="tara-workspace-nav" aria-label="Workspace views">{items.map(([id,label])=><button key={id} onClick={()=>select(id)} aria-current={activeView===id?'location':undefined} className={activeView===id?'is-active':''}>{label}</button>)}</nav>;
+  return <nav id="tara-workspace-nav" className="tara-workspace-nav" aria-label="Workspace views">{items.map(([id,label])=><button key={id} onClick={()=>select(id)} aria-current={activeView===id?'page':undefined} className={activeView===id?'is-active':''}>{label}</button>)}</nav>;
+};
+
+const TaraWorkspaceHeading=({view})=>{
+  const copy={
+    execution:['EXECUTION / CURRENT WINDOW','AutoTrade, order state, and position truth','The locked Tara Call is the input. Only exchange-confirmed fills are positions.'],
+    signals:['SIGNALS / MARKET READ','Why the call looks the way it does','Price, strike, depth, tape, and the evidence behind this window.'],
+    market:['MARKET / TRADINGVIEW','The full market lens','TradingView stays intact, with Tara’s live market context close by.'],
+    news:['CONTEXT / LIVE FEEDS','News, flows, and risk','Reference context is kept separate from the record-bearing call.'],
+    memory:['MEMORY / CALL LOG','The windows behind the record','Inspect and audit recorded calls without mixing in AutoTrade fills.'],
+    schedule:['TIMING / HOURLY','Hourly locks and session schedule','Hourly outcomes are their own record, separate from the 15-minute call.'],
+  }[view];
+  return copy?<div className="tara-workspace-heading"><span>{copy[0]}</span><h2>{copy[1]}</h2><p>{copy[2]}</p></div>:null;
 };
 
 const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,manualKalshiEntry,activeTicker,taraScorecards,windowType})=>{
@@ -20141,7 +20152,7 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
   );
 
   return (
-    <div className="border border-[#1B1B22] bg-[#0A0A0E] rounded-[10px] overflow-hidden">
+    <div className="tara-execution-card border border-[#1B1B22] bg-[#0A0A0E] rounded-[10px] overflow-hidden">
       <div className="px-4 py-2.5 border-b border-[#16161c] flex items-baseline justify-between gap-2"
            style={{background:dirTone+'0A'}}>
         <span className="text-[9.5px] uppercase font-bold tracking-[0.15em]" style={{color:dirTone+'BB'}}>AutoTrade · execution</span>
@@ -20210,7 +20221,7 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
              badge={_confirmedNoFill?'no fill confirmed'
                     :_autoExited?(_realized==null?'closed':_realized>0?'closed · won':_realized<0?'closed · lost':'closed · flat')
                     :_placed?(_delta==null?'—':_delta>0?'holding up':_delta<0?'going against':'flat')
-                    :_markedOnly?'in · unpriced':'not in'}
+                    :_markedOnly?'marked · unverified':'not in'}
              badgeTone={_confirmedNoFill?GREEN
                     :_autoExited?(_realized>0?GREEN:_realized<0?RED:DIM)
                     :_placed?(_delta>0?GREEN:_delta<0?RED:DIM):_markedOnly?GOLD:DIM}>
@@ -20242,12 +20253,10 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
             </div>
           </>
         ):_markedOnly?(
-          /* V13.4.278: in, but no fill price captured -- say what IS known and what
-             is missing, rather than reporting flat. */
+          /* A local follow marker is not an exchange-confirmed fill or position. */
           <div className="text-[13px] leading-snug" style={{color:'rgba(237,237,237,0.62)'}}>
-            You are in on <span style={{color:_side==='UP'?GREEN:RED}}>{_side}</span>
-            {_worth!=null&&<>, now worth <span className="tabular-nums">{_worth}¢</span></>}.
-            {' '}No fill price recorded, so profit and loss cannot be tracked yet.
+            Marked as following <span style={{color:_side==='UP'?GREEN:RED}}>{_side}</span> locally.
+            {' '}No fill is recorded, so this is not a verified Kalshi position or tracked P&amp;L.
           </div>
         ):(
           <div className="text-[13px] text-[#EDEDED]/40 leading-snug">
@@ -20290,8 +20299,8 @@ function ThisTradeCard({taraCall,snapshot,analysis,timeState,windowType,kalshiYe
           </div>
         ):_markedOnly?(
           <div className="text-[13px] text-[#EDEDED]/55 leading-snug">
-            You marked yourself in on {_side}, but no fill was recorded. Enter it under
-            {' '}REAL KALSHI FILL so this can track the trade.
+            No exchange fill is recorded. If you bought {_side} on Kalshi, confirm it there and
+            {' '}enter the actual fill under REAL KALSHI FILL to track the trade.
           </div>
         ):(
           <div className="text-[13px] text-[#EDEDED]/40 leading-snug">
@@ -21030,6 +21039,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
   // V9.19.25: tap-to-reveal tooltip state. Each setting has a stable id; clicking
   //   the (?) icon opens its tooltip inline. Click again or click another to dismiss.
   const[_settingsTip,_setSettingsTip]=React.useState(null);
+  const[_showKalshiSecrets,_setShowKalshiSecrets]=React.useState(false);
   // V10.4.1a: legacy presets hidden by default — clutter for choices that data
   //   shows aren't optimal in current market. Click to reveal if needed.
   const[_showLegacyPresets,_setShowLegacyPresets]=React.useState(false);
@@ -21368,11 +21378,14 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         },killSwitchEngaged?'⛔ Kill switch ENGAGED — tap to release':'Engage kill switch'),
         // API credentials
         React.createElement('div',{className:'mb-3 p-2 rounded-lg bg-[#050508]'},
-          React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50 mb-2'},'API credentials'),
+          React.createElement('div',{className:'flex items-center justify-between gap-2 mb-2'},
+            React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/50'},'API credentials · stored on this device'),
+            React.createElement('button',{type:'button',onClick:()=>_setShowKalshiSecrets(v=>!v),className:'text-[10px] uppercase tracking-wider border border-[#35403f] px-2 py-1 text-[#EDEDED]/70'},_showKalshiSecrets?'Hide credentials':'Reveal / edit')
+          ),
           React.createElement('label',{className:'block mb-2'},
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Key ID'),
             React.createElement('input',{
-              type:'text',value:kalshiCreds?.apiKeyId||'',spellCheck:false,autoComplete:'off',
+              type:_showKalshiSecrets?'text':'password',value:kalshiCreds?.apiKeyId||'',spellCheck:false,autoComplete:'off',readOnly:!_showKalshiSecrets,
               onChange:(e)=>saveKalshiCreds({apiKeyId:e.target.value,privateKeyPem:kalshiCreds?.privateKeyPem||''}),
               className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-[11px] tabular-nums focus:border-[#23B981] focus:outline-none font-mono',
               placeholder:'00000000-0000-0000-0000-000000000000',
@@ -21380,12 +21393,12 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           ),
           React.createElement('label',{className:'block'},
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/65 mb-1'},'Private key (PEM, PKCS#8 or PKCS#1)'),
-            React.createElement('textarea',{
+            _showKalshiSecrets?React.createElement('textarea',{
               rows:4,value:kalshiCreds?.privateKeyPem||'',spellCheck:false,autoComplete:'off',
               onChange:(e)=>saveKalshiCreds({apiKeyId:kalshiCreds?.apiKeyId||'',privateKeyPem:e.target.value}),
               className:'w-full bg-transparent border border-[#2A2A34] rounded-lg px-2 py-1 text-white text-[10px] focus:border-[#23B981] focus:outline-none font-mono leading-tight',
               placeholder:'-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----',
-            }),
+            }):React.createElement('div',{className:'border border-[#2A2A34] px-2 py-2 text-[11px] text-[#EDEDED]/45'},kalshiCreds?.privateKeyPem?'Private key saved · hidden until revealed':'No private key saved'),
           ),
           React.createElement('div',{className:'flex items-baseline gap-2 mt-2'},
             React.createElement('button',{
@@ -30026,7 +30039,7 @@ function WeatherView({onClose,weatherPicks}){
             On a phone they become one horizontal strip you swipe; the strip is a
             real overflow-x:auto scroller, so nothing is ever unreachable. They
             still wrap normally at sm and up, where the height is affordable. */}
-        <div className="flex gap-2 mb-4 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible -mx-1 px-1 pb-1">
+        <div className="weather-city-strip flex gap-2 mb-4 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible -mx-1 px-1 pb-1" aria-label="Weather city selection">
           {_WX_CITIES.map(c=>{
             // null = probe still running, so treat every city as available rather
             //   than flashing them all as closed for a second.
@@ -30550,7 +30563,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
         {err&&<div className="rounded-xl border p-4 text-[12px] mb-5" style={{borderColor:'rgba(232,69,94,0.3)',background:'rgba(232,69,94,0.06)',color:SPORTS_RED}}>Could not load /sports.json ({err}). Run <span className="font-mono">python src/export_tara.py</span> in sports-model and redeploy.</div>}
         {!data&&!err&&<div className="text-[#EDEDED]/40 text-sm">Loading…</div>}
 
-        {data&&(<>
+        {data&&(<div className="sports-data-stack">
           {rec&&(
             <div className={`grid grid-cols-2 sm:grid-cols-4 gap-px mb-4 overflow-hidden ${UI2_PANEL} ${UI2_GRID_BG}`}>
               <div className={card}>
@@ -30587,7 +30600,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
             const stale=ageMin>=60;
             const started=(data.upcoming||[]).filter(r=>sportsHasStarted(r.start,nowMs)).length;
             return(
-              <div className="rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed flex flex-wrap items-center gap-x-2 gap-y-1"
+              <div className="sports-snapshot-banner rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed flex flex-wrap items-center gap-x-2 gap-y-1"
                 style={{borderColor:stale?'rgba(232,69,94,0.3)':'#24242E',background:stale?'rgba(232,69,94,0.05)':'#111'}}>
                 <span className="font-bold" style={{color:stale?SPORTS_RED:'#EDEDED'}}>
                   Snapshot · {ageMin<1?'just now':ageMin<60?ageMin+' min old':(ageMin/60).toFixed(1)+' h old'}
@@ -30600,26 +30613,28 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
             );
           })()}
 
-          {/* V13.4.353: the board answers the user's first question before the
-              evidence lab. Keep the full grouped board below, but expose the
-              next actionable slice with tracked status and the lock-time price
-              in the first screen. */}
-          {tab==='board'&&(()=>{
-            const nextRows=rows.filter(r=>sportsIsFuture(r.start,nowMs)&&r.advice!=='STARTED').slice(0,6);
+          {/* Put committed picks first; otherwise the first six chronological
+              forecasts can all be untracked while record-bearing picks hide
+              farther down the board. Keep both kinds and the full board. */}
+          {tab==='upcoming'&&(()=>{
+            const futureRows=rows.filter(r=>sportsIsFuture(r.start,nowMs)&&r.advice!=='STARTED');
+            const priorityTracked=futureRows.filter(r=>r.tracked).slice(0,4);
+            const nextRows=[...priorityTracked,...futureRows.filter(r=>!r.tracked).slice(0,6-priorityTracked.length)];
             const tracked=nextRows.filter(r=>r.tracked).length;
+            const trackedUpcoming=futureRows.filter(r=>r.tracked).length;
             const when=(start)=>{
               const parsed=sportsParseStart(start);
               if(parsed.dateOnly)return'all day';
               return parsed.d?parsed.d.toLocaleString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'}):'time TBC';
             };
             return(
-              <section className="sports-next-glance" aria-label="Next sports picks">
+              <section className="sports-next-glance" aria-label="Upcoming sports picks and forecasts">
                 <div className="sports-next-glance__head">
                   <div>
-                    <div className="sports-next-glance__eyebrow">NEXT PICKS</div>
-                    <h3>What is coming up</h3>
+                    <div className="sports-next-glance__eyebrow">UPCOMING · RECORD-BEARING FIRST</div>
+                    <h3>Tracked picks & next forecasts</h3>
                   </div>
-                  <div className="sports-next-glance__count"><b>{nextRows.length}</b> shown · <b>{tracked}</b> tracked</div>
+                  <div className="sports-next-glance__count"><b>{nextRows.length}</b> of {rows.length} upcoming shown · <b>{tracked}</b> tracked</div>
                 </div>
                 {nextRows.length?(
                   <div className="sports-next-glance__list">
@@ -30628,17 +30643,17 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
                         <span className="sports-next-glance__time">{when(r.start)}</span>
                         <div className="sports-next-glance__pick">
                           <strong>{r.pick||r.label||'Pick pending'}</strong>
-                          <span>{r.event||r.match||'Fixture'} · {r.sport_label||r.sport||'sport'}</span>
+                          <span>{r.event||r.match||'Fixture'} · {r.sport_label||r.sport||'sport'}{r.mkt!=null?` · market ${Math.round(r.mkt*100)}%`:''}</span>
                         </div>
                         <span className="sports-next-glance__prob">{r.model==null?'—':Math.round(r.model*100)+'%'}<small> model</small></span>
-                        <span className={r.tracked?'sports-next-glance__tracked':'sports-next-glance__paper'}>{r.tracked?'TRACKED':'PAPER'}</span>
+                        <span className={r.tracked?'sports-next-glance__tracked':'sports-next-glance__paper'}>{r.tracked?'TRACKED':'NOT TRACKED'}</span>
                       </div>
                     ))}
                   </div>
                 ):(
                   <div className="sports-next-glance__empty">No future fixtures in this board. Open Record for settled picks or refresh when the next model run lands.</div>
                 )}
-                <div className="sports-next-glance__foot">Tracked picks are the only rows that count toward the Sports record. Paper rows stay visible for learning.</div>
+                <div className="sports-next-glance__foot"><span>Tracked picks are committed to the Sports record. Other forecasts are board-only, not betting instructions or settled paper bets.</span><div className="sports-next-glance__actions"><button onClick={()=>setTab('tracked')}>VIEW TRACKED · {trackedUpcoming}</button><button onClick={()=>setTab('record')}>SETTLED RECORD →</button></div></div>
               </section>
             );
           })()}
@@ -30963,7 +30978,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
               </div>
             </div>
           )}
-        </>)}
+        </div>)}
       </div>
     </div>
   );
@@ -53332,8 +53347,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* v13.4.152: SportsView is rendered inside <main> as a view swap, not
           here as an overlay. */}
       {/* V9.2.2: Dedicated Analytics Page */}
-      {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)} timeFormat={timeFormat}/>}
-      {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
+      {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
+      {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
       {/* V9.16: schedule modal hoisted to top level so simpleMode can open it */}
       {scheduleModalMain&&taraCallLog&&(
         <TradeScheduleModal
@@ -54100,8 +54115,6 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
-        <div className="tara-approved-columns">
-        <div className="tara-approved-primary" id="tara-primary-surface">
         <TaraWorkspaceNav
           setShowAnalytics={setAnalyticsPageOpen}
           setShowBrain={setShowBrain}
@@ -54109,6 +54122,9 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           activeView={workspaceFocus}
           setActiveView={setWorkspaceFocus}
         />
+        <div className="tara-approved-columns">
+        <div className="tara-approved-primary" id="tara-primary-surface" data-workspace={workspaceFocus}>
+        <TaraWorkspaceHeading view={workspaceFocus}/>
         <TaraPageBrief
           taraCall={taraCall}
           snapshot={taraCallSnapshotRef.current||null}
@@ -55912,7 +55928,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             <div className={'sticky top-0 bg-[#101014] border-b border-[#24242E] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.8.2 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How {TARA_VERSION_DISPLAY} Works
                 </h2>
                 <p className={'text-xs text-[#EDEDED]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
