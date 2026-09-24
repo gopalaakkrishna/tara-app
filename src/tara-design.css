@@ -1,4 +1,4 @@
-/* Tara 13.4.363 — approved control-room composition, shared across every surface. */
+/* Tara 13.4.364 — approved control-room composition, shared across every surface. */
 :root { color-scheme: dark; --bg:#07090b; --panel:#0d1114; --panel2:#12171b; --line:#252d31; --text:#eef4f0; --muted:#82908d; --green:#62e39a; --red:#ee6d72; --amber:#e0b765; --cyan:#8fd9e4; --dur-3:180ms; --ease-out:ease-out; }
 * { box-sizing:border-box; }
 html { font-size:16px; -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
@@ -731,4 +731,37 @@ iframe { max-width:100%; }
   .weather-record-strip > div { padding:10px 14px; }
   .weather-record-strip strong { margin:5px 0 2px; font-size:20px; }
   .sports-next-glance__row { min-height:52px; }
+}
+
+/* Phone first-screen priority: show the Call and actual pick state before a
+   long explanatory or statistical preamble. All secondary context stays
+   reachable in the existing horizontal rows and detailed sections. */
+@media (max-width:760px) {
+  .tara-context-strip > div:first-child { flex-direction:column; align-items:stretch; gap:5px; padding:7px 10px; }
+  .tara-context-strip > div:first-child > div:first-child {
+    flex:0 0 auto; width:100%; flex-wrap:nowrap; align-items:center;
+    gap:6px; overflow-x:auto; scrollbar-width:thin; padding-bottom:4px;
+  }
+  .tara-context-strip > div:first-child > div:first-child > span { flex-shrink:0; }
+  .tara-context-strip > div:first-child > div:first-child > span:first-child { order:-3; }
+  .tara-context-strip > div:first-child > div:first-child > span:nth-child(2) { order:-2; }
+  .tara-context-strip > div:first-child > div:first-child > span[title="This phase has poor edge. Skip or half-size."] { order:-1; }
+  .tara-context-strip > div:first-child > div:last-child { align-self:flex-end; }
+  .tara-workspace-heading,
+  .tara-approved-primary[data-workspace="overview"] .tara-workspace-heading { min-height:0; padding:13px 14px; }
+  .tara-workspace-heading__copy > span { display:block; font:9px/1 'IBM Plex Mono',monospace; }
+  .tara-workspace-heading h2 { margin:5px 0 3px; font-size:21px; }
+  .tara-workspace-heading p { margin:0; font-size:11px; line-height:1.4; }
+  .tara-workspace-heading__pulse { margin-top:8px; }
+  .tara-specialist-brief { padding:12px; margin-bottom:8px; }
+  .tara-specialist-brief h2 { font-size:23px; }
+  .tara-specialist-brief p { font-size:11px; }
+  .tara-specialist-brief__legend { font-size:9px; }
+  .sports-snapshot-banner { padding:9px!important; font-size:10.5px; line-height:1.35; }
+  .sports-data-stack > .grid:first-child { order:0; }
+  .sports-data-stack > .sports-next-glance { order:-1; }
+  .weather-record-strip > div { padding:9px; }
+  .weather-record-strip strong { font-size:18px; }
+  .weather-record-strip small { font-size:10px; line-height:1.25; }
+  .weather-record-strip + .rounded-xl { padding:11px!important; }
 }

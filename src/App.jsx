@@ -5900,8 +5900,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.24-v13.4.363-layout-composition';
-const TARA_VERSION_DISPLAY='Tara 13.4.363';
+const TARA_BUILD_VERSION='2026.09.24-v13.4.364-mobile-layout';
+const TARA_VERSION_DISPLAY='Tara 13.4.364';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
