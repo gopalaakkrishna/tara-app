@@ -1,4 +1,4 @@
-/* Tara 13.4.366 — approved control-room composition, shared across every surface. */
+/* Tara 13.4.367 — approved control-room composition, shared across every surface. */
 :root { color-scheme: dark; --bg:#07090b; --panel:#0d1114; --panel2:#12171b; --line:#252d31; --text:#eef4f0; --muted:#82908d; --green:#62e39a; --red:#ee6d72; --amber:#e0b765; --cyan:#8fd9e4; --dur-3:180ms; --ease-out:ease-out; }
 * { box-sizing:border-box; }
 html { font-size:16px; -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
@@ -903,4 +903,68 @@ iframe { max-width:100%; }
   .tara-specialist-brief p { font-size:11px; }
   .tara-tools-groups { grid-template-columns:minmax(0,1fr); }
   .tara-tools-groups .tara-tools-workspace__actions button { min-height:65px; }
+}
+
+/* 13.4.367 — Overview is a decision screen, not a second copy of every view. */
+.tara-approved-columns[data-workspace="overview"][data-overview-expanded="false"] { grid-template-columns:minmax(0,1fr); }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] {
+  display:grid; grid-template-columns:minmax(0,1.42fr) minmax(0,1fr); align-items:start; gap:12px;
+}
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] > .tara-workspace-switch,
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] > .tara-overview-toggle { grid-column:1/-1; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] > .tara-call-ledger,
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] > .tara-exec-glance { min-width:0; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-live-grid,
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-hourly-row { display:none!important; }
+.tara-context-strip[data-expanded="false"] .tara-context-extra { display:none!important; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__hero p,
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__truth,
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__actions,
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__metrics > :first-child { display:none; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__hero { padding:20px 22px; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__metrics > div { padding:14px 18px; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger[data-call-tradeable="false"] .tara-call-ledger__metrics { grid-template-columns:minmax(0,1fr); }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger[data-call-tradeable="false"] .tara-call-ledger__metrics > :nth-child(2),
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger[data-call-tradeable="false"] .tara-call-ledger__metrics > :nth-child(3),
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger[data-edge-available="false"] .tara-call-ledger__metrics > :nth-child(3) { display:none; }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger[data-call-tradeable="true"] .tara-call-ledger__metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger[data-call-tradeable="true"][data-edge-available="false"] .tara-call-ledger__metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.tara-call-ledger__metrics small { display:block; margin-top:4px; color:var(--muted); font:10px 'IBM Plex Mono',monospace; }
+.tara-exec-glance { border:1px solid #5b4a2c; border-top:2px solid var(--amber); background:linear-gradient(145deg,#141713,#0b1012 50%); }
+.tara-exec-glance.is-live,.tara-exec-glance.is-flat { border-color:#3b624c; border-top-color:var(--green); }
+.tara-exec-glance__head { padding:18px 19px 15px; }
+.tara-exec-glance__head h2 { margin:8px 0 6px; color:var(--amber); font:600 clamp(22px,2.15vw,32px)/1.05 'Space Grotesk',sans-serif; letter-spacing:-.045em; }
+.tara-exec-glance.is-live .tara-exec-glance__head h2,.tara-exec-glance.is-flat .tara-exec-glance__head h2 { color:var(--green); }
+.tara-exec-glance__head p { margin:0; color:#b9c4bc; font-size:12px; line-height:1.4; }
+.tara-exec-glance__facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; background:var(--line); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.tara-exec-glance__facts > div { min-width:0; padding:12px 15px; background:#0b1012; }
+.tara-exec-glance__facts label { display:block; color:var(--muted); font:9px 'IBM Plex Mono',monospace; letter-spacing:.07em; text-transform:uppercase; }
+.tara-exec-glance__facts strong { display:block; margin-top:6px; color:var(--text); font:600 17px/1.18 'Space Grotesk',sans-serif; overflow-wrap:anywhere; }
+.tara-exec-glance__warning { margin:0; padding:10px 15px; color:#e4c78f; border-bottom:1px solid #463c2a; font-size:11px; line-height:1.4; }
+.tara-exec-glance__actions { display:flex; flex-wrap:wrap; gap:6px; padding:11px 15px; }
+.tara-exec-glance__actions button { min-height:35px; padding:7px 11px; border:1px solid #3b5745; background:#17261c; color:var(--green); font:9px 'IBM Plex Mono',monospace; letter-spacing:.04em; }
+.tara-exec-glance__actions button + button { color:#bfcac1; background:transparent; border-color:var(--line); }
+.tara-exec-glance__actions button:hover { border-color:var(--green); }
+.tara-overview-toggle { display:flex; align-items:center; justify-content:space-between; width:100%; min-height:51px; padding:10px 15px; text-align:left; border:1px solid var(--line); background:#0b1012; color:var(--text); cursor:pointer; }
+.tara-overview-toggle:hover { border-color:#577264; background:#101915; }
+.tara-overview-toggle span { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 16px; }
+.tara-overview-toggle b { font:600 11px 'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:.04em; }
+.tara-overview-toggle small { color:var(--muted); font:10px 'Instrument Sans',sans-serif; }
+.tara-overview-toggle i { color:var(--green); font:20px 'IBM Plex Mono',monospace; font-style:normal; }
+
+@media (max-width:1100px) {
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] { grid-template-columns:minmax(0,1fr); }
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] > .tara-call-ledger,
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] > .tara-exec-glance { grid-column:1; }
+}
+@media (max-width:760px) {
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__hero { padding:15px; }
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"] .tara-call-ledger__metrics > div { padding:11px 13px; }
+  .tara-exec-glance__head { padding:14px; }
+  .tara-exec-glance__facts > div { padding:11px; }
+  .tara-exec-glance__facts strong { font-size:16px; }
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="true"] .tara-live-grid > #tara-signals-surface { display:flex!important; }
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="true"] .tara-live-grid > #tara-market-surface,
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="true"] .tara-live-grid > #tara-context-surface { display:block!important; }
+  .tara-approved-primary[data-workspace="overview"][data-overview-expanded="true"] .tara-hourly-row { display:grid!important; grid-template-columns:minmax(0,1fr)!important; }
 }

@@ -5901,8 +5901,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.25-v13.4.366-call-log-init';
-const TARA_VERSION_DISPLAY='Tara 13.4.366';
+const TARA_BUILD_VERSION='2026.09.25-v13.4.367-simple-overview';
+const TARA_VERSION_DISPLAY='Tara 13.4.367';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10512,7 +10512,7 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _lockAt=Number(_snap?.lockedAt)||0;
   const _lockTime=_lockAt>0?new Date(_lockAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):null;
   return(
-    <section className="tara-page-brief tara-call-ledger" aria-label="Tara call and execution truth">
+    <section className="tara-page-brief tara-call-ledger" aria-label="Tara call and execution truth" data-call-tradeable={_lock.tradeable} data-edge-available={Number.isFinite(_edge)}>
       <div className="tara-call-ledger__hero">
         <div>
           <div className="tara-call-ledger__kicker">TARA'S CALL · PRIMARY {_window.toUpperCase()} DECISION LEDGER</div>
@@ -10521,14 +10521,14 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         </div>
         <div className="tara-call-ledger__truth">
           <strong>{_lock.tradeable?'CALL LOCKED':_lock.satOut?'SAT OUT':'NOT YET LOCKED'}</strong>
-          <small>{_lockTime?`${_lockTime} · `:''}{_confidence!=null?`${_confidence}% confidence`:'waiting for a committed snapshot'}</small>
+          <small>{_lockTime?`${_lockTime} · `:''}{_confidence!=null?`${_confidence}% confidence`:_lock.satOut?'sit-out recorded':'waiting for a committed snapshot'}</small>
         </div>
       </div>
       <div className="tara-call-ledger__metrics">
-        <div><label>Call</label><strong className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_dir||'—'}</strong></div>
+        <div><label>Call</label><strong className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_dir||(_lock.satOut?'SIT OUT':'AWAITING')}</strong></div>
         <div><label>Confidence at lock</label><strong>{_confidence!=null?`${_confidence}%`:'—'}</strong></div>
         <div><label>Market edge at lock</label><strong className={_edge>0?'is-up':_edge<0?'is-down':''}>{_edgeLabel}</strong></div>
-        <div><label>Call record</label><strong className="is-amber">{_record.wins} · {_record.losses} · {_record.sitouts}</strong></div>
+        <div><label>Call record</label><strong className="is-amber">{_record.wins}W · {_record.losses}L</strong><small>{_record.sitouts} sat out</small></div>
       </div>
       <details className="tara-call-ledger__more">
         <summary>Call evidence, lifecycle &amp; record breakdown <span>{_lock.tradeable?`${_dir} lock preserved`:_lock.satOut?'Sit-out preserved':'Awaiting lock'}</span></summary>
@@ -10585,6 +10585,18 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
     :truth.state==='unverified'?'EXCHANGE POSITION UNVERIFIED'
     :'POSITION CHECKING';
   const stateTone=confirmedOpen?'is-live':truth.state==='flat'&&fresh?'is-flat':'is-warn';
+  if(compact)return <section className={'tara-exec-glance '+stateTone} aria-label="AutoTrade execution and exchange position">
+    <div className="tara-exec-glance__head"><span className="tara-rail-kicker">AUTOTRADE · EXCHANGE TRUTH</span><h2>{stateLabel}</h2><p>{truth.summary}</p></div>
+    <div className="tara-exec-glance__facts">
+      <div><label>Exchange position</label><strong>{positionText}</strong></div>
+      <div><label>Local order</label><strong>{order.status?String(order.status).replaceAll('_',' ').replaceAll('-',' '):'No order'}</strong></div>
+      <div><label>Local P&amp;L</label><strong>{realized||'—'}</strong></div>
+      <div><label>Last verified</label><strong>{checkLabel}</strong></div>
+    </div>
+    {otherPositions.length>0&&<p className="tara-exec-glance__warning">{otherPositions.length} other Kalshi position{otherPositions.length===1?'':'s'} in the last snapshot · verify before another order.</p>}
+    {['reconcile','unknown','stale-open'].includes(truth.state)&&<p className="tara-exec-glance__warning">Unknown is not a no-fill. Verify Kalshi before retrying or exiting.</p>}
+    <div className="tara-exec-glance__actions"><button onClick={onDetails}>INSPECT AUTOTRADE</button><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'↻ VERIFY POSITION':'CONNECT KALSHI'}</button></div>
+  </section>;
   return <section className={'tara-exec-overview '+stateTone} aria-label="AutoTrade execution and exchange position">
     <div className="tara-exec-overview__head"><div><span className="tara-rail-kicker">AUTOTRADE EXECUTION · FOLLOWS A LOCKED TARA CALL</span><h2>{stateLabel}</h2><p>Order, fill, position, and exit have their own audit. None changes the Tara Call record.</p></div><div className="tara-exec-overview__badge"><b>{confirmedOpen?'KALSHI CONFIRMED':lastSeenOpen?'CONFIRMATION STALE':truth.label}</b><small>{successAt>0?`Last successful exchange check ${checkLabel}`:'Awaiting first successful exchange check'}</small></div></div>
     <div className="tara-exec-overview__metrics"><div><label>Exchange position</label><strong>{positionText}</strong><small>{confirmedOpen?'open in latest Kalshi snapshot':lastSeenOpen?'requires a fresh check':order.dryRun?'local order is simulated only':truth.summary}</small></div><div><label>Reported auto fill</label><strong>{filledAt}</strong><small>{order.placed?`${order.count} contract${order.count===1?'':'s'} in local order state`:'no confirmed local fill'}</small></div><div><label>Execution P&amp;L</label><strong>{realized||'—'}</strong><small>{realized?'local exit record · verify on Kalshi':'not realized or not verified'}</small></div><div><label>Execution certainty</label><strong>{confirmedOpen?'CONFIRMED':truth.state==='flat'&&fresh?'FLAT':truth.state==='stale-flat'||lastSeenOpen?'STALE':'UNVERIFIED'}</strong><small>{confirmedOpen?'exchange position verified; local order mode may differ':order.dryRun?'dry run does not create a real position':truth.state==='flat'&&fresh?'exchange-checked flat state':'local state is not exchange proof'}</small></div></div>
@@ -10599,7 +10611,7 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
 };
 
 const TaraWorkspaceNav=({setShowAnalytics,setShowBrain,setShowHeaderOverflow,activeView,setActiveView})=>{
-  const items=[['overview','Overview'],['execution','Execution'],['signals','Signals'],['market','TradingView'],['analytics','Analytics'],['news','News & macro'],['memory','Memory'],['schedule','Hourly & schedule'],['logs','Tools & sync']];
+  const items=[['overview','Overview'],['execution','AutoTrade'],['signals','Signals'],['market','Chart'],['analytics','Analytics'],['news','News & macro'],['memory','Memory'],['schedule','Hourly & schedule'],['logs','Tools & sync']];
   const primary=items.slice(0,4);
   const secondary=items.slice(4);
   const select=(id)=>{
@@ -24031,11 +24043,11 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
   const _criticalCount=ctx.cautions.filter(c=>c.severity==='critical').length;
   const _warningCount=ctx.cautions.filter(c=>c.severity==='warning').length;
   // Top-level border tint by severity
-  const _borderColor=_criticalCount>0?'rgba(232,69,94,0.35)':_warningCount>0?'rgba(35,185,129,0.30)':'rgba(237,237,237,0.10)';
+  const _borderColor=_criticalCount>0?'rgba(232,69,94,0.35)':_warningCount>0?'rgba(212,160,58,0.30)':'rgba(237,237,237,0.10)';
   const _bgGradient=_criticalCount>0
     ?'rgba(232,69,94,0.05)'
     :_warningCount>0
-    ?'rgba(35,185,129,0.04)'
+    ?'rgba(212,160,58,0.04)'
     :'rgba(237,237,237,0.02)';
   // Format the countdown to next phase
   const _nextLabel=ctx.nextPhase.minutesUntil<60
@@ -24048,6 +24060,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
   })[0];
   return React.createElement('div',{
     className:'tara-context-strip rounded-lg overflow-hidden mb-2 sm:mb-3',
+    'data-expanded':expanded,
     style:{
       border:'1px solid '+_borderColor,
       background:_bgGradient,
@@ -24058,6 +24071,8 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
     React.createElement('div',{
       className:'flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 cursor-pointer hover:bg-[#EDEDED]/3',
       onClick:()=>setExpanded(p=>!p),
+      role:'button',tabIndex:0,'aria-expanded':expanded,
+      onKeyDown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setExpanded(p=>!p);}},
     },
       // Left: phase identity
       React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
@@ -24069,7 +24084,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         (()=>{
           const _liqMap={EXTREME:'PEAK ACTIVITY',HIGH:'BUSY',MED:'MODERATE',LOW:'QUIET'};
           const _liqLabel=_liqMap[ctx.phase.liquidity]||ctx.phase.liquidity;
-          return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',style:{
+          return React.createElement('span',{className:'tara-context-extra text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',style:{
             color:ctx.phase.liquidity==='EXTREME'?'rgb(35,185,129)':ctx.phase.liquidity==='HIGH'?'rgb(35,185,129)':ctx.phase.liquidity==='MED'?'#23B981':'rgba(232,69,94,0.7)',
             background:'#0E0E12',
           },title:`Liquidity: ${ctx.phase.liquidity}`},_liqLabel);
@@ -24077,7 +24092,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         (()=>{
           const _volMap={EXPANDING:'MOVES GROWING',STEADY:'CALM',COMPRESSING:'MOVES SHRINKING'};
           const _volLabel=_volMap[ctx.phase.vol]||ctx.phase.vol.toLowerCase();
-          return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg hidden sm:inline-block',style:{
+          return React.createElement('span',{className:'tara-context-extra text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg hidden sm:inline-block',style:{
             color:ctx.phase.vol==='EXPANDING'?'#E8455E':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(237,237,237,0.55)',
             background:'#0E0E12',
           },title:`Volatility: ${ctx.phase.vol}`},_volLabel);
@@ -24085,7 +24100,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         // V9.1.2: "Tara sees" plain-language pill — shows what direction Tara
         //   thinks price is going, in user-friendly terms (pumping/dumping/sideways).
         analysis?.regime&&React.createElement('span',{
-          className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',
+          className:'tara-context-extra text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',
           style:{
             color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(35,185,129)'
               :analysis.regime==='TRENDING DOWN'?'#E8455E'
@@ -24124,7 +24139,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         //   their tuned baseline without an extra global stretch/compress layer.
         // V8.7.2: Your-WR-this-session pill — only when we have ≥5 trades to be meaningful
         _sessionAdvice&&React.createElement('span',{
-          className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded-lg tabular-nums',
+          className:'tara-context-extra text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded-lg tabular-nums',
           style:{
             color:_sessionAdvice.color,
             background:_sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(35,185,129,0.06)'
@@ -34596,6 +34611,8 @@ function TaraApp(){
   const[showSports,setShowSports]=useState(false); // v13.4.149: sports prediction record
   const[showWeather,setShowWeather]=useState(false); // V13.4.217: weather lane — a market whose settlement number cannot be pushed around
   const[workspaceFocus,setWorkspaceFocus]=useState('overview'); // V13.4.353: real workspace navigation, not a row of dead scroll buttons
+  const[expandedOverview,setExpandedOverview]=useState(false); // The full board stays available, but the default has one clear job.
+  useEffect(()=>{if(workspaceFocus!=='overview')setExpandedOverview(false);},[workspaceFocus]);
   // V13.4.246: lifted out of WeatherView so its picks keep scanning and
   //   settling on the app's own 5-minute sweep even when the Weather tab is
   //   closed. It used to live inside WeatherView, whose state React destroys
@@ -53481,7 +53498,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     clockSeconds:timeState?.secsRemaining,
   });
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#050508] flex items-center justify-center text-[#EDEDED]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#050508] flex items-center justify-center text-[#EDEDED]/50 font-serif text-xl animate-pulse'}>Initializing {TARA_VERSION_DISPLAY}...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -54242,8 +54259,8 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
-        <div className="tara-approved-columns" data-workspace={workspaceFocus}>
-        <div className="tara-approved-primary" id="tara-primary-surface" data-workspace={workspaceFocus}>
+        <div className="tara-approved-columns" data-workspace={workspaceFocus} data-overview-expanded={expandedOverview}>
+        <div className="tara-approved-primary" id="tara-primary-surface" data-workspace={workspaceFocus} data-overview-expanded={expandedOverview}>
         <TaraWorkspaceNav
           setShowAnalytics={setAnalyticsPageOpen}
           setShowBrain={setShowBrain}
@@ -54251,7 +54268,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           activeView={workspaceFocus}
           setActiveView={setWorkspaceFocus}
         />
-        <TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length} snapshot={taraCallSnapshotRef.current||null}/>
+        {workspaceFocus!=='overview'&&<TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length} snapshot={taraCallSnapshotRef.current||null}/>}
         {workspaceFocus==='overview'&&<TaraPageBrief
           taraCall={taraCall}
           snapshot={taraCallSnapshotRef.current||null}
@@ -54279,8 +54296,12 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           onReconcile={()=>_manualReconcileNowRef.current?.()}
           onDetails={()=>setWorkspaceFocus('execution')}
           onOpenSettings={()=>setShowTradingSettings(true)}
-          compact={workspaceFocus==='overview'}
+          compact={workspaceFocus==='overview'&&!expandedOverview}
         />}
+        {workspaceFocus==='overview'&&<button className="tara-overview-toggle" type="button" aria-expanded={expandedOverview} aria-controls="tara-execution-surface tara-schedule-surface" onClick={()=>setExpandedOverview(v=>!v)}>
+          <span><b>{expandedOverview?'Hide full control room':'Show full control room'}</b><small>Signals · TradingView · news · memory · hourly · all original panels</small></span>
+          <i aria-hidden="true">{expandedOverview?'−':'+'}</i>
+        </button>}
         {workspaceFocus==='logs'&&<TaraToolsWorkspace
           positionReconciliation={positionReconciliation}
           activeTicker={kalshiActiveMarket?.ticker||null}
@@ -55193,7 +55214,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
         </div>
-        {(workspaceFocus==='overview'||workspaceFocus==='execution')&&<TaraApprovedRail
+        {(workspaceFocus==='execution'||(workspaceFocus==='overview'&&expandedOverview))&&<TaraApprovedRail
           autoExecSettings={autoExecSettings}
           mission={mission}
           killSwitchEngaged={killSwitchEngaged}
