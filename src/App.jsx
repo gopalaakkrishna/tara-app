@@ -5901,8 +5901,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.25-v13.4.365-workspace-finish';
-const TARA_VERSION_DISPLAY='Tara 13.4.365';
+const TARA_BUILD_VERSION='2026.09.25-v13.4.366-call-log-init';
+const TARA_VERSION_DISPLAY='Tara 13.4.366';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48065,6 +48065,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   without waiting, OR endgame-freeze fallback for everything else. Also resets sample
   //   counter when call direction flips.
   useEffect(()=>{
+    // A delay-gate abort can log a snapshot before the normal lock path runs.
+    // Initialize these stamps at effect entry so the hoisted logger never sees
+    // a temporal-dead-zone binding on that early path.
+    let _earlyLockFired=false;
+    let _earlyLockTier=null;
+    let _fastLockFired=false;
     if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
     const tc=taraCall;
     const isCall=tc.call==='UP'||tc.call==='DOWN';
@@ -48981,13 +48987,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Result: rollover scoring couldn't find pending entries → trades never resolved →
     //   memory + scorecards stopped updating for both BTC and ETH. Bug shipped in V7.8 and
     //   compounded each version since.
-    // V12.4/12.5: declare early-lock and fast-lock state vars BEFORE _logSnapshotEntry
-    //   so the function closes over initialized bindings. (V12.6 bug: these were declared
-    //   AFTER the function definition causing TDZ crash when early call sites at 41203/41457
-    //   triggered the function before the let declarations were reached.)
-    let _earlyLockFired=false;
-    let _earlyLockTier=null;
-    let _fastLockFired=false;
+    // Early-lock and fast-lock stamps are initialized at effect entry, before
+    // every possible call to this hoisted helper (including delay-gate exits).
     function _logSnapshotEntry(snapshot){
       // V13.4.127 attempted to wire up flipAtLock here -- turned out to be dead code.
       //   A separate, later object-literal construction site (the main automatic
