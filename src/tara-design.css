@@ -1,4 +1,4 @@
-/* Tara 13.4.364 — approved control-room composition, shared across every surface. */
+/* Tara 13.4.365 — approved control-room composition, shared across every surface. */
 :root { color-scheme: dark; --bg:#07090b; --panel:#0d1114; --panel2:#12171b; --line:#252d31; --text:#eef4f0; --muted:#82908d; --green:#62e39a; --red:#ee6d72; --amber:#e0b765; --cyan:#8fd9e4; --dur-3:180ms; --ease-out:ease-out; }
 * { box-sizing:border-box; }
 html { font-size:16px; -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
@@ -764,4 +764,143 @@ iframe { max-width:100%; }
   .weather-record-strip strong { font-size:18px; }
   .weather-record-strip small { font-size:10px; line-height:1.25; }
   .weather-record-strip + .rounded-xl { padding:11px!important; }
+}
+
+/* 13.4.365 — preserve the complete board while giving each view a clear job. */
+.tara-approved-columns:not([data-workspace="overview"]):not([data-workspace="execution"]) { grid-template-columns:minmax(0,1fr); }
+.tara-approved-columns[data-workspace="market"] .tara-live-grid { grid-template-columns:minmax(0,1fr); }
+.tara-workspace-switch { min-width:0; }
+.tara-main .tara-approved-primary .tara-workspace-switch .tara-workspace-nav {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)) minmax(130px,.9fr);
+  align-items:stretch; gap:6px; width:100%; padding:0; margin:0; border:0; overflow:visible;
+}
+.tara-main .tara-approved-primary .tara-workspace-switch .tara-workspace-nav button {
+  min-width:0; min-height:38px; width:100%; padding:8px 9px; font-size:10px; line-height:1.2; white-space:nowrap;
+}
+.tara-workspace-more { position:relative; display:block; min-width:0; min-height:38px; color:var(--muted); }
+.tara-workspace-more select {
+  width:100%; min-height:38px; padding:8px 23px 8px 10px; border:1px solid var(--line); border-radius:0;
+  background:#101618; color:var(--muted); font:10px/1.2 'IBM Plex Mono',monospace;
+  text-transform:uppercase; cursor:pointer;
+}
+.tara-workspace-more.is-active select { border-color:#577264; color:var(--text); background:#101915; }
+.tara-workspace-more select:hover { border-color:#577264; }
+.tara-workspace-select { display:none; }
+.tara-call-ledger__more,.tara-exec-overview__more { border-top:1px solid var(--line); }
+.tara-call-ledger__more > summary,.tara-exec-overview__more > summary {
+  display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 18px;
+  color:#c1d1c8; font:10px/1.35 'IBM Plex Mono',monospace; letter-spacing:.04em;
+  cursor:pointer; list-style:none;
+}
+.tara-call-ledger__more > summary::-webkit-details-marker,.tara-exec-overview__more > summary::-webkit-details-marker { display:none; }
+.tara-call-ledger__more > summary::after,.tara-exec-overview__more > summary::after { content:'+'; color:var(--green); font-size:15px; }
+.tara-call-ledger__more[open] > summary::after,.tara-exec-overview__more[open] > summary::after { content:'−'; }
+.tara-call-ledger__more > summary span,.tara-exec-overview__more > summary span { margin-left:auto; color:var(--muted); font-size:9px; text-align:right; }
+.tara-call-ledger__more[open] > summary,.tara-exec-overview__more[open] > summary { border-bottom:1px solid var(--line); }
+.tara-call-ledger__more .tara-call-ledger__timeline { padding:12px 18px; }
+.tara-call-ledger__more .tara-call-ledger__details { border-top:1px solid var(--line); }
+.tara-exec-overview__more .tara-exec-overview__flow { border-bottom:1px solid var(--line); }
+.tara-rail-record { padding:0; }
+.tara-rail-record summary { display:flex; align-items:center; gap:11px; padding:12px 15px; cursor:pointer; list-style:none; }
+.tara-rail-record summary::-webkit-details-marker { display:none; }
+.tara-rail-record summary span { color:var(--muted); font:9px/1.3 'IBM Plex Mono',monospace; letter-spacing:.07em; }
+.tara-rail-record summary strong { margin-left:auto; color:var(--green); font:600 25px/1 'Space Grotesk',sans-serif; }
+.tara-rail-record summary small { display:none; }
+.tara-rail-record summary::after { content:'+'; color:var(--green); font:14px 'IBM Plex Mono',monospace; }
+.tara-rail-record[open] summary::after { content:'−'; }
+.tara-rail-record[open] summary { border-bottom:1px solid var(--line); }
+.tara-rail-record__grid { margin:0; }
+.tara-rail-record__note { padding:10px 15px; }
+.tara-tools-panel__body small { display:block; margin-top:13px; color:var(--muted); font-size:11px; line-height:1.4; }
+.tara-tools-groups { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; background:var(--line); }
+.tara-tools-groups > section { min-width:0; background:#0b1113; }
+.tara-tools-groups h4 { margin:0; padding:14px 16px; border-bottom:1px solid var(--line); color:var(--green); font:10px 'IBM Plex Mono',monospace; letter-spacing:.1em; }
+.tara-tools-groups .tara-tools-workspace__actions { display:block; background:transparent; }
+.tara-tools-groups .tara-tools-workspace__actions button { display:grid; grid-template-columns:minmax(0,1fr) auto; width:100%; min-height:74px; padding:13px 16px; border-bottom:1px solid #1e2928; background:transparent; }
+.tara-tools-groups .tara-tools-workspace__actions button:hover { background:#13211a; }
+.tara-tools-groups .tara-tools-workspace__actions strong { grid-column:1; font-size:10px; }
+.tara-tools-groups .tara-tools-workspace__actions span { grid-column:1; margin-top:5px; }
+.tara-tools-groups .tara-tools-workspace__actions i { grid-column:2; grid-row:1/3; align-self:center; color:var(--muted); font:15px 'IBM Plex Mono',monospace; }
+.tara-memory-page__row { grid-template-columns:12px 96px 115px minmax(0,1fr); }
+.tara-memory-page__when { display:flex; flex-direction:column; gap:2px; color:#c2d3c9; font:10px/1.2 'IBM Plex Mono',monospace; }
+.tara-memory-page__when small { color:var(--muted); font:9px/1.2 'IBM Plex Mono',monospace; }
+.tara-approved-primary[data-workspace="news"] .tara-news-list { max-height:none; overflow:visible; }
+.tara-context-caution-mobile { display:none; }
+.weather-city-select { display:none; }
+.sports-data-stack > .sports-snapshot-banner { order:-4; }
+.sports-data-stack > .grid:first-child { order:-3; }
+.sports-data-stack > .sports-state-tabs { order:-2; }
+.sports-data-stack > .sports-next-glance { order:-1; }
+
+@media (max-width:760px) {
+  .tara-header { padding:7px 12px!important; }
+  .tara-header > div { display:grid!important; grid-template-columns:minmax(0,1fr) auto auto auto; gap:4px 6px!important; min-height:0; }
+  .tara-header > div > .flex-1 { display:none; }
+  .tara-brand-lockup { grid-row:1; min-width:0; }
+  .tara-brand-copy small { font-size:8px; }
+  .tara-header > div > .tara-today-pnl { grid-row:1; }
+  .tara-header-controls { display:contents!important; }
+  .tara-header-controls > button,.tara-header-controls > .relative { grid-row:1; }
+  .tara-header .tara-modebar {
+    grid-row:2; grid-column:1/-1; display:grid!important; grid-template-columns:repeat(5,minmax(0,1fr));
+    min-width:0; width:100%!important; height:39px; margin:2px 0 0; overflow:visible; border-top:1px solid var(--line)!important;
+  }
+  .tara-header .tara-modebar > div { display:none; }
+  .tara-header .tara-modebar > button { min-width:0!important; width:100%; height:38px; padding:0 2px!important; font-size:9px!important; letter-spacing:0!important; }
+  .tara-main { padding:8px 12px 98px!important; gap:8px; }
+  .tara-context-strip > div:first-child { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:3px 8px; padding:6px 8px; }
+  .tara-context-strip > div:first-child > div:first-child { grid-column:1/-1; width:100%; padding:0 0 2px; }
+  .tara-context-strip .tara-context-caution-inline { display:none; }
+  .tara-context-caution-mobile { display:block; grid-column:1; grid-row:2; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:10px/1.2 'Instrument Sans',sans-serif; }
+  .tara-context-strip > div:first-child > div:nth-child(2) { grid-column:2; grid-row:2; align-self:center; }
+  .tara-workspace-switch { position:sticky; top:94px; z-index:30; padding:6px 0; background:#07090bf5; }
+  .tara-main .tara-approved-primary .tara-workspace-switch .tara-workspace-nav { display:none; }
+  .tara-workspace-select { display:flex; align-items:center; justify-content:space-between; gap:10px; color:var(--muted); font:10px 'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:.06em; }
+  .tara-workspace-select select { min-width:0; width:65%; min-height:39px; padding:8px 10px; border:1px solid #45634f; color:var(--text); background:#101915; font:11px 'IBM Plex Mono',monospace; text-transform:uppercase; }
+  .tara-workspace-heading,.tara-approved-primary[data-workspace="overview"] .tara-workspace-heading { padding:10px 12px; }
+  .tara-workspace-heading__pulse { margin-top:6px; }
+  .tara-call-ledger__hero { padding:11px 14px 10px; }
+  .tara-call-ledger__hero h3 { font-size:34px; }
+  .tara-call-ledger__hero p { margin:4px 0 0; }
+  .tara-call-ledger__truth { min-width:0; padding-top:6px; }
+  .tara-call-ledger__metrics > div { padding:10px 12px; }
+  .tara-call-ledger__metrics label { font-size:9px; }
+  .tara-call-ledger__metrics strong { font-size:18px; }
+  .tara-call-ledger__more > summary,.tara-exec-overview__more > summary { padding:11px 13px; }
+  .tara-call-ledger__more > summary span,.tara-exec-overview__more > summary span { display:none; }
+  .tara-call-ledger__actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); padding:9px 10px; gap:5px; }
+  .tara-call-ledger__actions button { min-width:0; min-height:38px; padding:5px; font-size:9px; }
+  .tara-call-ledger .tara-page-brief__meta { padding:9px 12px; }
+  .tara-exec-overview__head { padding:14px; }
+  .tara-exec-overview__head h2 { font-size:25px; }
+  .tara-exec-overview__metrics > div { min-height:90px; padding:10px; }
+  .tara-exec-overview__metrics strong { margin:6px 0 4px; font-size:16px; }
+  .tara-exec-overview__actions { padding:10px; gap:6px; }
+  .tara-exec-overview__actions button { flex:1 1 125px; min-height:38px; }
+  .tara-memory-page__row { grid-template-columns:12px 86px minmax(0,1fr); }
+  .weather-city-strip { display:none!important; }
+  .weather-city-select { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 9px; color:var(--cyan); font:10px 'IBM Plex Mono',monospace; text-transform:uppercase; }
+  .weather-city-select select { min-width:0; width:66%; min-height:40px; padding:8px 10px; font:11px 'IBM Plex Mono',monospace; }
+  .weather-lane-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:3px; overflow:visible; }
+  .weather-lane-tabs button { justify-content:center; min-width:0; padding:8px 4px; }
+  .weather-lane-tabs__note { grid-column:1/-1; min-width:0; margin-left:0; padding:4px 6px; text-align:right; }
+  .sports-data-stack > .grid:first-child { order:-3; margin-bottom:8px; }
+  .sports-data-stack > .grid:first-child { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .sports-data-stack > .grid:first-child > div { min-width:0; padding:8px!important; }
+  .sports-data-stack > .grid:first-child .text-2xl { font-size:17px; line-height:1.1; }
+  .sports-data-stack > .sports-state-tabs { order:-2; margin-bottom:8px; }
+  .sports-data-stack > .sports-next-glance { order:-1; }
+  .sports-state-tabs > div { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; gap:2px; }
+  .sports-state-tabs button { min-width:0; padding:8px 3px; font-size:10px; line-height:1.2; letter-spacing:0; }
+  .sports-next-glance__row { grid-template-columns:43px minmax(0,1fr) 46px 56px; gap:5px; min-height:50px; padding:7px 9px; }
+  .sports-next-glance__row > :last-child { grid-column:auto; justify-self:end; }
+  .sports-next-glance__tracked,.sports-next-glance__paper { font-size:8px; letter-spacing:0; padding:4px 2px; }
+  .sports-next-glance__prob small { font-size:8px; }
+  .sports-next-glance__head { gap:5px; padding:11px; }
+  .sports-next-glance h3 { font-size:18px; }
+  .sports-next-glance__count { font-size:9px; }
+  .tara-specialist-brief { padding:11px 12px; }
+  .tara-specialist-brief p { font-size:11px; }
+  .tara-tools-groups { grid-template-columns:minmax(0,1fr); }
+  .tara-tools-groups .tara-tools-workspace__actions button { min-height:65px; }
 }
