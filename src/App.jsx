@@ -3,6 +3,11 @@ import taraDesignStyles from './tara-design.css?raw';
 import taraV14Styles from './tara-v14.css?raw';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
+import { useCallLedger } from './useCallLedger.js';
+import { amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
+import { useLockStudy } from './useLockStudy.js';
+import LockStudyPanel from './LockStudyPanel.jsx';
+import './lockStudy.css';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -5902,8 +5907,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.25-v14.1.0-live-review-layout';
-const TARA_VERSION_DISPLAY='TARA 14.1';
+const TARA_BUILD_VERSION='2026.09.27-v14.2.0-call-integrity-shadow-study';
+const TARA_VERSION_DISPLAY='TARA 14.2.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6191,17 +6196,7 @@ function _v104ConvBand(c){
 //   4. Deduplicate by windowId — keep only the LAST snapshot per window
 //      (aborts + re-locks create multiple entries; only the final one counts)
 const _isRealTrade=(e)=>{
-  if(!e)return false;
-  if(e.result!=='WIN'&&e.result!=='LOSS')return false;
-  if(e.wasOverriddenNoTrade===true)return false;
-  // V10.7.83: only exclude no-go-data entries that never actually resolved
-  // (no closingPrice = feed was stale AND trade never settled = not a real trade).
-  // Entries with closingPrice + resolvedAt settled on Kalshi regardless of the
-  // stale-feed flag at lock time — they are real trades and must count.
-  // Audit 2026-06-02: 76 no-go-data entries had real outcomes (48W/28L) but were
-  // excluded, causing dashboard to show 983W/599L vs Memory's correct 1030W/627L.
-  if(e.tier==='no-go-data'&&!e.closingPrice)return false;
-  return true;
+  return isScoredCall(e);
 };
 
 // Deduplicate entries by windowId, keeping the last committed snapshot per window.
@@ -6209,8 +6204,8 @@ const _isRealTrade=(e)=>{
 const _deduplicateByWindow=(entries)=>{
   const map=new Map();
   for(const e of entries){
-    if(!_isRealTrade(e))continue;
-    const key=e.windowId||e.wid||String(e.id||Math.random());
+    if(!e)continue;
+    const key=(e.asset||'BTC')+'|'+(e.windowType||'15m')+'|'+(e.windowId||e.wid||String(e.id||Math.random()));
     // Keep the later entry (higher id = more recent commit)
     const existing=map.get(key);
     if(!existing||(e.id||0)>(existing.id||0)){
@@ -6227,7 +6222,7 @@ const _canonicalTrades=(callLog)=>{
   //   analytics path that filters/sorts on e.time (walk-forward WR, recency weight,
   //   day/hour cells, P&L curve) was silently seeing only ~11% of history. e.id IS
   //   the lock timestamp; normalize once here so all downstream readers are whole.
-  return _deduplicateByWindow(callLog).map(e=>(e&&!e.time&&e.id)?{...e,time:e.id}:e);
+  return _deduplicateByWindow(callLog).filter(_isRealTrade).map(e=>(e&&!e.time&&e.id)?{...e,time:e.id}:e);
 };
 
 // V13.4.353: one display-safe record authority for the control room. The
@@ -6252,7 +6247,7 @@ function buildV104Table(callLog,asset){
   //   ETH trades have different volatility/regime characteristics — mixing them produces
   //   calibration tables that fit neither asset well.
   const _asset=asset||'BTC';
-  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.asset||'BTC')===_asset);
+  const resolved=_canonicalTrades(callLog).filter(e=>(e.asset||'BTC')===_asset);
   if(resolved.length===0)return V104_SEED_CALIBRATION;
   // V10.6.1 — RECENCY-WEIGHTED ROLLING WINDOW
   //   Old logic: count last 200 trades per cell with equal weight. A cell
@@ -6337,7 +6332,7 @@ function buildDowHourCalibration(callLog){
   if(!Array.isArray(callLog)||callLog.length===0)return null;
   // V10.9.28: use e.time||e.id (id is the lock timestamp). Was training on ~11% of
   //   history because ~89% of entries lack e.time; now the day/hour tilt sees them all.
-  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.time||e.id));
+  const resolved=_canonicalTrades(callLog).filter(e=>e.time||e.id);
   if(resolved.length<50)return null;
   // V10.6.1-style recency weighting (30-day half-life) reused for consistency
   const _HALF_LIFE_DAYS=30;
@@ -28480,7 +28475,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
 //   Accessible via header button. Shows: WR heatmap by hour×day, P&L curve by asset,
 //   ML model status + feature importance, loss pattern distribution, regime×direction
 //   performance matrix, signal attribution chart.
-function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=false}){
+function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=false,lockResearch}){
   React.useEffect(()=>{
     if(embedded)return;
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
@@ -28673,6 +28668,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=
             React.createElement('div',{key:label},React.createElement('span',null,label),React.createElement('strong',null,value),React.createElement('small',null,note))),
           React.createElement('p',null,'This is the Tara Call record and model evidence. AutoTrade order fills, actual positions, and execution P&L belong to Execution and the exchange audit.'),
         ),
+        React.createElement(LockStudyPanel,{research:lockResearch,callLog:taraCallLog}),
         // ═══ WR HEATMAP ═══
         React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold text-[#EDEDED]/50 mb-3'},'Win Rate Heatmap · UTC Hour × Day'),
@@ -36559,7 +36555,7 @@ function TaraApp(){
   //   — the user-visible audit trail of what she called, why, and how it resolved. Persisted
   //   to Firestore so it accumulates across sessions and devices. Capped at 500 most-recent
   //   entries to keep payload size sane.
-  const[taraCallLog,setTaraCallLog]=useState(()=>{
+  const[taraCallLog,setTaraCallLog]=useCallLedger(()=>{
     try{
       // V10.7.95: Load from localStorage cache first (fast paint).
       // IndexedDB (primary store) is loaded async via useEffect below.
@@ -36695,7 +36691,7 @@ function TaraApp(){
       }
       return cleaned;
     }catch(e){return[];}
-  });
+  },()=>taraCallSnapshotRef.current);
   // V10.7.89: Register window-level Kalshi credentials getter for Memory modal reconcile
   React.useEffect(()=>{
     window._taraGetKalshiCreds=()=>({
@@ -36727,7 +36723,7 @@ function TaraApp(){
         //   Also write a backup key so if taraCallLog_v1 gets clobbered, we can recover.
         try{
           const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000;
-          const _save=merged.slice(-_cap);
+          const _save=normalizeCallLedger(merged,prev,taraCallSnapshotRef.current).slice(-_cap);
           _idbWrite('taraCallLog',_save).catch(()=>{});          // primary: unlimited
           localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
           // V10.9.6: write DEEP minified cache (up to TARA_CALL_LOG_CAP) so the full imported
@@ -36735,6 +36731,7 @@ function TaraApp(){
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
           const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
+          ['originalDecision','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion'].forEach(k=>_MK.add(k));
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -36836,7 +36833,7 @@ function TaraApp(){
         const upd=updateMap.get(e.id);
         if(!upd)return e;
         applied++;
-        return{...e,...upd,manualEdit:true,manualEditedAt:Date.now()};
+        return amendCallRecord(e,{...upd,manualEdit:true,manualEditedAt:Date.now()},{source:upd.officialSettlement?'official-settlement':'reconcile'});
       });
       // Write FULL patched history back to IndexedDB (no slicing to 500).
       //   localStorage cache still gets the last-1000 slice for fast first paint,
@@ -36844,10 +36841,11 @@ function TaraApp(){
       //   reload even if IndexedDB is unavailable.
       try{
         const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000;
-        const _save=_patched.slice(-_cap);
+        const _save=normalizeCallLedger(_patched,taraCallLogRef.current,taraCallSnapshotRef.current).slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
         const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
+        ['originalDecision','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion'].forEach(k=>_MK.add(k));
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -36907,7 +36905,7 @@ function TaraApp(){
     //   The card is labelled "last N" and must actually mean it. The local log can
     //   hold up to TARA_CALL_LOG_CAP (10k) entries, so counting all of it produced
     //   6,601 under a "last 1,000" heading.
-    const _recentLog=(taraCallLog||[]).slice(-_TARA_CLOUD_LOG_CAP);
+    const _recentLog=_deduplicateByWindow((taraCallLog||[]).slice(-_TARA_CLOUD_LOG_CAP));
     _recentLog.forEach(e=>{
       if(!e||!e.windowType||!e.result)return;
       const _entryAsset=e.asset||'BTC';
@@ -36924,8 +36922,8 @@ function TaraApp(){
       if(e.tier==='no-go-data'&&!e.closingPrice)return;
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
-      if(e.result==='WIN')out[wt].wins++;
-      else if(e.result==='LOSS')out[wt].losses++;
+      if(_isRealTrade(e)&&e.result==='WIN')out[wt].wins++;
+      else if(_isRealTrade(e)&&e.result==='LOSS')out[wt].losses++;
       else if(e.result==='SITOUT')out[wt].sitouts++;
     });
     // V13.4.163: the V13.4.73 all-time RATCHET is REMOVED.
@@ -36962,7 +36960,7 @@ function TaraApp(){
   //   the user doesn't suddenly see "0W·0L" on day one. Going forward, scorecards diverge.
   const scorecards=React.useMemo(()=>{
     const out={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
-    (taraCallLog||[]).forEach(e=>{
+    _canonicalTrades(taraCallLog||[]).forEach(e=>{
       if(!e||!e.windowType||!e.result)return;
       // Device filter: skip entries created on a different device. Untagged (legacy)
       //   entries fall through and count, so existing totals aren't lost on upgrade.
@@ -38384,7 +38382,28 @@ function TaraApp(){
   //   _persistLock reads this to decide whether to write back. Convergence rule: whoever
   //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
   const _cloudLockMirrorRef=useRef(null);
+  const _sealCallSnapshot=(snapshot)=>{
+    if(!snapshot)return;
+    const _wid=computeWindowId(windowType);
+    Object.assign(snapshot,hydrateDecisionQuote(snapshot,{quote:_kalshiQuote,windowId:_wid,asset:currentAssetRef.current||'BTC',now:Date.now()}));
+    if(!snapshot.locked||!['UP','DOWN','SIT_OUT'].includes(snapshot.call))return;
+    snapshot._committedAt ||= Date.now();
+    snapshot.windowId ||= _wid;
+    snapshot.windowType ||= windowType;
+    snapshot.asset ||= currentAssetRef.current||'BTC';
+    snapshot.taraVersion ||= TARA_BUILD_VERSION;
+    snapshot.rawPosteriorAtLock ??= analysis?.rawPosteriorUncalibrated ?? null;
+    snapshot.calibratedPosteriorAtLock ??= analysis?.rawProbAbove ?? null;
+    snapshot.strikeAtLock ??= (Number(kalshiStrike)||Number(targetMarginRef.current)||null);
+    if(snapshot.call==='SIT_OUT'){
+      snapshot._intendedDir ||= (snapshot.direction==='UP'||snapshot.direction==='DOWN')?snapshot.direction:null;
+    }
+    snapshot.dir=snapshot.call;
+    snapshot.direction=snapshot.call;
+    snapshot.originalDecision ||= captureOriginalDecision(snapshot);
+  };
   const _persistLock=()=>{
+    _sealCallSnapshot(taraCallSnapshotRef.current);
     if(!_sbClient)return; // V10.2.0: now gates on Supabase, not Firestore
     // Stamp _committedAt on the snapshot the FIRST time we persist with non-null data.
     //   This is the canonical "when did this browser commit" timestamp, used for first-
@@ -39000,8 +39019,9 @@ function TaraApp(){
       try{return _fmtDateTz(new Date(e.time||e.id),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}
       catch(_){return false;}
     });
-    const wins=todayCalls.filter(e=>e.result==='WIN').length;
-    const losses=todayCalls.filter(e=>e.result==='LOSS').length;
+    const todayScored=_canonicalTrades(todayCalls);
+    const wins=todayScored.filter(e=>e.result==='WIN').length;
+    const losses=todayScored.filter(e=>e.result==='LOSS').length;
     const sitouts=todayCalls.filter(e=>e.result==='SITOUT').length;
     const pending=todayCalls.filter(e=>!e.result&&e.dir!=='NO_TRADE').length;
     const resolved=wins+losses;
@@ -39011,7 +39031,7 @@ function TaraApp(){
     const _payout=Number(tradingSettings?.winPayout)||8.5;
     const dollarPnL=Math.round(((wins*_payout)-(losses*_bet))*100)/100;
     // Streak from RESOLVED calls only — newest first, walk back
-    const _resolvedAll=_src.filter(e=>e.result==='WIN'||e.result==='LOSS').slice(-30);
+    const _resolvedAll=_canonicalTrades(_src).slice(-30);
     let streak=0,streakType='neutral',lastResult=null;
     if(_resolvedAll.length>0){
       lastResult=_resolvedAll[_resolvedAll.length-1].result;
@@ -39037,8 +39057,7 @@ function TaraApp(){
     const recentForHeatmap=_resolvedAll.slice(-20);
     // Hourly bucket for today (UTC) — for daily P&L curve
     const hourlyBuckets={};
-    todayCalls.forEach(e=>{
-      if(e.result!=='WIN'&&e.result!=='LOSS')return;
+    todayScored.forEach(e=>{
       try{
         const h=new Date(e.time||e.id).getUTCHours(); // V10.9.28
         if(!hourlyBuckets[h])hourlyBuckets[h]={wins:0,losses:0};
@@ -41661,6 +41680,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               spread:(_bidOK&&_askOK)?(_askC-_bidC):null,
               at:Date.now(),
               ticker:best.ticker||null,
+              closeTime:best.close_time||null,
+              strike:bestStrike,
             };
           }catch(_e){/* quote capture must never break the price feed */}
           if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
@@ -42119,13 +42140,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               if(pending.source==='taraCallLog'){
                 const _entry=(taraCallLogRef.current||[]).find(t=>t.id===pending.tradeId);
                 if(_entry&&typeof window._taraApplyReconcile==='function'){
-                  const finalResult=_entry.dir===kalshiOutcomeDir?'WIN':'LOSS';
-                  await window._taraApplyReconcile(new Map([[pending.tradeId,{
-                    result:finalResult,
-                    outcomeDir:kalshiOutcomeDir,
-                    kalshiResolved:true,
-                    kalshiClosingPrice:_kalshiSettlement,
-                  }]]));
+                  const _verified=settlementPatch(_entry,best);
+                  await window._taraApplyReconcile(new Map([[pending.tradeId,_verified.ok
+                    ?{..._verified.patch}
+                    :{recordIntegrity:{version:1,status:'review-required',reason:_verified.reason}}
+                  ]]));
                 }
               } else {
                 const trade=tradeLogRef.current.find(t=>t.id===pending.tradeId);
@@ -46745,6 +46764,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // Executable cost per contract on the side we are actually taking.
     const costCents=_execCostCents(dir,30000);
     if(costCents==null||!_quoteUsable(_kalshiQuote))return{ok:false,reason:'no-usable-quote'};
+    const _entryQuote=inspectDecisionQuote(_kalshiQuote,{
+      windowId:computeWindowId(windowType),asset:currentAssetRef.current||'BTC',now:Date.now(),
+      ticker:_signalSource==='snapshot'?taraCallSnapshotRef.current?.originalDecision?.marketTicker:undefined,
+    });
+    if(!_entryQuote.ok)return{ok:false,reason:'quote-integrity:'+_entryQuote.reason};
     // V13.4.349: THE REAL cost-band gate -- see the loss-cooldown comment
     //   above for why this needs to live here and not (only) on `taraCall`.
     //   costCents is already the live, direction-aware executable cost on
@@ -47979,6 +48003,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
+  // Observation only: the research hook has no order, arm, or live-lock callback.
+  const lockResearch=useLockStudy({
+    windowId:computeWindowId(windowType),windowType,asset:currentAsset,
+    quote:_kalshiQuote,probabilityUpRaw:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove,
+    probabilityUpCurrent:analysis?.rawProbAbove,probabilitySource:analysis?.rawPosteriorUncalibrated!=null?'rawPosteriorUncalibrated':'legacy-rawProbAbove-fallback',signalScore:taraCall.confidence,
+    currentDecision:taraCallSnapshotRef.current,referencePrice:analysis?.referencePrice,
+    spot:currentPrice,strike:kalshiStrike,atrBps:analysis?.atrBps,
+    tape15:analysis?.tapeWindows?.w15?.buyPct,tape30:analysis?.tapeWindows?.w30?.buyPct,
+    tape60:analysis?.tapeWindows?.w60?.buyPct,momentum:analysis?.rawSignalScores?.momentum,regime:analysis?.regime,
+  },{device:_taraDeviceId,version:TARA_BUILD_VERSION,publish:async(path,data)=>{
+    if(!_sbClient)throw new Error('Research cloud unavailable');
+    const {error}=await _sbClient.from('tara_state').upsert({doc_path:path,data,updated_at:new Date().toISOString()},{onConflict:'doc_path'});
+    if(error)throw error;
+  }});
   // V13.4.76: AUTO-FOLLOW LOCK (advisory). When Tara locks a real UP/DOWN call, auto-copy
   //   it into the tracked position so the live advisor + coach (hold / take-profit /
   //   cut-loss / reversal alerts) start managing it immediately -- identical to tapping
@@ -48642,6 +48680,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
         const _postNow=Number(analysis?.rawProbAbove)||50;
         if(!_isDeadWindow&&_postNow!==50){
+          // V14.2: an absent quote is recoverable before the real deadline.
+          // Keep sampling instead of freezing a false missing-price sit-out.
+          const _lateQuote=inspectDecisionQuote(_kalshiQuote,{windowId:computeWindowId(windowType),asset:currentAssetRef.current||'BTC',now:Date.now()});
+          if(!_lateQuote.ok&&(timeState.minsRemaining*60+timeState.secsRemaining)>LOCK_DEADLINE_SEC)return;
           // Force-commit instead of ambiguous SITOUT
           // V10.7.6 — check for reversal signals before committing
           const _v107_6=_v10_7_6_reversalCheck(_postNow,analysis);
@@ -48660,10 +48702,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _v10_7_6_revReasons:_v107_6.reasons,
             _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
             _v10_7_5_rangeBps:_rangeBps,
+            tier:'late-window-forced',
+            kalshiAtLock:_lateQuote.ok?_lateQuote.mid:null,
           };
-          _persistLock();
           // Log the force-commit entry
           _logSnapshotEntry(taraCallSnapshotRef.current);
+          _persistLock(); // persist the validated decision, never a pre-guard copy
           return;
         }
         // V13.4.326: this was the one sit-out branch in the whole commit
@@ -49066,6 +49110,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // Early-lock and fast-lock stamps are initialized at effect entry, before
     // every possible call to this hoisted helper (including delay-gate exits).
     function _logSnapshotEntry(snapshot){
+      if(!snapshot)return;
+      Object.assign(snapshot,hydrateDecisionQuote(snapshot,{quote:_kalshiQuote,windowId:computeWindowId(windowType),asset:currentAssetRef.current||'BTC',now:Date.now()}));
       // V13.4.127 attempted to wire up flipAtLock here -- turned out to be dead code.
       //   A separate, later object-literal construction site (the main automatic
       //   pipeline's entry builder, ~L42160) ALREADY captures this same data under a
@@ -49492,6 +49538,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
         }catch(_){}
       }
+      _sealCallSnapshot(snapshot);
       // V10.7.45: Lifecycle telemetry — record EVERY call regardless of what happens next.
       //   This lets us distinguish "log call never fired" from "log call fired but pushed nothing".
       try{
@@ -49545,6 +49592,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _entry={
           id:Date.now(),time:Date.now(),windowType,
           windowId:_wid,
+          originalDecision:snapshot.originalDecision,
+          marketTicker:snapshot.marketTicker||null,
+          marketCloseTime:snapshot.marketCloseTime||null,
           regime:analysis?.regime||'',
           dir:snapshot.call==='NO_TRADE'?(snapshot.direction||'NO_TRADE'):snapshot.call,
           confidence:snapshot.confidence||0,
@@ -49597,7 +49647,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           // V13.4.85: fair-value inputs (see note on the other lock paths).
           spotAtLock:Number(currentPrice)||0,
           distBpsAtLock:(Number(targetMargin)>0&&Number(currentPrice)>0)?Math.round(((Number(currentPrice)-Number(targetMargin))/Number(targetMargin))*1000000)/100:null,
-          volBpsAtLock:(typeof atrBps!=='undefined'&&Number.isFinite(atrBps))?Math.round(atrBps*10)/10:null,
+          volBpsAtLock:Number.isFinite(analysis?.atrBps)?Math.round(analysis.atrBps*10)/10:null,
           baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
           reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
           // V10.7.50: Direction bias stamps — record recent UP/DOWN ratio and WR-per-direction
@@ -51566,7 +51616,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   assuming sqrt-t, then price each window and compare against Kalshi. ASCII-only.
         spotAtLock:Number(currentPrice)||0,
         distBpsAtLock:(Number(targetMargin)>0&&Number(currentPrice)>0)?Math.round(((Number(currentPrice)-Number(targetMargin))/Number(targetMargin))*1000000)/100:null,
-        volBpsAtLock:(typeof atrBps!=='undefined'&&Number.isFinite(atrBps))?Math.round(atrBps*10)/10:null,
+        volBpsAtLock:Number.isFinite(analysis?.atrBps)?Math.round(analysis.atrBps*10)/10:null,
         baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
         reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
         // V10.7.54: bias stamps now on ALL entry paths (was 59% coverage in V10.7.50 — only on _logSnapshotEntry path)
@@ -53778,7 +53828,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.1</small>
+              <small>DECISION ENGINE · V14.2.0</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -54389,7 +54439,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           onOpenFlow={()=>setShowWhaleLog(true)}
           onOpenTheory={()=>setShowTheoryLab(true)}
         />}
-        {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
+        {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded taraCallLog={taraCallLog} taraMLModel={taraMLModel} lockResearch={lockResearch} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
         {workspaceFocus==='brain'&&showBrain&&<BrainView embedded snapshot={taraCallSnapshotRef.current||null} analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
         {workspaceFocus==='schedule'&&<TaraHourlyRecordSummary/>}
         {/* V13.4.298: lg:auto-rows-fr + the grid default (stretch) forced every

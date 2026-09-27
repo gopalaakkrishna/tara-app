@@ -1,0 +1,18 @@
+.tara-lock-study{padding:24px 0;border-top:1px solid #30302b;color:#b4b5b4;font-size:13px;line-height:1.6}
+.tara-lock-study-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.tara-lock-study h3{font-size:22px;font-weight:500;color:#eeede8;letter-spacing:-.04em;margin:6px 0}
+.tara-lock-study p{max-width:85ch;margin:10px 0}
+.tara-lock-study-badge{font-family:monospace;font-size:10px;letter-spacing:.08em;color:#c5b184;border:1px solid #61563e;border-radius:5px;padding:5px 8px}
+.tara-lock-study-status{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0;color:#d8d4c9}
+.tara-lock-study-status span{color:#999}
+.tara-lock-study-table{overflow:auto}
+.tara-lock-study table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;min-width:550px}
+.tara-lock-study th,.tara-lock-study td{text-align:right;padding:10px 8px;border-bottom:1px solid #292a28;font-size:12px}
+.tara-lock-study th:first-child,.tara-lock-study td:first-child{text-align:left}
+.tara-lock-study th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#9e9e98;font-weight:500}
+.tara-lock-study summary{cursor:pointer;color:#d8caa8;padding:12px 0}
+.tara-lock-study details{border-top:1px solid #292a28;margin-top:16px}
+.tara-lock-study ul{padding-left:20px;list-style:disc}
+.tara-lock-study button{margin-top:14px;padding:9px 14px;border:1px solid #4a453a;border-radius:5px;background:#1a1b17;color:#e2d6b7;font-size:12px}
+.tara-lock-study button:focus-visible,.tara-lock-study summary:focus-visible{outline:2px solid #c5b184;outline-offset:4px}
+.tara-lock-study-warning{color:#e1ba78}
