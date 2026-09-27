@@ -28,7 +28,7 @@ export function observeLockStudy(study, input) {
     quoteIssue:quote.ok?null:quote.reason, costCents:cost, estimatedEdgeCents:estimate,
     referencePrice:number(input.referencePrice), spot:number(input.spot), strike:number(input.strike), atrBps:number(input.atrBps),
     tape15:number(input.tape15), tape30:number(input.tape30), tape60:number(input.tape60), momentum:number(input.momentum),
-    regime:input.regime||null, visibility:input.visibility||'unknown'};
+    regime:input.regime||null, visibility:input.visibility||'unknown',dataProvenance:input.dataProvenance||null};
   const observations=[...study.observations,o].slice(-100);
   const next={...study,lastObservedAt:now,observations};
   const decision=input.currentDecision, original=decision?.originalDecision;

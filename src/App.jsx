@@ -8,6 +8,10 @@ import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, 
 import { useLockStudy } from './useLockStudy.js';
 import LockStudyPanel from './LockStudyPanel.jsx';
 import './lockStudy.css';
+import {useEconomicCalendar,computeEconCalendarRisk,getMacroEventState,getUpcomingMacroEvents} from './useEconomicCalendar.js';
+import {dampenScore} from './economicCalendar.js';
+import MarketIntelligencePanel from './MarketIntelligencePanel.jsx';
+import {assessSpotResponse, freshOkxResults, freshFeedStatus} from './marketDataQuality.js';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -1953,7 +1957,7 @@ const computeV101ShadowPosterior=(p)=>{
     totalScore+=Math.max(-W.technical,Math.min(W.technical,techScore));
     // regime/funding
     const funding=(bloomberg&&bloomberg.fundingRate)||0;
-    const fundingPrev=(bloomberg&&bloomberg.fundingRatePrev)||0;
+    const fundingPrev=bloomberg?.fundingRatePrev??funding; // absent history is not a zero-rate observation
     const delta=(globalFlow&&globalFlow.deltaUSD)||0;
     let regime='RANGE/CHOP',regimeBonus=0;
     const isHighVol=atrBps>35;
@@ -3188,100 +3192,9 @@ const computeStreak=(log,asset)=>{
   return{type:firstResult,count};
 };
 
-// V9.14: ECONOMIC CALENDAR BLACKOUT
-//   Major US macro events reliably create 1-3 minutes of directional spike followed
-//   by 5-15 minutes of high volatility. During that window, Tara's signals (which
-//   are calibrated to "normal" market conditions) become unreliable — patterns
-//   that fired 10 seconds before the event are wiped out by the post-event flush.
-//
-//   Strategy: hardcoded major US events. Within ±15 minutes of any event, return
-//   a non-zero risk score that the engine reads as a confidence dampener (not a
-//   block — user said no gates). The dampener pushes totalScore TOWARD zero,
-//   making Tara more reluctant to commit either direction.
-//
-//   Events tracked (UTC times, converted to EST/EDT inside the check):
-//   - NFP: First Friday of each month, 8:30 AM ET
-//   - CPI: Mid-month (10-15), usually 8:30 AM ET (Tue/Wed)
-//   - FOMC: 8x per year, 2:00 PM ET (rate decision)
-//   - Powell press conf: 30 min after FOMC
-//   - Jobless claims: Every Thursday 8:30 AM ET
-//   - PPI: Day after CPI, 8:30 AM ET
-//
-// Why hardcoded vs API: Calendar APIs (TradingEconomics, ForexFactory) require
-//   API keys, have rate limits, and add a network failure mode. The major events
-//   that move crypto are deterministic enough that hardcoded dates work.
-//   Calendar can be refreshed yearly by updating this constant.
-//
-// Coverage tradeoff: misses surprise events (geopolitical, exchange hacks,
-//   regulator actions). Those need news/twitter monitoring, which is a separate
-//   ship. This catches the SCHEDULED moves which are 60-70% of macro-shock risk.
-const computeEconCalendarRisk=()=>{
-  const _now=new Date();
-  const _utcHour=_now.getUTCHours();
-  const _utcMin=_now.getUTCMinutes();
-  const _utcDay=_now.getUTCDay(); // 0=Sun, 1=Mon, ... 4=Thu, 5=Fri
-  const _utcDate=_now.getUTCDate();
-  const _utcMonth=_now.getUTCMonth(); // 0-11
-  // DST approximation: Mar-Nov. ET = UTC-4 (DST) or UTC-5 (standard)
-  const _isDst=_utcMonth>=2&&_utcMonth<=10;
-  const _etOffset=_isDst?4:5;
-  // Compute "minutes-since-midnight ET" for the event-time math
-  const _etMinutes=((_utcHour-_etOffset)+24)%24*60+_utcMin;
-  // Helper: minutes from a target ET time (HH:MM in ET)
-  const _minsFromEtTime=(etHour,etMin)=>{
-    const _target=etHour*60+etMin;
-    return _etMinutes-_target;
-  };
-  // 1. NFP: first Friday of the month, 8:30 AM ET
-  //    First Friday = Fri AND (date 1-7)
-  const _isFirstFriday=_utcDay===5&&_utcDate<=7;
-  if(_isFirstFriday){
-    const _diff=_minsFromEtTime(8,30);
-    if(_diff>=-15&&_diff<=15){
-      return{risk:25,event:'NFP (Non-Farm Payrolls)',etTime:'8:30 AM ET',minsOffset:_diff};
-    }
-  }
-  // 2. FOMC: 2:00 PM ET on known dates. Hardcode 2026 schedule:
-  //    Jan 28, Mar 18, Apr 29, Jun 17, Jul 29, Sep 16, Oct 28, Dec 9
-  const _fomcDates2026=[
-    {m:0,d:28},{m:2,d:18},{m:3,d:29},{m:5,d:17},
-    {m:6,d:29},{m:8,d:16},{m:9,d:28},{m:11,d:9},
-  ];
-  const _isFomc=_fomcDates2026.some(e=>e.m===_utcMonth&&e.d===_utcDate);
-  if(_isFomc){
-    const _diff2pm=_minsFromEtTime(14,0);
-    if(_diff2pm>=-15&&_diff2pm<=15){
-      return{risk:35,event:'FOMC Rate Decision',etTime:'2:00 PM ET',minsOffset:_diff2pm};
-    }
-    const _diff230=_minsFromEtTime(14,30);
-    if(_diff230>=-5&&_diff230<=30){
-      return{risk:30,event:'Powell Press Conference',etTime:'2:30 PM ET',minsOffset:_diff230};
-    }
-  }
-  // 3. CPI: mid-month (typically 10-15th), 8:30 AM ET, weekday
-  //    Approximate window: 9th-16th, any weekday
-  if(_utcDate>=9&&_utcDate<=16&&_utcDay>=1&&_utcDay<=5){
-    const _diff=_minsFromEtTime(8,30);
-    if(_diff>=-15&&_diff<=15){
-      return{risk:25,event:'CPI/Inflation Print (likely)',etTime:'8:30 AM ET',minsOffset:_diff};
-    }
-  }
-  // 4. PPI: day after CPI, similar window
-  if(_utcDate>=10&&_utcDate<=17&&_utcDay>=1&&_utcDay<=5){
-    const _diff=_minsFromEtTime(8,30);
-    if(_diff>=-10&&_diff<=10){
-      return{risk:15,event:'PPI (likely)',etTime:'8:30 AM ET',minsOffset:_diff};
-    }
-  }
-  // 5. Jobless claims: Thursday 8:30 AM ET
-  if(_utcDay===4){
-    const _diff=_minsFromEtTime(8,30);
-    if(_diff>=-10&&_diff<=10){
-      return{risk:12,event:'Weekly Jobless Claims',etTime:'8:30 AM ET',minsOffset:_diff};
-    }
-  }
-  return{risk:0,event:null,etTime:null,minsOffset:null};
-};
+// V14.3: one official BLS / BEA / Fed schedule supplies the calendar UI,
+// existing macro guard and conviction dampener. Missing coverage is UNKNOWN.
+// Free schedules do not cover surprise news or every economic release.
 
 // V9.14: SPOT vs PERP DIVERGENCE HOOK
 //   Polls Coinbase BTC-USD spot every 10 seconds, compares against the perp
@@ -5907,8 +5820,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.27-v14.2.2-call-integrity-shadow-study';
-const TARA_VERSION_DISPLAY='TARA 14.2.2';
+const TARA_BUILD_VERSION='2026.09.27-v14.3.0-official-market-intelligence';
+const TARA_VERSION_DISPLAY='TARA 14.3.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8131,66 +8044,7 @@ const getMarketSessions=()=>{
   return{sessions,dominant,localH,dayLocal,dayName,dsAdj,dsRating,dsKey};
 };
 
-// ── V114: MACRO EVENT CALENDAR ─────────────────────────────────────────────
-// Hardcoded recurring high-impact events. These are the ones that historically
-// move BTC 1-3% in seconds. Times are UTC. Tara enters BLACKOUT (no new locks)
-// 30 min before, OBSERVE-ONLY during, ENHANCED for 15 min after.
-const MACRO_EVENTS=[
-  // ── US CPI & PPI ── 8:30 AM ET = 13:30 UTC (EST) or 12:30 UTC (EDT)
-  // V10.7.78: hourUTC stored as ET hour (8), resolved to UTC at runtime in getMacroEventState
-  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourET:8,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── NFP ── First Friday of month, 8:30 AM ET
-  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourET:8,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── FOMC Rate Decision ── 2:00 PM ET
-  {name:'FOMC',dayOfWeek:3,hourET:14,minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
-  // ── PCE ── Last Friday of month, 8:30 AM ET
-  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourET:8,minUTC:30,impact:'HIGH',preMin:30,postMin:15},
-  // ── Powell speeches ── irregular but Wed 19:30 UTC during FOMC weeks
-  // (covered by FOMC entry above)
-  // ── Retail Sales ── Mid-month, 8:30 AM EST = 13:30 UTC
-  {name:'RETAIL SALES',dayOfMonth:[14,15,16,17,18],hourUTC:13,minUTC:30,impact:'HIGH',preMin:20,postMin:10},
-  // ── GDP ── Quarterly, late month, 8:30 AM EST = 13:30 UTC
-  {name:'GDP',dayOfMonth:[25,26,27,28,29,30],hourUTC:13,minUTC:30,impact:'HIGH',preMin:20,postMin:10,monthsOnly:[1,4,7,10]},
-  // ── Weekly: Initial Jobless Claims ── Every Thursday 8:30 AM EST = 13:30 UTC
-  {name:'JOBLESS CLAIMS',dayOfWeek:4,hourUTC:13,minUTC:30,impact:'MEDIUM',preMin:10,postMin:5},
-  // ── Daily: BTC futures settlement ── Friday 4 PM EST = 21:00 UTC
-  {name:'BTC FUTURES SETTLE',dayOfWeek:5,hourUTC:21,minUTC:0,impact:'HIGH',preMin:15,postMin:10},
-];
-
-// Returns: {state:'CLEAR'|'BLACKOUT'|'OBSERVE'|'ENHANCED', event:{...}|null, minutesUntil:N|null}
-const getMacroEventState=(now=new Date())=>{
-  const dayUTC=now.getUTCDay();
-  const dateUTC=now.getUTCDate();
-  const monthUTC=now.getUTCMonth()+1; // 1-12
-  const hUTC=now.getUTCHours();
-  const mUTC=now.getUTCMinutes();
-  const nowMins=hUTC*60+mUTC;
-  // Calculate week of month
-  const weekOfMonth=Math.ceil(dateUTC/7);
-  // Calculate if this is the LAST week of month
-  const lastDayOfMonth=new Date(now.getUTCFullYear(),now.getUTCMonth()+1,0).getUTCDate();
-  const isLastWeek=(lastDayOfMonth-dateUTC)<7;
-  for(const ev of MACRO_EVENTS){
-    // Filter by day of week
-    if(ev.dayOfWeek!=null&&ev.dayOfWeek!==dayUTC)continue;
-    // Filter by week of month
-    if(ev.weekOfMonth===1&&weekOfMonth!==1)continue;
-    if(ev.weekOfMonth===-1&&!isLastWeek)continue;
-    // Filter by day of month
-    if(ev.dayOfMonth&&!ev.dayOfMonth.includes(dateUTC))continue;
-    // Filter by months
-    if(ev.monthsOnly&&!ev.monthsOnly.includes(monthUTC))continue;
-    // V10.7.78: resolve ET hour to UTC at runtime using DST state
-    const _etOffset=_isUSDST(now)?4:5; // EDT=UTC-4, EST=UTC-5
-    const _eventHourUTC=ev.hourET!=null?ev.hourET+_etOffset:(ev.hourUTC||0);
-    const evMins=_eventHourUTC*60+ev.minUTC;
-    const diffMins=evMins-nowMins;
-    if(diffMins>0&&diffMins<=ev.preMin)return{state:'BLACKOUT',event:ev,minutesUntil:diffMins};
-    if(diffMins<=0&&Math.abs(diffMins)<=2)return{state:'OBSERVE',event:ev,minutesUntil:diffMins};
-    if(diffMins<0&&Math.abs(diffMins)<=ev.postMin)return{state:'ENHANCED',event:ev,minutesUntil:diffMins};
-  }
-  return{state:'CLEAR',event:null,minutesUntil:null};
-};
+// V14.3: calendar helpers imported from the shared official schedule.
 
 // ── V7.10.6: MARKET CONTEXT SYSTEM ──────────────────────────────────────────
 // UTC-anchored intraday phases. Each phase has a stable character profile derived from
@@ -8471,44 +8325,7 @@ const getMarketContext=(now=new Date())=>{
   };
 };
 
-// V8.0: Returns upcoming macro events sorted by time. Looks ahead `hoursAhead` hours.
-//   Each entry: {name, impact, hoursUntil, minutesUntil, eventTime: Date, weekday}.
-//   Used by the 24h macro calendar widget in the expanded market context.
-const getUpcomingMacroEvents=(now=new Date(),hoursAhead=24)=>{
-  const horizon=now.getTime()+hoursAhead*60*60*1000;
-  const upcoming=[];
-  // Walk forward day-by-day up to the horizon
-  for(let dayOffset=0;dayOffset<=Math.ceil(hoursAhead/24)+1;dayOffset++){
-    const candidate=new Date(now.getTime()+dayOffset*24*60*60*1000);
-    const candDayUTC=candidate.getUTCDay();
-    const candDateUTC=candidate.getUTCDate();
-    const candMonthUTC=candidate.getUTCMonth()+1;
-    const weekOfMonth=Math.ceil(candDateUTC/7);
-    const lastDayOfMonth=new Date(candidate.getUTCFullYear(),candidate.getUTCMonth()+1,0).getUTCDate();
-    const isLastWeek=(lastDayOfMonth-candDateUTC)<7;
-    for(const ev of MACRO_EVENTS){
-      if(ev.dayOfWeek!=null&&ev.dayOfWeek!==candDayUTC)continue;
-      if(ev.weekOfMonth===1&&weekOfMonth!==1)continue;
-      if(ev.weekOfMonth===-1&&!isLastWeek)continue;
-      if(ev.dayOfMonth&&!ev.dayOfMonth.includes(candDateUTC))continue;
-      if(ev.monthsOnly&&!ev.monthsOnly.includes(candMonthUTC))continue;
-      const evDate=new Date(Date.UTC(candidate.getUTCFullYear(),candidate.getUTCMonth(),candidate.getUTCDate(),ev.hourUTC,ev.minUTC));
-      if(evDate.getTime()<now.getTime())continue;
-      if(evDate.getTime()>horizon)continue;
-      const minutesUntil=Math.round((evDate.getTime()-now.getTime())/60000);
-      upcoming.push({
-        name:ev.name,
-        impact:ev.impact,
-        eventTime:evDate,
-        minutesUntil,
-        hoursUntil:Math.floor(minutesUntil/60),
-        weekday:['SUN','MON','TUE','WED','THU','FRI','SAT'][candDayUTC],
-        preMin:ev.preMin,
-      });
-    }
-  }
-  return upcoming.sort((a,b)=>a.minutesUntil-b.minutesUntil);
-};
+// V14.3: calendar helpers imported from the shared official schedule.
 
 // Phase inference for legacy log entries that lack a session/phase tag.
 //   Used by the Memory modal to backfill display data without mutating the entry.
@@ -10210,16 +10027,14 @@ const useDepthFlash=()=>{
 //     it as a primary input.
 //   - longShortRatio comes pre-computed from OKX (single number) instead of
 //     buy/sell ratios that we'd divide. Same downstream value.
-//   - topTraderLSPositions still mirrors longShortRatio (OKX top-trader
-//     endpoint requires auth, mirroring is acceptable).
 //   - Order book sizes are CONTRACTS not coins. Multiplied by ctVal=0.01 BTC
 //     for BTC-USDT-SWAP to get USD value of each level.
-const useBloomberg=()=>{
+const useDerivativesData=()=>{
   const[data,setData]=useState({
-    fundingRate:0,fundingRatePrev:0,nextFundingTime:0,
+    fundingRate:null,fundingRatePrev:null,nextFundingTime:0,
     openInterest:0,openInterestUSD:0,oiChange5m:0,
     basisBps:0,markPrice:0,indexPrice:0,
-    longShortRatio:1,topTraderLSPositions:1,
+    longShortRatio:1,topTraderLSPositions:null,
     binanceFuturesVol24h:0,
     liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,
     longWallAgeMs:0,shortWallAgeMs:0,
@@ -10233,20 +10048,29 @@ const useBloomberg=()=>{
     const SWAP='BTC-USDT-SWAP'; // OKX perpetual symbol
     const IDX='BTC-USD';        // OKX spot index symbol
     const CT_VAL=0.01;          // BTC-USDT-SWAP contract face = 0.01 BTC
+    let stopped=false,busy=false;
+    const read=async url=>{const r=await fetch(url,{signal:AbortSignal.timeout(6000),cache:'no-store'});if(!r.ok)throw new Error(`OKX HTTP ${r.status}`);return r.json();};
     const f=async()=>{
+      if(stopped||busy)return;busy=true;
       try{
         const R=await Promise.allSettled([
-          fetch(`/api/okx/public/mark-price?instType=SWAP&instId=${SWAP}`).then(r=>r.json()),
-          fetch(`/api/okx/market/index-tickers?instId=${IDX}`).then(r=>r.json()),
-          fetch(`/api/okx/public/funding-rate?instId=${SWAP}`).then(r=>r.json()),
-          fetch(`/api/okx/public/funding-rate-history?instId=${SWAP}&limit=2`).then(r=>r.json()),
-          fetch(`/api/okx/public/open-interest?instType=SWAP&instId=${SWAP}`).then(r=>r.json()),
-          fetch(`/api/okx/rubik/stat/contracts/long-short-account-ratio?ccy=BTC&period=5m`).then(r=>r.json()),
-          fetch(`/api/okx/market/books?instId=${SWAP}&sz=50`).then(r=>r.json()),
+          read(`/api/okx/public/mark-price?instType=SWAP&instId=${SWAP}`),
+          read(`/api/okx/market/index-tickers?instId=${IDX}`),
+          read(`/api/okx/public/funding-rate?instId=${SWAP}`),
+          read(`/api/okx/public/funding-rate-history?instId=${SWAP}&limit=2`),
+          read(`/api/okx/public/open-interest?instType=SWAP&instId=${SWAP}`),
+          read(`/api/okx/rubik/stat/contracts/long-short-account-ratio?ccy=BTC&period=5m`),
+          read(`/api/okx/market/books?instId=${SWAP}&sz=50`),
         ]);
-        const[mpR,idxR,frR,frhR,oiR,lsR,bkR]=R;
+        if(stopped)return;
         const now=Date.now();
-        let u={lastUpdate:now,status:'live',_source:'okx'};
+        const quality=freshOkxResults(R,now);
+        const[mpR,idxR,frR,frhR,oiR,lsR,bkR]=quality.values;
+        // Missing groups become neutral/null, never a retained "live" signal.
+        let u={lastUpdate:quality.lastUpdate,status:quality.status,_source:'okx',sourceHealth:quality.health,
+          fundingRate:null,fundingRatePrev:null,nextFundingTime:0,openInterest:0,openInterestUSD:0,oiChange5m:0,oiChange5mReady:false,
+          basisBps:null,markPrice:0,indexPrice:0,longShortRatio:1,topTraderLSPositions:null,
+          liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,longWallAgeMs:0,shortWallAgeMs:0};
 
         // ── MARK PRICE ──────────────────────────────────────────────────
         // OKX mark-price returns {code:"0", data:[{markPx, ts, ...}]}
@@ -10282,7 +10106,8 @@ const useBloomberg=()=>{
         if(frhR.status==='fulfilled'&&frhR.value?.code==='0'&&Array.isArray(frhR.value?.data)){
           const _h=frhR.value.data;
           if(_h[0]){
-            u.fundingRatePrev=parseFloat(_h[0].realizedRate)||parseFloat(_h[0].fundingRate)||0;
+            const realized=parseFloat(_h[0].realizedRate);
+            u.fundingRatePrev=Number.isFinite(realized)?realized:Number(_h[0].fundingRate); // zero is valid; an empty field is not zero
           }
         }
 
@@ -10299,6 +10124,7 @@ const useBloomberg=()=>{
           u.openInterest=oi;
           u.openInterestUSD=parseFloat(_oi.oiUsd)||(oi*u.markPrice);
           u.oiChange5m=o5?((oi-o5.oi)/o5.oi)*100:0;
+          u.oiChange5mReady=!!o5;
         }
 
         // ── LONG/SHORT ACCOUNT RATIO ────────────────────────────────────
@@ -10309,7 +10135,7 @@ const useBloomberg=()=>{
           const _r=parseFloat(lsR.value.data[0][1])||1;
           if(_r>0){
             u.longShortRatio=_r;
-            u.topTraderLSPositions=_r; // OKX top-trader needs auth — mirror as before
+            // Account ratio is not top-trader positioning; that field stays unavailable.
           }
         }
 
@@ -10347,12 +10173,12 @@ const useBloomberg=()=>{
 
         setData(prev=>({...prev,...u}));
       }catch(e){
-        setData(prev=>({...prev,status:'error',_source:'okx'}));
-      }
+        if(!stopped)setData(prev=>({...prev,status:'error',_source:'okx'}));
+      }finally{busy=false;}
     };
     f();
     const _h=taraSetVizInterval(f,8000,60000);/*V13.4.99: was raw setInterval(f,8000)*/
-    return()=>_h.clear();
+    return()=>{stopped=true;_h.clear();};
   },[]);
   return data;
 };
@@ -12550,7 +12376,7 @@ const computeV99Posterior=(params)=>{
     totalScore+=tsdClamped;
   }
   const funding=bloomberg?.fundingRate||0;
-  const fundingPrev=bloomberg?.fundingRatePrev||0;
+  const fundingPrev=bloomberg?.fundingRatePrev??funding;
   const delta=globalFlow.deltaUSD||0;
   let regime='RANGE-CHOP';
   let regimeBonus=0;
@@ -12643,7 +12469,7 @@ const computeV99Posterior=(params)=>{
     const distBps=((liqLongWall-currentPrice)/currentPrice)*10000;
     if(distBps>0&&distBps<60){
       liqAdj+=Math.min(8,liqLongUSD/200000);
-      reasoning.push(`[LIQ] Short liq cluster $${(liqLongUSD/1000).toFixed(0)}K @ +${distBps.toFixed(0)}bps (${((bloomberg.longWallAgeMs||0)/1000).toFixed(0)}s old) — UP pull`);
+      reasoning.push(`[BOOK] Resting ask liquidity $${(liqLongUSD/1000).toFixed(0)}K @ +${distBps.toFixed(0)}bps (${((bloomberg.longWallAgeMs||0)/1000).toFixed(0)}s old) — modeled UP pull, not confirmed liquidations`);
     }
   } else if(liqLongWall>0&&liqLongUSD>500000&&!longWallStable){
     reasoning.push(`[LIQ-SPOOF] Ignored fresh long wall (<15s) — likely spoof`);
@@ -12652,7 +12478,7 @@ const computeV99Posterior=(params)=>{
     const distBps=((currentPrice-liqShortWall)/currentPrice)*10000;
     if(distBps>0&&distBps<60){
       liqAdj-=Math.min(8,liqShortUSD/200000);
-      reasoning.push(`[LIQ] Long liq cluster $${(liqShortUSD/1000).toFixed(0)}K @ -${distBps.toFixed(0)}bps (${((bloomberg.shortWallAgeMs||0)/1000).toFixed(0)}s old) — DOWN pull`);
+      reasoning.push(`[BOOK] Resting bid liquidity $${(liqShortUSD/1000).toFixed(0)}K @ -${distBps.toFixed(0)}bps (${((bloomberg.shortWallAgeMs||0)/1000).toFixed(0)}s old) — modeled DOWN pull, not confirmed liquidations`);
     }
   } else if(liqShortWall>0&&liqShortUSD>500000&&!shortWallStable){
     reasoning.push(`[LIQ-SPOOF] Ignored fresh short wall (<15s) — likely spoof`);
@@ -13865,7 +13691,7 @@ const computeV99Posterior=(params)=>{
     const _calMag=econCalRisk.risk;
     const _ourDirCal=totalScore>0?1:totalScore<0?-1:0;
     if(_ourDirCal!==0){
-      const _calAdj=-_calMag*_ourDirCal; // OPPOSITE to lean — dampens
+      const _calAdj=dampenScore(totalScore,_calMag)-totalScore; // cannot reverse a weak lean
       totalScore+=_calAdj;
       rawSignalScores.calendarRisk=_calAdj;
       reasoning.push(`[CALENDAR] ${econCalRisk.event} @ ${econCalRisk.etTime} (${econCalRisk.minsOffset>=0?'+':''}${econCalRisk.minsOffset}m) — dampening ${_ourDirCal>0?'UP':'DOWN'} lean (${_calAdj.toFixed(0)})`);
@@ -27866,12 +27692,17 @@ function DepthStrip({orderBook,targetMargin}){
 }
 
 // ── V111: NewsFeedCard - external events affecting BTC price ──
-function NewsFeedCard({timeFormat,pushToast}={}){
+function NewsFeedCard({timeFormat,pushToast,calendar}={}){
   const[news,setNews]=React.useState([]);
   const[loading,setLoading]=React.useState(true);
   const[err,setErr]=React.useState(null);
   // V134: also fetch macro event countdown — always shown even if news fails
   const[macroEvents,setMacroEvents]=React.useState([]);
+  React.useEffect(()=>{
+    const now=new Date(),active=getMacroEventState(now),upcoming=getUpcomingMacroEvents(now,24).slice(0,3);
+    if(active.event&&!upcoming.some(e=>e.id===active.event.id))upcoming.unshift({...active.event,minutesUntil:active.minutesUntil,state:active.state});
+    setMacroEvents(upcoming);
+  },[calendar]);
   // V9.8.19: track URLs we've already seen so each fetch doesn't re-toast the same
   //   article. On first mount we silently populate the seen-set with the initial
   //   batch — only NEW arrivals after first load can trigger toasts. This prevents
@@ -27925,23 +27756,9 @@ function NewsFeedCard({timeFormat,pushToast}={}){
   },[news,pushToast]);
   React.useEffect(()=>{
     const computeMacros=()=>{
-      // Find next 3 upcoming macro events in next 8 hours
-      const now=new Date();
-      const upcoming=[];
-      for(let h=0;h<8&&upcoming.length<3;h++){
-        const t=new Date(now.getTime()+h*3600000);
-        const ms=getMacroEventState(t);
-        if(ms.state!=='CLEAR'&&ms.event){
-          if(!upcoming.find(u=>u.name===ms.event.name)){
-            upcoming.push({...ms.event,minutesUntil:Math.round((t.getTime()-now.getTime())/60000)});
-          }
-        }
-      }
-      // Also find any state RIGHT NOW
-      const nowState=getMacroEventState(now);
-      if(nowState.event&&!upcoming.find(u=>u.name===nowState.event.name)){
-        upcoming.unshift({...nowState.event,minutesUntil:nowState.minutesUntil,state:nowState.state});
-      }
+      const now=new Date(),active=getMacroEventState(now);
+      const upcoming=getUpcomingMacroEvents(now,24).slice(0,3);
+      if(active.event&&!upcoming.some(e=>e.id===active.event.id))upcoming.unshift({...active.event,minutesUntil:active.minutesUntil,state:active.state});
       setMacroEvents(upcoming);
     };
     computeMacros();
@@ -27994,9 +27811,9 @@ function NewsFeedCard({timeFormat,pushToast}={}){
               categories:[],
             }));
             setNews(items);
-            setErr(null);
+            setErr(data.stale?'Cached news — upstream refresh failed':null);
             setLoading(false);
-            _writeCache(items);
+            if(!data.stale)_writeCache(items);
             return;
           }
           try{console.warn('[Tara news] /api/news returned no items. diagnostics:',data?.diagnostics||'(none)');}catch(_){}
@@ -28044,7 +27861,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
       <div className={'flex items-center justify-between mb-2'}>
         <span className={'text-xs uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold'}>News & Macro</span>
         <div className="flex items-center gap-2">
-          <span className={'text-[9px] text-[#EDEDED]/30 italic'}>{loading?'loading...':err?'macro only':'30s refresh'}</span>
+          <span className={'text-[9px] text-[#EDEDED]/30 italic'}>{loading?'loading...':err?'news delayed':'5m refresh'}</span>
           {/* V9.1.2: Expand to full news view */}
           {news.length>0&&(
             <button onClick={()=>setExpandOpen(true)} title="Expand news feed" className="text-[10px] px-1.5 py-0.5 rounded-lg border transition-colors hover:bg-[#EDEDED]/5" style={{color:'#23B981',borderColor:'rgba(35,185,129,0.30)'}}>⊕</button>
@@ -28960,6 +28777,8 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
 //   adds no new fetches, sockets or cloud reads — it is a relocation, not a
 //   second copy of the feed.
 function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
+  const derivativesFresh=freshFeedStatus(bloomberg?.lastUpdate,30000)==='fresh';
+  const fieldFresh=key=>derivativesFresh&&bloomberg?.sourceHealth?.[key]?.status==='fresh';
   const tape=tapeRef?.current||{};
   const cb=tape.coinbase||{buys:0,sells:0};
   const bf=tape.binanceFutures||{buys:0,sells:0};
@@ -28992,19 +28811,19 @@ function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
       <div className="grid grid-cols-2 gap-px mb-2 rounded-[10px] overflow-hidden" style={{background:'#16161c'}}>
         <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
           <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Buy Flow</div>
-          <div className="text-[15px] tabular-nums" style={{color:'#23B981'}}>{buyPct.toFixed(0)}%</div>
+          <div className="text-[15px] tabular-nums" style={{color:'#23B981'}}>{total>0?buyPct.toFixed(0)+'%':'—'}</div>
         </div>
         <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
           <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>OI 5m</div>
-          <div className={'text-[15px] tabular-nums'}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
+          <div className={'text-[15px] tabular-nums'}>{fieldFresh('openInterest')?(bloomberg.oiChange5mReady?`${oi>=0?'+':''}${oi.toFixed(2)}%`:'Warming up'):'—'}</div>
         </div>
         <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
           <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Funding</div>
-          <div className={'text-[15px] tabular-nums'}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
+          <div className={'text-[15px] tabular-nums'}>{fieldFresh('funding')?`${fr>=0?'+':''}${fr.toFixed(4)}%`:'—'}</div>
         </div>
         <div className={'px-3 py-2.5 min-w-0'} style={{background:'#0A0A0E'}}>
           <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Long/short</div>
-          <div className={'text-[15px] tabular-nums'}>{ls.toFixed(2)}</div>
+          <div className={'text-[15px] tabular-nums'}>{fieldFresh('accountRatio')?ls.toFixed(2):'—'}</div>
         </div>
       </div>
       <div className={'text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 font-bold mb-1'}>Recent Whales ($100K+)</div>
@@ -39661,7 +39480,8 @@ function TaraApp(){
   const[showWhaleLog,setShowWhaleLog]=useState(false);
   const[showTheoryLab,setShowTheoryLab]=useState(false); // V10.9.3 Theory Lab panel toggle
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
-  const bloomberg=useBloomberg();
+  const bloomberg=useDerivativesData(); // legacy object name retained for engine compatibility
+  const economicCalendar=useEconomicCalendar();
   const depthFlash=useDepthFlash(); // V134: 2.5s order book polling
   const tfCandles=useMultiTFCandles(currentAsset,priceSource); // V134: HPotter FGT multi-timeframe data — V9.8.5 source-aware
   // V9.11.0 LAYER 2: pull funding / OI / basis from Bybit perpetuals every 30s.
@@ -39961,10 +39781,10 @@ function TaraApp(){
    Also: always update lastPriceSourceRef even if we reject the price value — this
    prevents the stale guard from firing just because BTC price hasn't changed. */
 if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId){
-  // Strictly older — CDN is replaying. Update source ref to show we're still connected.
-  const now=Date.now();lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};
+  // A replay is not a fresh observation; preserve the last successful receipt time.
   return; // discard the stale price value
 }if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();
+              if(assessSpotResponse(_src.label,d,p,now).status!=='fresh')return;
               // V10.7.73b: Update lastPriceSourceRef on EVERY successful fetch.
               //   Previously only updated when price changed — but if BTC is flat
               //   for 60s, price doesn't change, sourceRef doesn't update, stale
@@ -39984,16 +39804,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   proxy), so removing it just stops a dead per-poll fetch that 404'd.
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
+    let stopped=false,busy=false;
     const _fetchOne=async(url,parsePrice,name)=>{
       try{
-        const r=await fetch(url,{cache:'no-store'});
-        if(!r.ok)return null;
+        const r=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(5000)});
+        if(!r.ok)throw new Error(`HTTP ${r.status}`);
         const d=await r.json();
         const p=parsePrice(d);
-        return p&&Number.isFinite(p)&&p>0?{name,price:p}:null;
-      }catch(_){return null;}
+        return assessSpotResponse(name,d,p);
+      }catch(_){return {name,price:null,receivedAt:null,status:'unavailable',timestampBasis:'unknown'};}
     };
     const _poll=async()=>{
+      if(stopped||busy)return;busy=true;
+      try{
       // ── Constituent fallback (V10.9.10) ──────────────────────────────────
       //   ROOT-CAUSE FIX: the old fallback used Gemini + Bitstamp, whose public
       //   APIs fail CORS from the browser — so this blend almost never reached
@@ -40016,8 +39839,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _okx?_fetchOne(_okx.url(_cfg,currentAsset),_okx.parsePrice,'OKX'):Promise.resolve(null),
         _fetchOne(_bybitUrl,(d)=>{const v=d?.result?.list?.[0]?.lastPrice;return v?parseFloat(v):null;},'BYB'),
       ]);
-      let _ok=_results.filter(x=>x&&x.price>0);
-      if(_ok.length<1)return; // nothing reachable this tick — keep last good value
+      if(stopped)return;
+      const sourceHealth=_results.filter(Boolean);
+      let _ok=sourceHealth.filter(x=>x.price>0&&x.status==='fresh');
+      if(_ok.length<1){setBrtiApprox(prev=>({...prev,sourceHealth,status:'unavailable'}));return;}
       // ── Bias-correct the hot exchanges toward the CB/KR anchor ──
       //   Maintain a rolling offset (in bps) for each hot feed vs the anchor mean.
       //   When the anchor (CB and/or KR) is present, update the offset; always
@@ -40081,13 +39906,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         correctedCount:_ok.filter(x=>x.corrected).length,
         divergenceBps:_divBps!=null?Math.round(_divBps*10)/10:null,
         lastUpdate:_now,
+        sourceHealth,status:_ok.length>=2?'live':'partial',benchmark:'cross-exchange-estimate-not-BRTI',
       });
+      }finally{busy=false;}
     };
     _poll(); // immediate
     // V10.7.58d: 1.5s poll (was 3s). CF publishes BRTI every second.
     //   40 samples/min gives a much tighter 60s rolling mean.
     const iv=setInterval(_poll,1500); // 40 samples/min
-    return()=>{clearInterval(iv);};
+    return()=>{stopped=true;clearInterval(iv);};
   },[currentAsset]);
 
   // V9.8.4: Stale-tick monitor — runs once per second, computes age of last
@@ -41407,45 +41234,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           p.catch(()=>{});
           return p;
         };
-        const _vercelPromise=_racer('vercel',_vercelUrl,_okEvents);
-        // V13.4.52: first-party PUBLIC-base racer. The authed /api/kalshi vercel path
-        //   503s for unauth browser reads, so the only reliable racers were flaky free
-        //   CORS proxies -> stale yes-price -> Kalshi guards sit out. The public base
-        //   (external-api) needs no auth and egresses from Vercel's edge IP, dodging
-        //   Kalshi's browser-503s. Additive: if it fails it just loses Promise.any.
-        const _vercelPubUrl=`/api/kalshi-public/events?series_ticker=${_seriesTicker}&with_nested_markets=true&status=open&limit=50&min_close_ts=${_minCloseTs}`;
-        const _vercelPubPromise=_racer('vercel-pub',_vercelPubUrl,_okEvents);
-        const _directPromise=_racer('direct',_eventsUrl,_okEvents);
-        const _corsproxyPromise=_racer('corsproxy',`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,_okEvents);
-        const _allOriginsPromise=_racer('allorigins',
-          `https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,
-          (d)=>!!(d&&typeof d.contents==='string'),
-          (r)=>{
-            if(!r.ok)return r;
-            try{
-              const inner=JSON.parse(r.data.contents);
-              if(!_okEvents(inner))return{ok:false,reason:'allorigins inner payload not events'};
-              return{ok:true,data:inner};
-            }catch(_e){return{ok:false,reason:'allorigins inner parse error'};}
-          });
-        // V5.5.5 patch: 2 more proxies for resilience. User: 'how to never get this'.
-        //   With 6 parallel paths + 15-min cache, all-paths-fail is exceedingly rare.
-        const _codetabsPromise=_racer('codetabs',`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_eventsUrl)}`,_okEvents);
-        const _thingproxyPromise=_racer('thingproxy',`https://thingproxy.freeboard.io/fetch/${_eventsUrl}`,_okEvents);
+        // Only first-party exchange paths: no untrusted CORS relays or eager seven-way fan-out.
+        const _publicUrl=`/api/kalshi-public/events?series_ticker=${_seriesTicker}&with_nested_markets=true&status=open&limit=50&min_close_ts=${_minCloseTs}`;
         let result;
-        try{
-          // V13.4.59: TIERED race -- first-party edge paths win; flaky CORS proxies (cache ~10s,
-          //   were serving stale prior-window prices that poisoned the feed) demoted to a
-          //   last-resort fallback only if all first-party paths fail. All 7 promises already
-          //   fired in parallel above, so tiering adds zero latency.
-          try{
-            result=await Promise.any([_vercelPubPromise,_vercelPromise,_directPromise]);
-          }catch(_fpFail){
-            result=await Promise.any([_corsproxyPromise,_allOriginsPromise,_codetabsPromise,_thingproxyPromise]);
-          }
-        }catch(aggregateError){
-          const _errMsgs=aggregateError?.errors?.map(e=>e?.message||String(e))||['unknown'];
-          result={ok:false,reason:`all proxies failed: ${_errMsgs.join(' / ')}`.slice(0,180)};
+        try{result=await _racer('kalshi-public',_publicUrl,_okEvents);}
+        catch(primaryError){
+          try{result=await _racer('kalshi-direct-proxy',_vercelUrl,_okEvents);}
+          catch(fallbackError){result={ok:false,reason:`Exchange market data unavailable: ${fallbackError.message}`.slice(0,180)};}
         }
         if(!result.ok){
           // V5.5.5 patch: Cache TTL extended to 15min (900s) since the strike for a given
@@ -48018,6 +47813,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     spot:currentPrice,strike:kalshiStrike,atrBps:analysis?.atrBps,
     tape15:analysis?.tapeWindows?.w15?.buyPct,tape30:analysis?.tapeWindows?.w30?.buyPct,
     tape60:analysis?.tapeWindows?.w60?.buyPct,momentum:analysis?.rawSignalScores?.momentum,regime:analysis?.regime,
+    dataProvenance:{calendarStatus:economicCalendar.status,calendarSources:economicCalendar.sources.map(s=>({id:s.id,status:s.status,fetchedAt:s.fetchedAt})),derivativesStatus:bloomberg.status,derivativesAt:bloomberg.lastUpdate,referenceSources:brtiApprox?.sourceHealth||[],referenceIsBenchmark:false},
   },{device:_taraDeviceId,version:TARA_BUILD_VERSION,publish:async(path,data)=>{
     if(!_sbClient)throw new Error('Research cloud unavailable');
     const {error}=await _sbClient.from('tara_state').upsert({doc_path:path,data,updated_at:new Date().toISOString()},{onConflict:'doc_path'});
@@ -53834,7 +53630,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.2.2</small>
+              <small>DECISION ENGINE · V14.3.0</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -53956,7 +53752,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             </div>
 
             <div className="tara-status-chips" aria-label="Live feed status">
-              <span className={showSports||showWeather?'is-warn':feedFrozen?'is-warn':'is-ok'}>{showSports?'● SPORTS BOARD':showWeather?'● WEATHER SCAN':'● FEED '+(feedFrozen?'STALE':'NOMINAL')}</span>
+              <span className={showSports||showWeather||freshFeedStatus(lastPriceSourceRef.current?.time,15000)!=='fresh'?'is-warn':'is-ok'}>{showSports?'● SPORTS BOARD':showWeather?'● WEATHER SCAN':'● SPOT '+freshFeedStatus(lastPriceSourceRef.current?.time,15000).toUpperCase()}</span>
               <span className={showSports||showWeather?'is-ok':kalshiPingState?.ok===false?'is-warn':'is-ok'} title="Market data status only; exchange account positions are verified separately in Execution">{showSports?'↕ SNAPSHOT MODEL':showWeather?'↕ NWS · KALSHI':'↕ KALSHI MARKET '+(kalshiPingState?.ok===false?'CHECK':'DATA')}</span>
             </div>
 
@@ -55275,7 +55071,8 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           {/* V13.4.294: News + Live Feeds, relocated here from column 2. */}
           <div className={'tara-news-stack bg-[#0A0A0E] p-3 sm:p-4 rounded-[10px] border border-[#1B1B22] flex flex-col gap-3 relative min-w-0'}>
             <T2Stamp code="FEED · 016"/>
-            <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
+            <MarketIntelligencePanel calendar={economicCalendar} derivatives={bloomberg} reference={brtiApprox} quote={_kalshiQuote} spotSource={lastPriceSourceRef.current}/>
+            <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast} calendar={economicCalendar}/>
             <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
               <LiveFeedsCard tapeRef={tapeRef} bloomberg={bloomberg} whaleLog={whaleLog} timeFormat={timeFormat}/>
             </div>
@@ -56452,7 +56249,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             const sessionLabel=analysis?.session||'—';
             const velLabel=analysis?.velocityRegime||'NORMAL';
             const macroState=getMacroEventState?.()||{state:'CLEAR'};
-            const macroCls=macroState.state==='BLACKOUT'?'text-rose-300':macroState.state==='OBSERVE'?'text-amber-300':'text-emerald-300';
+            const macroCls=macroState.state==='BLACKOUT'?'text-rose-300':['OBSERVE','UNKNOWN'].includes(macroState.state)?'text-amber-300':'text-emerald-300';
             const geoRisk=newsSentiment?.geoRisk||0;
             const geoLabel=geoRisk>=0.7?'HIGH':geoRisk>=0.5?'ELEVATED':geoRisk>=0.3?'WATCH':'CLEAR';
             const geoColor=geoRisk>=0.5?T2_COPPER:geoRisk>=0.3?'rgba(201,125,74,0.6)':'rgba(35,185,129,0.7)';

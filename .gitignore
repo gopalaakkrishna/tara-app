@@ -2,3 +2,4 @@ node_modules/
 dist/
 run-dev.bat
 .claude/
+.wrangler/

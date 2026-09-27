@@ -1,35 +1,15 @@
-// Cloudflare Pages Function replacing the dead Vercel rewrite:
-//   vercel.json: /api/kalshi-public/:path* -> https://external-api.kalshi.com/trade-api/v2/:path*
-
-const UPSTREAM = 'https://external-api.kalshi.com/trade-api/v2/';
-
+import {fetchBounded,jsonResponse} from '../../../lib/publicData.js';
+// Public market reads only. Account/order routes remain separate and authenticated.
 export async function onRequest(context) {
-  const { request, params } = context;
-  const path = Array.isArray(params.path) ? params.path.join('/') : (params.path || '');
-  const search = new URL(request.url).search;
-  const upstreamUrl = UPSTREAM + path + search;
-
-  let upstreamRes;
-  try {
-    upstreamRes = await fetch(upstreamUrl, {
-      method: request.method,
-      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 TaraApp' },
-      body: (request.method === 'GET' || request.method === 'HEAD') ? undefined : await request.text(),
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: 'upstream fetch failed', detail: String(e && e.message || e) }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    });
+  const {request,params}=context;
+  if(request.method!=='GET')return new Response('Method not allowed',{status:405,headers:{Allow:'GET'}});
+  const path=Array.isArray(params.path)?params.path.join('/'):(params.path||'');
+  if(!/^(events|markets|series|exchange|historical)(\/[A-Za-z0-9_.,-]+)*$/.test(path)||path.includes('..'))return jsonResponse({error:'Unsupported public market path'},400);
+  try{
+    const text=await fetchBounded(`https://external-api.kalshi.com/trade-api/v2/${path}${new URL(request.url).search}`,{maxBytes:4000000,timeoutMs:7000});
+    return jsonResponse(JSON.parse(text));
+  }catch(error){
+    const limited=error.message==='Upstream HTTP 429';
+    return jsonResponse({error:limited?'Exchange rate limit; retry later':'Public exchange read failed'},limited?429:502);
   }
-
-  const body = await upstreamRes.text();
-  return new Response(body, {
-    status: upstreamRes.status,
-    headers: {
-      'Content-Type': upstreamRes.headers.get('Content-Type') || 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'no-store',
-    },
-  });
 }
