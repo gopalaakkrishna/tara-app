@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, repairCallRecord, settlementPatch} from '../src/callIntegrity.js';
+import {amendCallRecord, callEvidenceSignature, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, repairCallRecord, settlementPatch} from '../src/callIntegrity.js';
 
 const start=Date.parse('2026-09-27T00:00:00Z'),now=start+120000,windowId='15m-2026-09-27T00:00:00.000Z';
 const quote={ticker:'KXBTC15M-26SEP262015-15',closeTime:'2026-09-27T00:15:00Z',at:now,bid:60,ask:62,mid:61,strike:75000};
@@ -88,4 +88,14 @@ test('every compact cache and cross-device merge retains the shared evidence fie
   assert.match(app,/CALL_EVIDENCE_FIELDS\.forEach\(k=>_MINI_KEEP\.add\(k\)\)/);
   assert.match(app,/_STICKY_TELEMETRY\.push\(\.\.\.CALL_EVIDENCE_FIELDS\)/);
   assert.match(app,/return normalizeCallLedger\(Array\.from\(byKey\.values\(\)\)/);
+  assert.match(app,/return\(\)=>clearTimeout\(_persistTimer\)/);
+  assert.match(app,/!_localHasMoreResolved&&!_evidenceChanged/);
+});
+
+test('sync signatures detect corrections and original evidence without a new window',()=>{
+  const first={...entry,result:'WIN'};
+  assert.equal(callEvidenceSignature({...first}),callEvidenceSignature(first));
+  assert.notEqual(callEvidenceSignature({...first,result:'LOSS'}),callEvidenceSignature(first));
+  assert.notEqual(callEvidenceSignature({...first,originalDecision:captureOriginalDecision(first)}),callEvidenceSignature(first));
+  assert.notEqual(callEvidenceSignature({...first,recordIntegrity:{status:'review-required'}}),callEvidenceSignature(first));
 });

@@ -4,7 +4,7 @@ import taraV14Styles from './tara-v14.css?raw';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import { useCallLedger } from './useCallLedger.js';
-import { CALL_EVIDENCE_FIELDS, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
+import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
 import LockStudyPanel from './LockStudyPanel.jsx';
 import './lockStudy.css';
@@ -5907,8 +5907,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.27-v14.2.1-call-integrity-shadow-study';
-const TARA_VERSION_DISPLAY='TARA 14.2.1';
+const TARA_BUILD_VERSION='2026.09.27-v14.2.2-call-integrity-shadow-study';
+const TARA_VERSION_DISPLAY='TARA 14.2.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37143,7 +37143,7 @@ function TaraApp(){
     //   Fix: strip verbose fields before localStorage write (same as cloud write).
     //     If still too large, progressively trim oldest entries until it fits.
     //     Surface persistent failures via a ref so the UI can warn the user.
-    if(Date.now()-_lastLocalPersistAt>=2500){ // V13.4.4: throttle to at most 1 full local persist per 2.5s; guaranteed flush on tab-leave via _onLeave below (unaffected by this gate)
+    const _persistLocal=()=>{ // Trailing flush: never discard a load/update inside the throttle interval.
     _lastLocalPersistAt=Date.now();
     const _stripForStorage=(e)=>{
       if(!e)return e;
@@ -37373,7 +37373,8 @@ function TaraApp(){
         sessionStorage.setItem('taraCallLog_session',JSON.stringify(_session));
       }catch(_){}
     }
-    } // V13.4.4: end throttle gate
+    };
+    const _persistTimer=setTimeout(_persistLocal,Math.max(0,2500-(Date.now()-_lastLocalPersistAt)));
     if(_callLogHydratedRef.current){
       // V8.3: Switch from simple cloudWriteDebounced to RMW. Reads current cloud first,
       //   merges with local, writes union — protects against last-write-wins clobbering
@@ -37402,8 +37403,10 @@ function TaraApp(){
           const _cloudHasUnresolved=cloudEntries.some(e=>!e?.result||e.result==='PENDING');
           const _localHasMoreResolved=_cloudSlice.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length>
                                       cloudEntries.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length;
+          const _cloudEvidence=new Map(cloudEntries.filter(Boolean).map(e=>[callKey(e),callEvidenceSignature(e)]));
+          const _evidenceChanged=_cloudSlice.some(e=>e&&_cloudEvidence.get(callKey(e))!==callEvidenceSignature(e));
           // Skip if: no new windows AND cloud isn't stale AND no newly resolved trades
-          if(!_hasNewWindows&&!_cloudHasUnresolved&&!_localHasMoreResolved){
+          if(!_hasNewWindows&&!_cloudHasUnresolved&&!_localHasMoreResolved&&!_evidenceChanged){
             return null; // skip write
           }
           // V10.7.58 — EGRESS REDUCTION: strip signal score raw fields from synced entries.
@@ -37451,6 +37454,7 @@ function TaraApp(){
       // Pre-hydration but we have data → mark pending. Once cloudWatch fires we'll flush.
       _logWritePendingRef.current=true;
     }
+    return()=>clearTimeout(_persistTimer);
   },[taraCallLog]);
   // V10.7.95: IndexedDB async load on mount.
   //   localStorage gives instant first paint. IDB then loads the full history
@@ -53830,7 +53834,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.2.1</small>
+              <small>DECISION ENGINE · V14.2.2</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
