@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, repairCallRecord, settlementPatch} from '../src/callIntegrity.js';
 
 const start=Date.parse('2026-09-27T00:00:00Z'),now=start+120000,windowId='15m-2026-09-27T00:00:00.000Z';
@@ -79,4 +80,12 @@ test('stale cloud results cannot undo a verified correction or quarantine',()=>{
   assert.equal(merged.result,'WIN');assert.equal(merged.officialSettlement.outcomeDir,'UP');
   const quarantine={...fixed,officialSettlement:undefined,recordIntegrity:{status:'review-required'}};
   assert.equal(normalizeCallLedger([original],[quarantine])[0].recordIntegrity.status,'review-required');
+});
+
+test('every compact cache and cross-device merge retains the shared evidence fields',()=>{
+  const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
+  assert.equal((app.match(/CALL_EVIDENCE_FIELDS\.forEach\(k=>_MK\.add\(k\)\)/g)||[]).length,2);
+  assert.match(app,/CALL_EVIDENCE_FIELDS\.forEach\(k=>_MINI_KEEP\.add\(k\)\)/);
+  assert.match(app,/_STICKY_TELEMETRY\.push\(\.\.\.CALL_EVIDENCE_FIELDS\)/);
+  assert.match(app,/return normalizeCallLedger\(Array\.from\(byKey\.values\(\)\)/);
 });

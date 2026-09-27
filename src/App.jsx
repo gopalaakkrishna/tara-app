@@ -4,7 +4,7 @@ import taraV14Styles from './tara-v14.css?raw';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import { useCallLedger } from './useCallLedger.js';
-import { amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
+import { CALL_EVIDENCE_FIELDS, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
 import LockStudyPanel from './LockStudyPanel.jsx';
 import './lockStudy.css';
@@ -5907,8 +5907,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.27-v14.2.0-call-integrity-shadow-study';
-const TARA_VERSION_DISPLAY='TARA 14.2.0';
+const TARA_BUILD_VERSION='2026.09.27-v14.2.1-call-integrity-shadow-study';
+const TARA_VERSION_DISPLAY='TARA 14.2.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -36731,7 +36731,7 @@ function TaraApp(){
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
           const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
-          ['originalDecision','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion'].forEach(k=>_MK.add(k));
+          CALL_EVIDENCE_FIELDS.forEach(k=>_MK.add(k));
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -36845,7 +36845,7 @@ function TaraApp(){
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
         const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
-        ['originalDecision','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion'].forEach(k=>_MK.add(k));
+        CALL_EVIDENCE_FIELDS.forEach(k=>_MK.add(k));
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -37105,6 +37105,7 @@ function TaraApp(){
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
     const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
+    _STICKY_TELEMETRY.push(...CALL_EVIDENCE_FIELDS);
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -37130,7 +37131,7 @@ function TaraApp(){
       else if(_shouldReplace(ex,e))byKey.set(k,_coalesceSticky(e,ex));
       else byKey.set(k,_coalesceSticky(ex,e)); // V13.1: loser may carry telemetry winner lacks
     });
-    return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP);
+    return normalizeCallLedger(Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP),existing||[]);
   },[]);
   useEffect(()=>{
     // V10.7.60 — ROBUST LOCALSTORAGE WRITE
@@ -37223,6 +37224,7 @@ function TaraApp(){
       //   about. ~80 bytes when present, null otherwise.
       /*V13.4.211: the execution quote fields were NEVER in this whitelist, so any entry rehydrated from the deep-cache fallback lost its bid/ask/spread and dropped out of the Execution panel's cohort. Same bug class as the V13.4.31/67/84 notes above -- fourth time a field set has been added at lock time and forgotten here.*/'kalshiBidAtLock','kalshiAskAtLock','kalshiSpreadAtLock','kalshiQuoteAgeMs','execCostAtLock','midToExecCents',
       'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
+    CALL_EVIDENCE_FIELDS.forEach(k=>_MINI_KEEP.add(k));
     const _minifyEntry=(e)=>{
       if(!e)return e;
       // V13.4.212 DRIFT GUARD. Four separate field sets have been added at lock
@@ -51807,7 +51809,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   assuming sqrt-t, then price each window and compare against Kalshi. ASCII-only.
         spotAtLock:Number(currentPrice)||0,
         distBpsAtLock:(Number(targetMargin)>0&&Number(currentPrice)>0)?Math.round(((Number(currentPrice)-Number(targetMargin))/Number(targetMargin))*1000000)/100:null,
-        volBpsAtLock:(typeof atrBps!=='undefined'&&Number.isFinite(atrBps))?Math.round(atrBps*10)/10:null,
+        volBpsAtLock:Number.isFinite(analysis?.atrBps)?Math.round(analysis.atrBps*10)/10:null,
         baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
         reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
         // V10.7.54: bias stamps now on ALL entry paths (was 59% coverage in V10.7.50 — only on _logSnapshotEntry path)
@@ -53828,7 +53830,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.2.0</small>
+              <small>DECISION ENGINE · V14.2.1</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

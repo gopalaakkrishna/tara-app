@@ -1,5 +1,8 @@
 // Prediction records are not order/fill records. No exchange writes live here.
 export const CALL_INTEGRITY_VERSION = 1;
+// All persistence fallbacks share this list so original evidence cannot drift
+// out of one of the older, compacted cache formats.
+export const CALL_EVIDENCE_FIELDS = Object.freeze(['originalDecision','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion']);
 export const finiteNumber = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
 export const isDirection = value => value === 'UP' || value === 'DOWN';
 export const callDirection = entry => entry?.dir ?? entry?.call ?? entry?.direction ?? null;
