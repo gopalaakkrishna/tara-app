@@ -13,6 +13,7 @@ import {dampenScore} from './economicCalendar.js';
 import MarketIntelligencePanel from './MarketIntelligencePanel.jsx';
 import {assessSpotResponse, freshOkxResults, freshFeedStatus, observedFundingPair} from './marketDataQuality.js';
 import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executionIntegrity.js';
+import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -5823,8 +5824,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.27-v14.4.0-execution-integrity';
-const TARA_VERSION_DISPLAY='TARA 14.4.0';
+const TARA_BUILD_VERSION='2026.09.27-v14.4.1-call-policy';
+const TARA_VERSION_DISPLAY='TARA 14.4.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5881,7 +5882,7 @@ const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runwa
 // V13.4.249 — SIT-OUTS OFF. Tara commits to her lean instead of declining a
 //   window on signal quality. Set NO_SITOUT_MODE=false to restore the old
 //   behaviour in one line; nothing else needs touching.
-const NO_SITOUT_MODE=true;
+const NO_SITOUT_MODE=false; // V14.4.1: failed quality checks must remain sit-outs.
 // V13.4.326: was 420s (7 minutes) -- an execution-timing floor is legitimate
 //   (a real order needs time to place and fill via the entry ladder before
 //   the window stops accepting orders), but 7 minutes was never justified as
@@ -18873,7 +18874,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     // V6.1.0: Hard cadence cap (90s for 15m, 45s for 5m) is now the PRIMARY deadline.
     //   Past this cap, Tara auto-sits-out. So this is the real "decide by" clock the
     //   user has been asking for: predictable, hard, never-changing.
-    const _hardCapSec=windowType==='15m'?120:60;
+    const _hardCapSec=_totalSec-callLockDeadline(windowType);
     const _secsUntilCap=Math.max(0,_hardCapSec-_elapsed);
     const _deadlineLabel=_secsUntilCap>=60
       ?`${Math.floor(_secsUntilCap/60)}m ${String(_secsUntilCap%60).padStart(2,'0')}s`
@@ -38262,8 +38263,29 @@ function TaraApp(){
   //   _persistLock reads this to decide whether to write back. Convergence rule: whoever
   //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
   const _cloudLockMirrorRef=useRef(null);
+  const callCommitHoldRef=useRef(null);
+  const _prepareCallCommit=(snapshot)=>{
+    const windowId=computeWindowId(windowType);
+    const decision=assessCallCommit(snapshot,{windowId,windowType,asset:currentAssetRef.current||'BTC',quote:_kalshiQuote,now:Date.now()});
+    if(decision.action==='wait'){
+      callCommitHoldRef.current={windowId,reason:decision.reason};
+      if(taraCallSnapshotRef.current===snapshot)taraCallSnapshotRef.current=null;
+      lockedCallRef.current=null;
+      return false;
+    }
+    if(decision.action==='sitout'){
+      Object.assign(snapshot,deadlineSitout(snapshot,decision));
+      lockedCallRef.current=null;
+    }
+    if(decision.action==='allow'||decision.action==='manual'){
+      snapshot.callPolicy={version:CALL_POLICY_VERSION,action:decision.action,cutoff:decision.cutoff??null};
+      callCommitHoldRef.current=null;
+    }
+    return true;
+  };
   const _sealCallSnapshot=(snapshot)=>{
     if(!snapshot)return;
+    if(!_prepareCallCommit(snapshot))return false;
     const _wid=computeWindowId(windowType);
     Object.assign(snapshot,hydrateDecisionQuote(snapshot,{quote:_kalshiQuote,windowId:_wid,asset:currentAssetRef.current||'BTC',now:Date.now()}));
     if(!snapshot.locked||!['UP','DOWN','SIT_OUT'].includes(snapshot.call))return;
@@ -38283,7 +38305,8 @@ function TaraApp(){
     snapshot.originalDecision ||= captureOriginalDecision(snapshot);
   };
   const _persistLock=()=>{
-    _sealCallSnapshot(taraCallSnapshotRef.current);
+    if(!taraCallSnapshotRef.current&&callCommitHoldRef.current?.windowId===computeWindowId(windowType))return;
+    if(_sealCallSnapshot(taraCallSnapshotRef.current)===false)return;
     if(!_sbClient)return; // V10.2.0: now gates on Supabase, not Firestore
     // Stamp _committedAt on the snapshot the FIRST time we persist with non-null data.
     //   This is the canonical "when did this browser commit" timestamp, used for first-
@@ -43442,7 +43465,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   on a 15m window. Previously locks were merely penalised this late
       //   (isLateLockZone -8, isVeryLateLock -20) and still allowed until ~100s
       //   remained. An existing lock is untouched; this only blocks forming a new one.
-      const _pastLockDeadline=NO_SITOUT_MODE&&clockSeconds<=LOCK_DEADLINE_SEC;
+      const _pastLockDeadline=clockSeconds<=callLockDeadline(windowType);
 
       // Add current posterior to history (capped at 12 samples)
       posteriorHistoryRef.current.push(posterior);
@@ -45945,7 +45968,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // Why threshold=2: single signal could be noise. Two independent reversal
   //   signals = real consensus. Three+ = essentially certainty.
   const _v10_7_6_reversalCheck=(postValue,analysisObj)=>{
-    const _p=Number(postValue)||50;
+    const _p=Number(postValue);
+    if(postValue==null||postValue===''||!Number.isFinite(_p)||_p<0||_p>100)return{flipped:false,dir:null,reasons:[]};
     if(_p===50)return{flipped:false,dir:null,reasons:[]};
     const _proposedDir=_p>=50?'UP':'DOWN';
     const _oppositeDir=_proposedDir==='UP'?'DOWN':'UP';
@@ -46023,7 +46047,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     return{
       flipped:false,
       dir:_proposedDir,
-      conf:Math.round(_p),
+      conf:Math.round(directionalConfidence(_p,_proposedDir)),
       revVotes:_revVotes,
       reasons:_revReasons,
     };
@@ -48079,6 +48103,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
     const tc=taraCall;
     const isCall=tc.call==='UP'||tc.call==='DOWN';
+    // Read the shared window first so a late-opening tab cannot replace a
+    // pre-existing Call with a new deadline sitout.
+    if(!_cloudRestoreCompletedRef.current&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000))return;
+
+    // The clock cannot create a new automatic Call after this deadline.
+    // Existing snapshots returned above; explicit manual overrides remain tagged.
+    const _decisionSecondsLeft=(Date.parse(computeWindowId(windowType).replace(/^(5m|15m)-/,''))+(windowType==='15m'?900000:300000)-Date.now())/1000;
+    if(_decisionSecondsLeft<=callLockDeadline(windowType)&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000)){
+      const reason=windowType==='15m'?'No qualifying Call before the 7-minute cutoff. Sitting out this window.':'No qualifying Call before the 30-second cutoff. Sitting out this window.';
+      taraCallSnapshotRef.current=deadlineSitout({atPosterior:analysis?.rawProbAbove},{reason,secondsLeft:_decisionSecondsLeft,cutoff:callLockDeadline(windowType)});
+      lockedCallRef.current=null;
+      _logSnapshotEntry(taraCallSnapshotRef.current);
+      _persistLock();
+      return;
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // V10.4.1 MODULE A — EV-AWARE DELAY GATE
@@ -49002,6 +49041,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // every possible call to this hoisted helper (including delay-gate exits).
     function _logSnapshotEntry(snapshot){
       if(!snapshot)return;
+      if(!_prepareCallCommit(snapshot))return;
       Object.assign(snapshot,hydrateDecisionQuote(snapshot,{quote:_kalshiQuote,windowId:computeWindowId(windowType),asset:currentAssetRef.current||'BTC',now:Date.now()}));
       // V13.4.127 attempted to wire up flipAtLock here -- turned out to be dead code.
       //   A separate, later object-literal construction site (the main automatic
@@ -49429,7 +49469,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
         }catch(_){}
       }
-      _sealCallSnapshot(snapshot);
+      if(_sealCallSnapshot(snapshot)===false)return;
       // V10.7.45: Lifecycle telemetry — record EVERY call regardless of what happens next.
       //   This lets us distinguish "log call never fired" from "log call fired but pushed nothing".
       try{
@@ -49484,6 +49524,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           id:Date.now(),time:Date.now(),windowType,
           windowId:_wid,
           originalDecision:snapshot.originalDecision,
+          callPolicy:snapshot.callPolicy||null,
           marketTicker:snapshot.marketTicker||null,
           marketCloseTime:snapshot.marketCloseTime||null,
           regime:analysis?.regime||'',
@@ -50402,7 +50443,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   is already > 90), creating a snapshot that may conflict with what other tabs
       //   already committed. _cloudRestoreCompletedRef flips true only after cloudRead
       //   resolves — distinct from _hasRestoredLockRef which gates the effect re-running.
-      if(_hardCapElapsed&&_cloudRestoreCompletedRef.current&&taraCallSnapshotRef.current===null){
+      if(ALLOW_CLOCK_FORCED_CALLS&&_hardCapElapsed&&_cloudRestoreCompletedRef.current&&taraCallSnapshotRef.current===null){
         // V10.2.50 — CHOP TIME-CAP GUARD: if regime is RANGE-CHOP and conviction
         //   is sub-baseline, the historical WR of time-cap-commit in chop is
         //   well below 50%. Converts marginal time-cap commits to sit-outs.
@@ -50652,7 +50693,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _etaSamples=tc?._ctx?.samples;
       const _etaNeed=tc?._ctx?.needSamples;
       const _etaExpired=_etaSec!=null&&_etaSec<=0&&_etaSamples!=null&&_etaNeed!=null&&_etaSamples<_etaNeed;
-      if(_etaExpired&&!_isCoinFlip&&_cloudRestoreCompletedRef.current){
+      if(ALLOW_CLOCK_FORCED_CALLS&&_etaExpired&&!_isCoinFlip&&_cloudRestoreCompletedRef.current){
         // V13.4.112: FOURTH separate commit path found -- 'Path B: timer commit', triggered
         //   by sample-count ETA expiry rather than the hard elapsedSec deadline (that was
         //   Path A, patched in 107). Same problem: builds and persists _timerSnap directly,
@@ -51581,6 +51622,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
         fgt:analysis?.mtfAlignment,
       };
+      // Seal once before sounds, persistence or the independent main-path log.
+      // Re-persistence cannot move a pre-cutoff decision across the deadline.
+      if(_sealCallSnapshot(taraCallSnapshotRef.current)===false)return;
+      if(taraCallSnapshotRef.current.call==='SIT_OUT'){
+        _logSnapshotEntry(taraCallSnapshotRef.current);
+        _persistLock();
+        return;
+      }
       // V6.0: Fire commit sound. Super-confluence gets the special arpeggio.
       // V6.0.1: Rising-confluence gets a lighter early-entry chirp.
       // V6.0.7: Tape-led also uses the early-entry chirp — same character (fast lock).
@@ -51626,6 +51675,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         windowId:_wid,
         // V9.9.0: stamp reversalRisk on the entry for CSV audit + post-hoc analysis
         reversalRisk:_reversalRisk,
+        originalDecision:taraCallSnapshotRef.current.originalDecision,
+        callPolicy:taraCallSnapshotRef.current.callPolicy||null,
         // V6.4: explicit lock timestamp + window-open timestamp so we can analyze how long
         //   Tara takes to lock under different conditions. secondsIntoWindow = lockedAt - windowOpenedAt.
         lockedAt:Date.now(),
@@ -53719,7 +53770,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.0</small>
+              <small>DECISION ENGINE · V14.4.1</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -54307,6 +54358,10 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
         {workspaceFocus==='execution'&&<TaraExchangeAuditPanel state={exchangeAudit}
           onRefresh={refreshExchangeAudit}
           connected={!!(kalshiCreds.apiKeyId&&kalshiCreds.privateKeyPem)}/>}
+        {workspaceFocus==='overview'&&windowType==='15m'&&<p className="text-[11px] text-[#EDEDED]/55 px-1 py-2" role="status">
+          Automatic Calls close at 7:00 remaining.
+          {!taraCallSnapshotRef.current&&callCommitHoldRef.current?.windowId===computeWindowId(windowType)&&<> {callCommitHoldRef.current.reason}</>}
+        </p>}
         {workspaceFocus==='overview'&&!expandedOverview&&<><TaraOverviewMarket
           asset={currentAsset} priceSource={priceSource} resolution={resolution} setResolution={setResolution}
           currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource}

@@ -2,7 +2,7 @@
 export const CALL_INTEGRITY_VERSION = 1;
 // All persistence fallbacks share this list so original evidence cannot drift
 // out of one of the older, compacted cache formats.
-export const CALL_EVIDENCE_FIELDS = Object.freeze(['originalDecision','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion']);
+export const CALL_EVIDENCE_FIELDS = Object.freeze(['originalDecision','callPolicy','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion']);
 export const callEvidenceSignature = entry => JSON.stringify([entry?.result ?? null,entry?.outcomeDir ?? null,...CALL_EVIDENCE_FIELDS.map(key=>entry?.[key] ?? null)]);
 export const finiteNumber = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
 export const isDirection = value => value === 'UP' || value === 'DOWN';
@@ -58,7 +58,7 @@ export function captureOriginalDecision(entry, {now = Date.now(), provenance = '
     probabilityUpRaw:finiteNumber(entry.rawPosteriorAtLock ?? entry.atPosterior ?? entry.posterior),
     probabilityUpCurrent:finiteNumber(entry.calibratedPosteriorAtLock ?? entry.atPosterior ?? entry.posterior),
     signalScore:finiteNumber(entry.confidence), modelVersion:entry.taraVersion || null, tier:entry.tier || null,
-    reason:entry.reason || null,
+    reason:entry.reason || null, commitPolicy:entry.callPolicy || null,
   };
 }
 
