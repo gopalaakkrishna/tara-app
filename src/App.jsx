@@ -11,7 +11,7 @@ import './lockStudy.css';
 import {useEconomicCalendar,computeEconCalendarRisk,getMacroEventState,getUpcomingMacroEvents} from './useEconomicCalendar.js';
 import {dampenScore} from './economicCalendar.js';
 import MarketIntelligencePanel from './MarketIntelligencePanel.jsx';
-import {assessSpotResponse, freshOkxResults, freshFeedStatus} from './marketDataQuality.js';
+import {assessSpotResponse, freshOkxResults, freshFeedStatus, observedFundingPair} from './marketDataQuality.js';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -1956,8 +1956,7 @@ const computeV101ShadowPosterior=(p)=>{
     if(channel<0.2&&drift1m<0)techScore+=5;
     totalScore+=Math.max(-W.technical,Math.min(W.technical,techScore));
     // regime/funding
-    const funding=(bloomberg&&bloomberg.fundingRate)||0;
-    const fundingPrev=bloomberg?.fundingRatePrev??funding; // absent history is not a zero-rate observation
+    const {funding,fundingPrev}=observedFundingPair(bloomberg);
     const delta=(globalFlow&&globalFlow.deltaUSD)||0;
     let regime='RANGE/CHOP',regimeBonus=0;
     const isHighVol=atrBps>35;
@@ -5820,8 +5819,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.27-v14.3.0-official-market-intelligence';
-const TARA_VERSION_DISPLAY='TARA 14.3.0';
+const TARA_BUILD_VERSION='2026.09.27-v14.3.1-official-market-intelligence';
+const TARA_VERSION_DISPLAY='TARA 14.3.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -12375,8 +12374,7 @@ const computeV99Posterior=(params)=>{
     rawSignalScores._tsdScoreRaw=tsdScore; // V10.7.42a audit stamp
     totalScore+=tsdClamped;
   }
-  const funding=bloomberg?.fundingRate||0;
-  const fundingPrev=bloomberg?.fundingRatePrev??funding;
+  const {funding,fundingPrev}=observedFundingPair(bloomberg);
   const delta=globalFlow.deltaUSD||0;
   let regime='RANGE-CHOP';
   let regimeBonus=0;
@@ -53630,7 +53628,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.3.0</small>
+              <small>DECISION ENGINE · V14.3.1</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

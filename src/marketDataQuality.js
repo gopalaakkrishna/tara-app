@@ -1,4 +1,9 @@
 const finite=value=>value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value));
+export function observedFundingPair(data) {
+  if(!finite(data?.fundingRate))return {funding:0,fundingPrev:0};
+  const funding=Number(data.fundingRate);
+  return {funding,fundingPrev:finite(data.fundingRatePrev)?Number(data.fundingRatePrev):funding};
+}
 export function assessSpotResponse(name,data,price,receivedAt=Date.now()) {
   const p=Number(price);
   let sourceAt=null;

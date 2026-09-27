@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {CALENDAR_SOURCES,parseIcs,parseFed,zonedTime,macroEventState,economicCalendarRisk,upcomingEvents,dampenScore,calendarStatus,eventPolicy} from '../src/economicCalendar.js';
-import {assessSpotResponse,freshOkxResults,freshFeedStatus} from '../src/marketDataQuality.js';
+import {assessSpotResponse,freshOkxResults,freshFeedStatus,observedFundingPair} from '../src/marketDataQuality.js';
 import {cachedSource,fetchBounded} from '../lib/publicData.js';
 import {onRequest as calendarHandler} from '../functions/api/economic-calendar.js';
 import {onRequest as publicHandler} from '../functions/api/kalshi-public/[[path]].js';
@@ -104,6 +104,11 @@ test('a real zero funding rate is valid, while missing numeric fields are not',(
   results[2]={status:'fulfilled',value:{code:'0',data:[{fundingRate:'0',ts:now}]}};
   assert.equal(freshOkxResults(results,now).health.funding.status,'fresh');
   results[2].value.data[0].fundingRate='';assert.equal(freshOkxResults(results,now).health.funding.status,'unavailable');
+});
+test('missing current funding cannot create a reversal against known history, but an observed zero can',()=>{
+  assert.deepEqual(observedFundingPair({fundingRate:null,fundingRatePrev:0.002}),{funding:0,fundingPrev:0});
+  assert.deepEqual(observedFundingPair({fundingRate:0.002,fundingRatePrev:null}),{funding:0.002,fundingPrev:0.002});
+  assert.deepEqual(observedFundingPair({fundingRate:0,fundingRatePrev:0.002}),{funding:0,fundingPrev:0.002});
 });
 test('live call site uses shared schedule; research provenance cannot trigger orders',()=>{
   const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
