@@ -515,6 +515,7 @@ iframe { max-width:100%; }
 .tara-memory-page__stats .is-win strong { color:var(--green); }
 .tara-memory-page__stats .is-loss strong { color:var(--red); }
 .tara-memory-page__stats .is-sitout strong { color:var(--amber); }
+.tara-memory-page__coverage { margin:0; padding:12px 18px; border-bottom:1px solid var(--line); color:var(--muted); font:11px/1.5 'IBM Plex Mono',monospace; }
 .tara-memory-page__filters { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
 .tara-memory-page__filters button { min-height:32px; padding:7px 10px; border:1px solid var(--line); color:var(--muted); font:10px 'IBM Plex Mono',monospace; text-transform:uppercase; }
 .tara-memory-page__filters button[aria-pressed="true"] { border-color:#4a8060; color:var(--green); background:#13231a; }

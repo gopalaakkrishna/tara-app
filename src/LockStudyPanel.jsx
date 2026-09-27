@@ -1,6 +1,7 @@
 import React from 'react';
 import {isScoredCall} from './callIntegrity.js';
 import {LOCK_STUDY_POLICY,calibrateStudyProbability} from './lockStudy.js';
+import {callWindowCoverage} from './executionIntegrity.js';
 
 const percent=value=>value===null?'—':`${(value*100).toFixed(1)}%`;
 export default function LockStudyPanel({research,callLog=[]}) {
@@ -9,6 +10,7 @@ export default function LockStudyPanel({research,callLog=[]}) {
   const repaired=callLog.filter(e=>e.recordIntegrity?.status==='repaired').length;
   const review=callLog.filter(e=>e.recordIntegrity?.status==='review-required').length;
   const scoreOnly=callLog.filter(e=>isScoredCall(e)&&!e.officialSettlement).length;
+  const coverage=callWindowCoverage(callLog,Date.now(),24);
   const rawUp=current?.observations?.at(-1)?.probabilityUpRaw;
   const calibrated=typeof rawUp==='number'?calibrateStudyProbability(studies,Math.max(rawUp,1-rawUp),Date.now()):null;
   const download=()=>{
@@ -24,6 +26,7 @@ export default function LockStudyPanel({research,callLog=[]}) {
       {[['Current Tara',summary.current],['Early candidate',summary.early],['Market at candidate time',summary.marketAtEarly]].map(([name,s])=><tr key={name}><td>{name}</td><td>{s.calls}</td><td>{s.wins} / {s.losses}</td><td>{percent(s.winRate)}</td><td>{percent(s.coverage)}</td></tr>)}
     </tbody></table></div>
     <p>{summary.observed} observed · {summary.settled} officially settled · {summary.complete} fully observed windows · {summary.excludedPartial} partial windows excluded. Browser downtime is missing evidence, not a sit-out.</p>
+    <p>Last 24 hours: {coverage.recorded}/{coverage.expected} fifteen-minute Call windows recorded · {coverage.unobserved} unobserved. Unobserved means the browser was offline, the record did not sync, or collection failed; it is never counted as a deliberate sit-out.</p>
     <details><summary>Confidence, costs and record integrity</summary>
       <p>“Confidence” is currently a signal score, not a promised win probability. These forward results test whether its probability estimates match actual outcomes.</p>
       <p>Past-only calibration for the current raw-score band: {calibrated?.probability!=null?`${percent(calibrated.probability)} from ${calibrated.n} previous complete windows; research estimate only`:`insufficient forward evidence (${calibrated?.n||0}/30 minimum comparable windows)`}.</p>

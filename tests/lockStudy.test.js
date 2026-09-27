@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createLockStudy,observeLockStudy,settleLockStudy,studyCoverage,summarizeLockStudies,calibrateStudyProbability} from '../src/lockStudy.js';
+import {createLockStudy,observeLockStudy,settleLockStudy,studyCoverage,summarizeLockStudies,calibrateStudyProbability,estimatedTakerFeeCents} from '../src/lockStudy.js';
 
 const start=Date.parse('2026-09-27T00:00:00Z'),windowId='15m-2026-09-27T00:00:00.000Z';
 const market={ticker:'KXBTC15M-26SEP262015-15',close_time:'2026-09-27T00:15:00Z',floor_strike:75000,result:'yes',status:'settled'};
@@ -44,7 +44,11 @@ test('complete windows are officially scored, priced as estimates, and never pro
   s=settleLockStudy(s,market,start+1000000);
   const report=summarizeLockStudies([s]);assert.equal(report.early.wins,1);assert.equal(report.marketAtEarly.wins,1);assert.equal(report.promotionAllowed,false);
   assert.deepEqual(report.calibration.map(b=>b.to),[60,70,80,90,100]);
-  assert.equal(report.early.estimatedNetCents,100-57-2);
+  assert.equal(report.early.estimatedNetCents,100-57-estimatedTakerFeeCents(57));
+});
+test('research fee estimate uses centicent precision and remains separate from actual fill fees',()=>{
+  assert.equal(estimatedTakerFeeCents(50),1.75);
+  assert.equal(estimatedTakerFeeCents(90),.63);
 });
 test('duplicate or out-of-order observations do not manufacture stability',()=>{
   let s=observeLockStudy(fresh(),sample(15));

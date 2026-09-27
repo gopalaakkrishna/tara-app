@@ -2,8 +2,9 @@ import {finiteNumber as number, inspectDecisionQuote, isDirection, windowCloseMs
 
 // Frozen research protocol. This module cannot return an order or arm AutoTrade.
 export const LOCK_STUDY_POLICY = Object.freeze({id:'early-7m-v1', mode:'shadow-only', cutoffSeconds:420, cadenceMs:15000, stabilityMs:30000, maxGapMs:22000, minRawSideProbability:0.65, minEstimatedEdgeCents:3});
-// One-contract paper trade; exchange fees round up to the next cent.
-export const estimatedTakerFeeCents = cost => Math.ceil(7 * (cost / 100) * (1 - cost / 100));
+// One-contract paper trade. The published schedule rounds to a centicent;
+// actual fee_cost from Kalshi fills is authoritative and may vary by market.
+export const estimatedTakerFeeCents = cost => Math.ceil((7 * (cost / 100) * (1 - cost / 100))*100-1e-9)/100;
 const side = (up, direction) => direction === 'UP' ? up : 1-up;
 
 export function createLockStudy({windowId, asset='BTC', device, version, now=Date.now()}) {
