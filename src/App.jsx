@@ -3,6 +3,7 @@ import taraDesignStyles from './tara-design.css?raw';
 import taraV14Styles from './tara-v14.css?raw';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
+import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
 import { useCallLedger } from './useCallLedger.js';
 import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
@@ -5824,8 +5825,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.09.27-v14.4.1-call-policy';
-const TARA_VERSION_DISPLAY='TARA 14.4.1';
+const TARA_BUILD_VERSION='2026.10.05-v14.4.2-sports-settlement';
+const TARA_VERSION_DISPLAY='TARA 14.4.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30450,6 +30451,9 @@ function WeatherView({onClose,weatherPicks}){
 function SportsView({onClose}){
   const[data,setData]=React.useState(null);
   const[err,setErr]=React.useState(null);
+  const[sourceWarning,setSourceWarning]=React.useState(null);
+  const[refreshKey,setRefreshKey]=React.useState(0);
+  const[refreshing,setRefreshing]=React.useState(false);
   const[tab,setTab]=React.useState('upcoming');
   const[sportFilter,setSportFilter]=React.useState('all');
   // Which date groups the user has explicitly opened or closed. Anything not
@@ -30475,11 +30479,10 @@ function SportsView({onClose}){
   // rate-limits. It may be older; the "Snapshot · N min old" header is
   // computed from the payload's own `generated` field either way, so a stale
   // fallback announces itself rather than passing as current.
-  const LIVE_URL='https://raw.githubusercontent.com/gopalaakkrishna/sports-model/main/public/sports.json';
-
   React.useEffect(()=>{
     let alive=true;
     let timer=null;
+    let inFlight=false;
 
     const load=(force)=>{
       const now=Date.now();
@@ -30487,24 +30490,25 @@ function SportsView({onClose}){
       // for the poll below, which exists precisely to get newer data.
       if(!force&&_sportsCache.data&&now-_sportsCache.at<_SPORTS_TTL_MS){
         setData(_sportsCache.data);
+        setSourceWarning(_sportsCache.warning||null);
         return Promise.resolve();
       }
-      // Cache-bust: a stale copy would silently present yesterday's slate as
-      // today's.
-      const get=(url)=>fetch(url+'?t='+now)
-        .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});
-      return get(LIVE_URL)
-        .catch(()=>get('/sports.json'))
-        .then(j=>{
-          _sportsCache={data:j,at:Date.now()};
-          if(alive){setData(j);setErr(null);}
+      if(inFlight)return Promise.resolve();
+      inFlight=true;
+      setRefreshing(true);
+      return loadSportsBoard({previous:_sportsCache.data,now})
+        .then(({data:j,warning})=>{
+          if(!alive)return;
+          _sportsCache={data:j,at:Date.now(),warning};
+          setData(j);setErr(null);setSourceWarning(warning);
         })
         // A failed REFRESH must not blank a board that is already on screen —
         // only report the error if there is nothing to show.
-        .catch(e=>{if(alive&&!_sportsCache.data)setErr(String(e.message||e));});
+        .catch(e=>{if(alive)setErr(String(e.message||e));})
+        .finally(()=>{inFlight=false;if(alive)setRefreshing(false);});
     };
 
-    load(false);
+    load(refreshKey>0);
 
     // Keep it current without the user touching anything. 5 minutes matches
     // raw.githubusercontent's own CDN cache (max-age=300), so polling faster
@@ -30528,7 +30532,7 @@ function SportsView({onClose}){
     document.addEventListener('visibilitychange',onVis);
 
     return()=>{alive=false;stop();document.removeEventListener('visibilitychange',onVis);};
-  },[]);
+  },[refreshKey]);
 
   // Everything for the current tab, before the sport filter — this is what the
   // sport buttons count, so their numbers do not change as you click between
@@ -30604,6 +30608,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
   const setAllDays=open=>{const m={};grouped.forEach(d=>{m[d.key]=open;});setDateOverrides(m);};
 
   const rec=data&&data.record;
+  const settlementStatus=sportsSettlementStatus(data,nowMs);
   // V13.4.258: was a raised card with a shadow and a corner stamp per tile.
   //   Now a hairline cell inside one joined panel -- the tiles read as one
   //   instrument rather than four competing boxes.
@@ -30634,13 +30639,23 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
             </div>
           </div>
           {/* Returns to the BTC board — same thing the header toggle does. */}
-          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-colors" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}>← Back to BTC</button>
+          <div className="flex gap-2">
+            <button disabled={refreshing} onClick={()=>setRefreshKey(k=>k+1)} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold border disabled:opacity-40" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER}}>{refreshing?'Refreshing…':'Refresh results'}</button>
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-colors" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}>← Back to BTC</button>
+          </div>
         </div>
 
-        {err&&<div className="rounded-xl border p-4 text-[12px] mb-5" style={{borderColor:'rgba(232,69,94,0.3)',background:'rgba(232,69,94,0.06)',color:SPORTS_RED}}>Could not load /sports.json ({err}). Run <span className="font-mono">python src/export_tara.py</span> in sports-model and redeploy.</div>}
+        {err&&<div role="alert" className="rounded-xl border p-4 text-[12px] mb-5" style={{borderColor:'rgba(232,69,94,0.3)',background:'rgba(232,69,94,0.06)',color:SPORTS_RED}}>Sports results are unavailable ({err}). Use Refresh results to retry.</div>}
+        {sourceWarning&&<div role="status" className="rounded-xl border p-3 text-[12px] mb-3" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER}}>{sourceWarning}</div>}
         {!data&&!err&&<div className="text-[#EDEDED]/40 text-sm">Loading…</div>}
 
         {data&&(<div className="sports-data-stack">
+          <div className="text-[11px] leading-relaxed mb-3" style={{color:settlementStatus.overdue?SPORTS_RED:'#a4a4ae'}}>
+            {settlementStatus.pending} tracked pick{settlementStatus.pending===1?'':'s'} awaiting settlement
+            {settlementStatus.overdue>0&&<span> · {settlementStatus.overdue} over 48 hours old — settlement needs attention</span>}
+            {settlementStatus.lastSettled&&<span> · Last result added {new Date(settlementStatus.lastSettled).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/New_York'})} ET</span>}
+            {settlementStatus.nonBinary.map(r=><div key={r.id}>{r.event}: {r.reason}</div>)}
+          </div>
           {rec&&(
             <div className={`grid grid-cols-2 sm:grid-cols-4 gap-px mb-4 overflow-hidden ${UI2_PANEL} ${UI2_GRID_BG}`}>
               <div className={card}>
@@ -53770,7 +53785,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.1</small>
+              <small>DECISION ENGINE · V14.4.2</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
