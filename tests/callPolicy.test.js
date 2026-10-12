@@ -90,14 +90,22 @@ test('the actual reversal helper returns directionally correct confidence withou
   assert.equal(check(65,{}).conf,65);
   assert.equal(check(null,{}).dir,null);
 });
-function boundaryHarness(secondsLeft) {
+function boundaryHarness(secondsLeft,readiness={ready:true}) {
   const clock=context(secondsLeft);
   const taraCallSnapshotRef={current:null},lockedCallRef={current:{dir:'UP'}},callCommitHoldRef={current:null};
   const body=app.slice(app.indexOf('  const _prepareCallCommit='),app.indexOf('  const _sealCallSnapshot='));
-  const prepare=new Function('assessCallCommit','deadlineSitout','CALL_POLICY_VERSION','computeWindowId','windowType','currentAssetRef','_kalshiQuote','Date','taraCallSnapshotRef','lockedCallRef','callCommitHoldRef',body+'; return _prepareCallCommit;')(
-    assessCallCommit,deadlineSitout,CALL_POLICY_VERSION,()=>windowId,'15m',{current:'BTC'},clock.quote,{now:()=>clock.now},taraCallSnapshotRef,lockedCallRef,callCommitHoldRef);
+  const prepare=new Function('assessCallCommit','deadlineSitout','CALL_POLICY_VERSION','computeWindowId','windowType','currentAssetRef','_kalshiQuote','Date','taraCallSnapshotRef','lockedCallRef','callCommitHoldRef','startupReadiness','currentCallBlockerRef',body+'; return _prepareCallCommit;')(
+    assessCallCommit,deadlineSitout,CALL_POLICY_VERSION,()=>windowId,'15m',{current:'BTC'},clock.quote,{now:()=>clock.now},taraCallSnapshotRef,lockedCallRef,callCommitHoldRef,readiness,{current:null});
   return {prepare,taraCallSnapshotRef,lockedCallRef,callCommitHoldRef};
 }
+
+test('application cannot seal a directional candidate before startup data is ready',()=>{
+  const h=boundaryHarness(600,{ready:false,reason:'Loading 1m candles'}),snap={...candidate};
+  h.taraCallSnapshotRef.current=snap;
+  assert.equal(h.prepare(snap),false);
+  assert.equal(h.taraCallSnapshotRef.current,null);
+  assert.equal(h.callCommitHoldRef.current.reason,'Loading 1m candles');
+});
 test('application boundary clears a rejected candidate without sealing or logging it',()=>{
   const h=boundaryHarness(600),snap={...candidate,tier:'time-cap-commit'};
   h.taraCallSnapshotRef.current=snap;

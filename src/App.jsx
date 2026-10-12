@@ -4,6 +4,9 @@ import taraV14Styles from './tara-v14.css?raw';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
+import {useStartupReadiness} from './startupReadiness.js';
+import {describeCallBlocker} from './callBlocker.js';
+import {readCapturedCallSettlement} from './callSettlement.js';
 import { useCallLedger } from './useCallLedger.js';
 import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
@@ -5825,8 +5828,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.05-v14.4.2-sports-settlement';
-const TARA_VERSION_DISPLAY='TARA 14.4.2';
+const TARA_BUILD_VERSION='2026.10.12-v14.4.3-readiness-and-records';
+const TARA_VERSION_DISPLAY='TARA 14.4.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10328,14 +10331,14 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
   const _snap=snapshot||null;
   const _lock=readLockState(_snap);
   const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
-  const _callLabel=_dir?`${_dir} · locked`:_snap?.call==='SIT_OUT'?'SITTING OUT':'SCANNING';
+  const _callLabel=_dir?`${_dir} · locked`:_snap?.call==='SIT_OUT'?'SITTING OUT':taraCall?.startupBlocked?'WARMING UP':'SCANNING';
   const _confidence=_lock.tradeable&&Number.isFinite(Number(_lock.confidence))?Math.round(Number(_lock.confidence)):null;
   const _edgeRaw=_lock.tradeable?(_snap?.edgePts??_snap?.edge):null;
   const _edge=_edgeRaw==null?null:Number(_edgeRaw);
   const _edgeLabel=Number.isFinite(_edge)?`${_edge>0?'+':''}${Math.round(_edge)}pt`:'—';
   const _window=windowType||timeState?.windowType||'15m';
   const _record=_taraRecordStats(taraScorecards?.[_window]);
-  const _reason=describeCommittedCallReason(_snap);
+  const _reason=describeCommittedCallReason(_snap)||taraCall?.blockedDecision?.reason||taraCall?.reason;
   const _lockAt=Number(_snap?.lockedAt)||0;
   const _lockTime=_lockAt>0?new Date(_lockAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):null;
   const _recent=[...(Array.isArray(taraCallLog)?taraCallLog:[])]
@@ -10348,7 +10351,7 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         <div>
           <div className="tara-call-ledger__kicker">01 / TARA'S CALL · RECORD-BEARING</div>
           <h3 className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_callLabel}</h3>
-          <p>{_lock.tradeable?'This locked decision enters the Call record whether AutoTrade places an order or not.':_lock.satOut?'No tradeable Call was locked for this window. A sit-out is not scored as a win.':'Tara is reading this window. No tradeable Call is locked yet.'}</p>
+          <p>{_lock.tradeable?'This locked decision enters the Call record whether AutoTrade places an order or not.':_reason||'Tara is reading this window. No tradeable Call is locked yet.'}</p>
         </div>
         <div className="tara-call-ledger__truth">
           <strong>{_lock.tradeable?'CALL LOCKED':_lock.satOut?'SAT OUT':'NOT YET LOCKED'}</strong>
@@ -35976,19 +35979,14 @@ function TaraApp(){
       if(!raw)return null;
       const ws=JSON.parse(raw);
       if(!ws||!ws.savedAt)return null;
+      if(ws.asset!==currentAsset)return null;
       if(Date.now()-ws.savedAt>_WARM_STATE_MAX_AGE_MS)return null;
       return ws;
     }catch(_){return null;}
   };
   const _warmState=_loadWarmState();
-  // V13.4.341: freeze the cold-start verdict at mount. _warmState above is
-  //   recomputed on every render (reads sessionStorage fresh each time), so by
-  //   the time later renders happen it reflects THIS session's own recent
-  //   saves, not what was available when the page actually loaded. useRef's
-  //   initializer only takes effect once, on the first render -- exactly what
-  //   we need to remember "did this page load start cold." Same >=10 threshold
-  //   the history-seed check below already uses.
-  const _isColdStartRef=useRef(!(_warmState?.history?.length>=10));
+  // Startup eligibility is evaluated from candle coverage and real live
+  // observations below, rather than a cold-at-mount flag held for 75 minutes.
   const[history,setHistory]=useState(()=>{
     // Seed from warm state if available and fresh
     if(_warmState?.history?.length>=10){
@@ -38279,16 +38277,18 @@ function TaraApp(){
   //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
   const _cloudLockMirrorRef=useRef(null);
   const callCommitHoldRef=useRef(null);
+  const currentCallBlockerRef=useRef(null);
   const _prepareCallCommit=(snapshot)=>{
     const windowId=computeWindowId(windowType);
-    const decision=assessCallCommit(snapshot,{windowId,windowType,asset:currentAssetRef.current||'BTC',quote:_kalshiQuote,now:Date.now()});
+    const decision=assessCallCommit(snapshot,{windowId,windowType,asset:currentAssetRef.current||'BTC',quote:_kalshiQuote,readiness:startupReadiness,now:Date.now()});
     if(decision.action==='wait'){
-      callCommitHoldRef.current={windowId,reason:decision.reason};
+      callCommitHoldRef.current={windowId,reason:decision.reason,at:Date.now()};
       if(taraCallSnapshotRef.current===snapshot)taraCallSnapshotRef.current=null;
       lockedCallRef.current=null;
       return false;
     }
     if(decision.action==='sitout'){
+      snapshot.blockedDecision ||= currentCallBlockerRef.current;
       Object.assign(snapshot,deadlineSitout(snapshot,decision));
       lockedCallRef.current=null;
     }
@@ -41902,6 +41902,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
             continue;
           }
+          if(_stalledEntry?.originalDecision?.marketTicker||_stalledEntry?.marketTicker){
+            const _captured=await readCapturedCallSettlement(_stalledEntry);
+            if(_captured.ok&&typeof window._taraApplyReconcile==='function'){
+              await window._taraApplyReconcile(new Map([[pending.tradeId,_captured.patch]]));
+              pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
+            }
+            // An identity-bearing Call must never substitute another contract
+            // from the recent list when its own read failed or is not settled.
+            continue;
+          }
         }
         // V13.4.248: taraCallLog-sourced items (the V8.1 stale-pending backfill,
         //   tagged source:'taraCallLog') do not belong to the tradeLog branch below
@@ -44838,6 +44848,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   };
   const qualityGate=_computeQuality(analysis,regimeMemory);
   const qualityGateV2=_computeQualityV2(analysis,regimeMemory);
+  const _startupNow=Date.now();
+  const _startupSource=PRICE_SOURCES[priceSource]?.virtual?null:PRICE_SOURCES[priceSource]?.label;
+  const _startupSpotAt=Math.max(lastPriceSourceRef.current?.exchange===priceSource?(lastPriceSourceRef.current.time||0):0,
+    ...(brtiApprox?.sourceHealth||[]).filter(s=>s.status==='fresh'&&(!_startupSource||s.name===_startupSource)).map(s=>Number(s.receivedAt)||0));
+  const _startupUserHold=(()=>{try{const minutes=Number(localStorage.getItem('taraColdStartWarmupMin'));return minutes>0&&minutes<=180?_mountTimeRef.current+minutes*60000:0;}catch{return 0;}})();
+  const startupReadiness=useStartupReadiness({asset:currentAsset,source:priceSource,history,tfCandles,
+    spot:currentPrice,spotAt:_startupSpotAt,analysis,intervalSeconds:windowType==='15m'?900:300,
+    minimumUntil:_startupUserHold,now:_startupNow});
 
   // V3.2.4: TARA'S CALL — a separate, higher-conviction decision layer.
   //   The "general prediction" (analysis.prediction / posterior) tells you the most likely
@@ -44864,30 +44882,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //     5. Kalshi sanity check: if market disagrees materially, require higher conviction
   const taraCall=(()=>{
     const _post=analysis?.rawProbAbove;
+    if(!startupReadiness.ready)return{call:'SIT_OUT',reason:startupReadiness.reason,confidence:0,startupBlocked:true};
     if(!analysis||_post==null||isNaN(_post)){
       return{call:'SIT_OUT',reason:'Engine still loading — analysis not ready yet',confidence:0};
-    }
-    // V13.4.341: COLD-START WARM-UP GATE. The `analysis` null-check above only
-    //   requires liveHistory.length>=30 (candles) -- on a true cold start (no
-    //   usable sessionStorage warm state, see _isColdStartRef above) that floor
-    //   passes at ~30 real minutes in, but the V10.7.86 comment on the warm-state
-    //   restore documents that ADX/tape-flow/VWAP still need MORE than that
-    //   ("~50 ticks for tape flow, ~5 min for VWAP... first 3-5 windows have
-    //   partial signals and worse calls") with nothing enforcing it -- a real,
-    //   ungated gap between "analysis stops returning null" and "analysis is
-    //   actually trustworthy." This SIT_OUTs for the documented window instead
-    //   of silently trading on it. Warm-started sessions (the normal case, same
-    //   tab refreshed within 5min) are completely unaffected -- history seeds
-    //   instantly from sessionStorage so _isColdStartRef is false immediately.
-    //   Override: localStorage 'taraColdStartWarmupMin' (minutes, 0 disables).
-    if(_isColdStartRef.current){
-      const _coldWarmupMin=(function(){
-        try{const v=parseFloat(localStorage.getItem('taraColdStartWarmupMin'));
-          return(Number.isFinite(v)&&v>=0&&v<=180)?v:75;}catch(_e){return 75;}
-      })();
-      if(Date.now()-_mountTimeRef.current<_coldWarmupMin*60000){
-        return{call:'SIT_OUT',reason:'cold-start-warming-up',confidence:0};
-      }
     }
     const post=_post;
     const conviction=Math.abs(post-50);
@@ -45536,6 +45533,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   is a lean. Take the side, ride the movement.
   const _v10_6_8_postProcess=(call)=>{
     if(!call||call.call!=='SIT_OUT')return call;
+    if(call.startupBlocked)return call;
     const _reason=String(call.reason||'').toLowerCase();
     // Physical constraints — engine hasn't formed a view yet
     if(_reason.includes('engine still loading'))return call;
@@ -47930,8 +47928,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   };
   // V4.3: Attach lifecycle data so the Tara's Call card can render phase/samples/snapshot.
   //   Refs read at render time — same data the lifecycle effect uses.
+  if(!startupReadiness.ready&&!taraCallSnapshotRef.current){
+    Object.assign(taraCall,{call:'SIT_OUT',direction:null,confidence:0,startupBlocked:true,reason:startupReadiness.reason});
+  }
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
+  taraCall.blockedDecision=taraCallSnapshotRef.current?.blockedDecision||describeCallBlocker({call:taraCall,
+    readiness:startupReadiness,hold:callCommitHoldRef.current,samples:taraCallSampleRef.current,
+    quote:_kalshiQuote,windowId:computeWindowId(windowType),asset:currentAsset,now:Date.now()});
+  currentCallBlockerRef.current=taraCall.blockedDecision;
   // Observation only: the research hook has no order, arm, or live-lock callback.
   const lockResearch=useLockStudy({
     windowId:computeWindowId(windowType),windowType,asset:currentAsset,
@@ -48127,12 +48132,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _decisionSecondsLeft=(Date.parse(computeWindowId(windowType).replace(/^(5m|15m)-/,''))+(windowType==='15m'?900000:300000)-Date.now())/1000;
     if(_decisionSecondsLeft<=callLockDeadline(windowType)&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000)){
       const reason=windowType==='15m'?'No qualifying Call before the 7-minute cutoff. Sitting out this window.':'No qualifying Call before the 30-second cutoff. Sitting out this window.';
-      taraCallSnapshotRef.current=deadlineSitout({atPosterior:analysis?.rawProbAbove},{reason,secondsLeft:_decisionSecondsLeft,cutoff:callLockDeadline(windowType)});
+      taraCallSnapshotRef.current=deadlineSitout({atPosterior:analysis?.rawProbAbove,blockedDecision:currentCallBlockerRef.current},{reason,secondsLeft:_decisionSecondsLeft,cutoff:callLockDeadline(windowType)});
       lockedCallRef.current=null;
       _logSnapshotEntry(taraCallSnapshotRef.current);
       _persistLock();
       return;
     }
+
+    if(!startupReadiness.ready&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000))return;
 
     // ─────────────────────────────────────────────────────────────────────
     // V10.4.1 MODULE A — EV-AWARE DELAY GATE
@@ -49540,6 +49547,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           windowId:_wid,
           originalDecision:snapshot.originalDecision,
           callPolicy:snapshot.callPolicy||null,
+          blockedDecision:snapshot.blockedDecision||null,
           marketTicker:snapshot.marketTicker||null,
           marketCloseTime:snapshot.marketCloseTime||null,
           regime:analysis?.regime||'',
@@ -53785,7 +53793,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.2</small>
+              <small>DECISION ENGINE · V14.4.3</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -53821,27 +53829,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               style:{color:'#D4A03A'},
               title:'Cloud sync paused until ~Jun 18 — data saving to this browser only. Open Memory to backup.',
             },'💾 LOCAL')}
-            {(()=>{
-              // V10.7.86: show warm/cold state indicator
-              try{
-                const _ws=sessionStorage.getItem('taraWarmState_v1');
-                if(_ws){
-                  const _wsp=JSON.parse(_ws);
-                  const _ageSec=Math.round((Date.now()-(_wsp.savedAt||0))/1000);
-                  if(_ageSec<300&&(_wsp.history||[]).length>=10){
-                    return React.createElement('span',{
-                      // V13.4.299: chip chrome and green both dropped. The mockup
-                      //   puts "Warm" in the header as plain gold tiny-caps -- warm
-                      //   vs cold is a readiness caution, not a won trade.
-                      className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] uppercase cursor-default',
-                      style:{color:'#D4A03A'},
-                      title:`Warm state active — ${(_wsp.history||[]).length} candles restored from ${_ageSec}s ago. Signals start immediately.`,
-                    },'⚡ WARM');
-                  }
-                }
-              }catch(_){}
-              return null;
-            })()}
+            <span className="hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] uppercase cursor-default" style={{color:'#D4A03A'}} title={startupReadiness.reason} data-startup-ready={startupReadiness.ready}>
+              {startupReadiness.ready?'● DATA READY':startupReadiness.code==='startup-sampling'?`WARMING · ${Math.min(startupReadiness.samples,50)}/50`:'DATA WAIT'}
+            </span>
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
           </div>
 
