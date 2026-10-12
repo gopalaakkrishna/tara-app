@@ -7,6 +7,7 @@ import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
 import {readCapturedCallSettlement} from './callSettlement.js';
+import {coinbaseCandleRange} from './candleRequests.js';
 import { useCallLedger } from './useCallLedger.js';
 import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
@@ -5828,8 +5829,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.12-v14.4.3-readiness-and-records';
-const TARA_VERSION_DISPLAY='TARA 14.4.3';
+const TARA_BUILD_VERSION='2026.10.12-v14.4.4-fresh-candles-and-readiness';
+const TARA_VERSION_DISPLAY='TARA 14.4.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6505,7 +6506,7 @@ const PRICE_SOURCES={
     //   guard discards those flashes deterministically — no thresholds, no false
     //   positives. Kraken / OKX don't define this so the guard is skipped for them.
     parseTradeId:(d)=>d?.trade_id?Number(d.trade_id):null,
-    candleUrl:(cfg,asset,granSec)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/candles?granularity=${granSec}`,
+    candleUrl:(cfg,asset,granSec)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/candles?granularity=${granSec}&${coinbaseCandleRange(granSec)}`,
     parseCandles:(d)=>{
       if(!Array.isArray(d))return[];
       return d.map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
@@ -24376,6 +24377,9 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
                 React.createElement('span',{className:fullPage?'tara-memory-page__decision':'text-[11px] truncate',style:{color:'rgba(237,237,237,0.66)'}},
                   (_ddir||(r==='SITOUT'?'SIT OUT':'—'))+' · '+_outcomeWord),
                 fullPage&&React.createElement('span',{className:'tara-memory-page__evidence'},`${e.confidence!=null?Math.round(Number(e.confidence))+'% confidence · ':''}${e.regime||'regime pending'}${e.qScore!=null?' · q'+e.qScore:''}`),
+                fullPage&&e.blockedDecision?.reason&&React.createElement('span',{
+                  className:'tara-memory-page__blocker',style:{gridColumn:'2 / -1',fontSize:'11px',lineHeight:1.5,color:'#b9aa87',overflowWrap:'anywhere'},
+                },`Blocked: ${e.blockedDecision.reason}`),
               );
             })
           ),
@@ -53793,7 +53797,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.3</small>
+              <small>DECISION ENGINE · V14.4.4</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
