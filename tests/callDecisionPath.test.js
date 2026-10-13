@@ -155,3 +155,30 @@ test('the separate intentional Call cost band and timing ceiling share unchanged
   const manual=makeHarness({yesPrice:74});manual.storage.set('taraCostBandMax','73');assert.equal(manual.run(),null);
   assert.match(manual.scope.taraCall.reason,/44-73c/);
 });
+
+test('pre-lock analysis shape cannot disable the lower or upper Call band',()=>{
+  for(const options of [{yesPrice:43,probabilityUp:95,mtf:2,quality:80},
+    {yesPrice:78},{yesPrice:57,probabilityUp:20.055,mtf:-2,quality:80,tapeBuy:10,regime:'TRENDING DOWN'},
+    {yesPrice:22,probabilityUp:1,mtf:-2,quality:80,tapeBuy:10,regime:'TRENDING DOWN'}]){
+    const h=makeHarness(options);assert.equal(h.scope.analysis.kalshiAtLock,undefined);
+    assert.equal(h.run(),null);assert.match(h.scope.taraCall.reason,/cost band 44-77c/);
+    assert.equal(h.logs.length,0);assert.equal(h.cloud.length,0);assert.deepEqual(h.errors,[]);
+  }
+});
+
+test('a historical analysis lock price cannot substitute for the current direction-aware price',()=>{
+  for(const historical of [null,50,90]){
+    const valid=makeHarness({yesPrice:74});valid.scope.analysis.kalshiAtLock=historical;
+    assert.equal(valid.run()?.call,'UP');assert.equal(valid.logs.length,1);
+    const blocked=makeHarness({yesPrice:78});blocked.scope.analysis.kalshiAtLock=historical;
+    assert.equal(blocked.run(),null);assert.match(blocked.scope.taraCall.reason,/entry 78c/);
+  }
+});
+
+test('inclusive44 and77 Call bounds are symmetric for UP and DOWN with actual live data shape',()=>{
+  for(const cost of [44,77]){
+    const up=makeHarness({yesPrice:cost,probabilityUp:95,mtf:2,quality:80});assert.equal(up.run()?.call,'UP');
+    const down=makeHarness({yesPrice:100-cost,probabilityUp:5,mtf:-2,tapeBuy:10,quality:80,regime:'TRENDING DOWN'});
+    assert.equal(down.run()?.call,'DOWN');assert.equal(down.logs.length,1);assert.deepEqual(down.errors,[]);
+  }
+});

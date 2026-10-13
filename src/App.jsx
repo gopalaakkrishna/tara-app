@@ -5836,8 +5836,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.13-v14.4.6-consistent-call-decision-path';
-const TARA_VERSION_DISPLAY='TARA 14.4.6';
+const TARA_BUILD_VERSION='2026.10.13-v14.4.7-live-call-price-policy';
+const TARA_VERSION_DISPLAY='TARA 14.4.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -45575,7 +45575,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   try{
     const _dogOn=(function(){try{return localStorage.getItem('taraDecentOddsGate')!=='off';}catch(_){return true;}})();
     if(_dogOn&&taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
-      const _kEntry=(analysis&&typeof analysis.kalshiAtLock==='number')?analysis.kalshiAtLock:null;
+      // Live analysis has no kalshiAtLock before a sealed Call. Read the live
+      // YES quote, not an absent or historical lock field; identity/age still
+      // have to pass the unchanged commit quote guard.
+      const _kEntry=typeof kalshiYesPrice==='number'&&Number.isFinite(kalshiYesPrice)?kalshiYesPrice:null;
       const _tapeOk=!!(taraCall.isTapeLed||(taraCall._ctx&&taraCall._ctx.isTapeLed));
       if(_kEntry!=null){
         // V13.4.77: REVERTED the 13.4.74 EV ceiling -- it was a pricing bug. It gated on raw
@@ -45692,7 +45695,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _cbPolicy=readCallCostBand(localStorage);
     const _cbOn=_cbPolicy.enabled;
     if(_cbOn&&taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
-      const _cbEntry=(analysis&&typeof analysis.kalshiAtLock==='number')?analysis.kalshiAtLock:null;
+      const _cbEntry=typeof kalshiYesPrice==='number'&&Number.isFinite(kalshiYesPrice)?kalshiYesPrice:null;
       if(_cbEntry!=null){
         const _cbMin=_cbPolicy.minCost;
         const _cbMax=_cbPolicy.maxCost;
@@ -53824,7 +53827,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.6</small>
+              <small>DECISION ENGINE · V14.4.7</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
