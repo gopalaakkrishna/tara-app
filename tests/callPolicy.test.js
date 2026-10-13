@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from '../src/callPolicy.js';
-import {captureOriginalDecision, settlementPatch} from '../src/callIntegrity.js';
+import {captureOriginalDecision, isDirection, settlementPatch} from '../src/callIntegrity.js';
 
 const windowId='15m-2026-09-27T22:45:00.000Z';
 const close=Date.parse('2026-09-27T23:00:00Z');
@@ -94,8 +94,8 @@ function boundaryHarness(secondsLeft,readiness={ready:true}) {
   const clock=context(secondsLeft);
   const taraCallSnapshotRef={current:null},lockedCallRef={current:{dir:'UP'}},callCommitHoldRef={current:null};
   const body=app.slice(app.indexOf('  const _prepareCallCommit='),app.indexOf('  const _sealCallSnapshot='));
-  const prepare=new Function('assessCallCommit','deadlineSitout','CALL_POLICY_VERSION','computeWindowId','windowType','currentAssetRef','_kalshiQuote','Date','taraCallSnapshotRef','lockedCallRef','callCommitHoldRef','startupReadiness','currentCallBlockerRef',body+'; return _prepareCallCommit;')(
-    assessCallCommit,deadlineSitout,CALL_POLICY_VERSION,()=>windowId,'15m',{current:'BTC'},clock.quote,{now:()=>clock.now},taraCallSnapshotRef,lockedCallRef,callCommitHoldRef,readiness,{current:null});
+  const prepare=new Function('assessCallCommit','deadlineSitout','CALL_POLICY_VERSION','computeWindowId','windowType','currentAssetRef','_kalshiQuote','Date','taraCallSnapshotRef','lockedCallRef','callCommitHoldRef','startupReadiness','currentCallBlockerRef','isDirection',body+'; return _prepareCallCommit;')(
+    assessCallCommit,deadlineSitout,CALL_POLICY_VERSION,()=>windowId,'15m',{current:'BTC'},clock.quote,{now:()=>clock.now},taraCallSnapshotRef,lockedCallRef,callCommitHoldRef,readiness,{current:null},isDirection);
   return {prepare,taraCallSnapshotRef,lockedCallRef,callCommitHoldRef};
 }
 

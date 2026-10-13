@@ -6,10 +6,11 @@ import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
+import {callLogSyncSignature,callLogSyncStatus} from './callLogSync.js';
 import {readCapturedCallSettlement} from './callSettlement.js';
 import {coinbaseCandleRange} from './candleRequests.js';
 import { useCallLedger } from './useCallLedger.js';
-import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
+import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isDirection, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
 import LockStudyPanel from './LockStudyPanel.jsx';
 import './lockStudy.css';
@@ -435,21 +436,12 @@ const _taraDeviceId=(()=>{
 // Compute a comparable signature from a call-log array. resolved is the primary,
 //   monotonic axis (only goes up as trades settle); maxId (Date.now()-based) and
 //   count are tiebreakers. Cheap to compute, cheap to compare.
-const _computeLogSig=(arr)=>{
-  let resolved=0,maxId=0,count=0;
-  if(Array.isArray(arr)){
-    for(const e of arr){
-      if(!e)continue;count++;
-      if(e.result==='WIN'||e.result==='LOSS')resolved++;
-      const _id=e.id||0;if(_id>maxId)maxId=_id;
-    }
-  }
-  return{resolved,maxId,count};
-};
+const _computeLogSig=callLogSyncStatus;
 // Is signature A strictly behind signature B? (i.e. should A pull from a source at B)
 //   Behind = fewer resolved trades, or equal resolved but an older max id.
 const _sigBehind=(a,b)=>{
   if(!a||!b)return false;
+  if((b.finalized||0)>(a.finalized||0)||(b.evidenceAt||0)>(a.evidenceAt||0))return true;
   if((b.resolved||0)>(a.resolved||0))return true;
   if((b.resolved||0)===(a.resolved||0)&&(b.maxId||0)>(a.maxId||0))return true;
   return false;
@@ -459,6 +451,8 @@ const _sigMax=(a,b)=>({
   resolved:Math.max((a&&a.resolved)||0,(b&&b.resolved)||0),
   maxId:Math.max((a&&a.maxId)||0,(b&&b.maxId)||0),
   count:Math.max((a&&a.count)||0,(b&&b.count)||0),
+  finalized:Math.max((a&&a.finalized)||0,(b&&b.finalized)||0),
+  evidenceAt:Math.max((a&&a.evidenceAt)||0,(b&&b.evidenceAt)||0),
 });
 
 // V11.2 live timing recommendation — written by the timing controller each tick,
@@ -891,27 +885,31 @@ const cloudSupabaseDelete=async(path)=>{
 const _sbWriteQueueRMW=new Map();
 const _sbWritePendingRMW=new Map();
 const _sbLastSyncSig=new Map(); // V10.9.29: path -> last successfully-synced signature
-const _sbPendingSig=new Map();  // V10.9.29: path -> signature being written this cycle
 const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
   if(!_sbClient||!path)return;
+  // The large log flush has a bounded wait: fresh evidence updates the pending
+  // payload but must not indefinitely restart its existing 60-second timer.
+  if(_sbWriteQueueRMW.has(path)&&path==='memory/taraCallLog'){
+    _sbWritePendingRMW.set(path,{getLocalData,mergeFn});
+    return;
+  }
   if(_sbWriteQueueRMW.has(path))clearTimeout(_sbWriteQueueRMW.get(path));
   _sbWritePendingRMW.set(path,{getLocalData,mergeFn});
   const tid=setTimeout(async()=>{
+    const _pending=_sbWritePendingRMW.get(path);
+    const _getLocalData=_pending?.getLocalData||getLocalData;
+    const _mergeFn=_pending?.mergeFn||mergeFn;
     _sbWriteQueueRMW.delete(path);
     _sbWritePendingRMW.delete(path);
     if(!_sbClient)return;
-    // V10.9.29 EGRESS: cheap pre-gate for the big log doc. If the local signature
-    //   (entry count + max id) is unchanged since our last successful write, there is
-    //   nothing new to sync - skip the 2.6MB read+write entirely.
+    // V14.4.5: pending -> SITOUT and blocker-only updates have unchanged counts
+    // and ids. Compare the actual stripped evidence, retaining the egress gate.
     if(path==='memory/taraCallLog'){
       try{
-        const _ld=getLocalData();
+        const _ld=_getLocalData();
         const _arr=Array.isArray(_ld)?_ld:(Array.isArray(_ld&&_ld.entries)?_ld.entries:[]);
-        let _maxId=0,_res=0;
-        for(const e of _arr){if(e){if((e.id||0)>_maxId)_maxId=e.id||0;if(e.result==='WIN'||e.result==='LOSS')_res++;}}
-        const _sig=_arr.length+':'+_maxId+':'+_res;
+        const _sig=callLogSyncSignature(_arr,_stripEntryForCloud);
         if(_sbLastSyncSig.get(path)===_sig)return; // nothing material changed
-        _sbPendingSig.set(path,_sig);
       }catch(_){}
     }
     // Optimistic RMW with retry. 5 attempts matches Firestore default.
@@ -936,8 +934,10 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         }
         const _cloudData=_cur?.data||null;
         const _cloudUpdatedAt=_cur?.updated_at||null;
-        const _localData=getLocalData();
-        const _merged=mergeFn(_cloudData,_localData);
+        const _localData=_getLocalData();
+        const _writtenSig=path==='memory/taraCallLog'?callLogSyncSignature(
+          Array.isArray(_localData)?_localData:(_localData?.entries||[]),_stripEntryForCloud):null;
+        const _merged=_mergeFn(_cloudData,_localData);
         if(_merged==null)return; // mergeFn signaled "skip write"
         // Conditional upsert: succeed only if row's updated_at hasn't changed.
         //   For a brand-new row (no _cloudUpdatedAt), this is an INSERT and
@@ -964,7 +964,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
             await new Promise(r=>setTimeout(r,50*_attempts));
             continue;
           }
-          if(_sbPendingSig.has(path))_sbLastSyncSig.set(path,_sbPendingSig.get(path)); // V10.9.29
+          if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
           _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         } else {
@@ -987,6 +987,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
             _setCloudStatus({state:'error',lastError:{path,message:_insertErr.message,at:Date.now()}});
             return;
           }
+          if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
           _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         }
@@ -1608,6 +1609,11 @@ const _writeQueueRMW=new Map();
 const _writePendingRMW=new Map();
 const cloudWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
   // Mirror into the queue maps so the tab-close flush has visibility.
+  if(_writeQueueRMW.has(path)&&path==='memory/taraCallLog'){
+    _writePendingRMW.set(path,{getLocalData,mergeFn});
+    try{cloudSupabaseWriteDebouncedRMW(path,getLocalData,mergeFn,delayMs);}catch(_){}
+    return;
+  }
   if(_writeQueueRMW.has(path))clearTimeout(_writeQueueRMW.get(path));
   _writePendingRMW.set(path,{getLocalData,mergeFn});
   const tid=setTimeout(()=>{
@@ -5829,8 +5835,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.12-v14.4.4-fresh-candles-and-readiness';
-const TARA_VERSION_DISPLAY='TARA 14.4.4';
+const TARA_BUILD_VERSION='2026.10.13-v14.4.5-cloud-sync-and-exact-blockers';
+const TARA_VERSION_DISPLAY='TARA 14.4.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37980,7 +37986,7 @@ function TaraApp(){
           // Only commit to state if the merge actually changed something, to avoid
           //   a render/write loop (a state change re-fires the big-log write effect).
           const _ps=_computeLogSig(prev),_ms=_computeLogSig(_merged);
-          if(_merged.length===prev.length&&_ms.resolved===_ps.resolved&&_ms.maxId===_ps.maxId)return prev;
+          if(callLogSyncSignature(_merged,_stripEntryForCloud)===callLogSyncSignature(prev,_stripEntryForCloud))return prev;
           try{console.info('[V12.8 SYNC] catch-up pull ('+reason+'): '+prev.length+' -> '+_merged.length+' entries, resolved '+_ps.resolved+' -> '+_ms.resolved);}catch(_){}
           return _merged;
         });
@@ -38281,12 +38287,23 @@ function TaraApp(){
   //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
   const _cloudLockMirrorRef=useRef(null);
   const callCommitHoldRef=useRef(null);
+  const callGateHoldRef=useRef(null); // diagnostic only; never a lock/persistence condition
   const currentCallBlockerRef=useRef(null);
   const _prepareCallCommit=(snapshot)=>{
     const windowId=computeWindowId(windowType);
     const decision=assessCallCommit(snapshot,{windowId,windowType,asset:currentAssetRef.current||'BTC',quote:_kalshiQuote,readiness:startupReadiness,now:Date.now()});
     if(decision.action==='wait'){
-      callCommitHoldRef.current={windowId,reason:decision.reason,at:Date.now()};
+      callCommitHoldRef.current={windowId,asset:currentAssetRef.current||'BTC',
+        code:'commit-check',direction:isDirection(snapshot?.call)?snapshot.call:null,
+        reason:decision.reason,at:Date.now(),details:{action:decision.action,
+          secondsLeft:decision.secondsLeft,cutoff:decision.cutoff,confidence:snapshot?.confidence??null}};
+      currentCallBlockerRef.current={...(currentCallBlockerRef.current||{}),
+        code:'commit-check',reason:decision.reason,windowId,asset:currentAssetRef.current||'BTC',
+        dataReady:!!startupReadiness.ready,observedAt:callCommitHoldRef.current.at,
+        proposedDirection:callCommitHoldRef.current.direction,
+        lastGate:null,
+        gate:{...callCommitHoldRef.current.details,code:'commit-check',reason:decision.reason,
+          at:callCommitHoldRef.current.at,direction:callCommitHoldRef.current.direction}};
       if(taraCallSnapshotRef.current===snapshot)taraCallSnapshotRef.current=null;
       lockedCallRef.current=null;
       return false;
@@ -47938,7 +47955,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
   taraCall.blockedDecision=taraCallSnapshotRef.current?.blockedDecision||describeCallBlocker({call:taraCall,
-    readiness:startupReadiness,hold:callCommitHoldRef.current,samples:taraCallSampleRef.current,
+    readiness:startupReadiness,hold:callCommitHoldRef.current,gateHold:callGateHoldRef.current,samples:taraCallSampleRef.current,
     quote:_kalshiQuote,windowId:computeWindowId(windowType),asset:currentAsset,now:Date.now()});
   currentCallBlockerRef.current=taraCall.blockedDecision;
   // Observation only: the research hook has no order, arm, or live-lock callback.
@@ -48127,9 +48144,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
     const tc=taraCall;
     const isCall=tc.call==='UP'||tc.call==='DOWN';
+    // Observation only. Stamp the branch which actually returns without a lock,
+    // before the next render/deadline, instead of reporting sample formation.
+    const _noteGateHold=(code,reason,details={})=>{
+      const windowId=computeWindowId(windowType),asset=currentAssetRef.current||'BTC',now=Date.now();
+      callGateHoldRef.current={code,reason,details,windowId,asset,at:now,
+        direction:isDirection(tc.call)?tc.call:null,scope:details.scope||'direction'};
+      currentCallBlockerRef.current=describeCallBlocker({call:tc,readiness:startupReadiness,
+        hold:callCommitHoldRef.current,gateHold:callGateHoldRef.current,
+        samples:taraCallSampleRef.current,quote:_kalshiQuote,windowId,asset,now});
+      tc.blockedDecision=currentCallBlockerRef.current;
+    };
     // Read the shared window first so a late-opening tab cannot replace a
     // pre-existing Call with a new deadline sitout.
-    if(!_cloudRestoreCompletedRef.current&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000))return;
+    if(!_cloudRestoreCompletedRef.current&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000)){
+      _noteGateHold('shared-lock-restore','Waiting for the shared window decision to finish loading.',{scope:'window'});
+      return;
+    }
 
     // The clock cannot create a new automatic Call after this deadline.
     // Existing snapshots returned above; explicit manual overrides remain tagged.
@@ -48181,6 +48212,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
       const MAX_ABORTS_PER_BURST=3;
       if(_v104_1_abortCountRef.current.count>=MAX_ABORTS_PER_BURST){
+        const remainingMs=Math.max(0,_cooldownMs-(_now5-(_v104_1_abortCountRef.current.lastAbortAt||0)));
+        _noteGateHold('adverse-kalshi-cooldown',`Adverse Kalshi cooldown: ${_v104_1_abortCountRef.current.count} aborts; ${Math.ceil(remainingMs/1000)}s remaining.`,
+          {scope:'window',abortCount:_v104_1_abortCountRef.current.count,maxAborts:MAX_ABORTS_PER_BURST,
+            cooldownMs:_cooldownMs,remainingMs,regime:_abortRegime});
         return; // in cooldown — don't retry until cooldown passes or new window
       }
       // Kalshi price FROM TARA'S DIRECTION — if Tara says DOWN and Kalshi YES is 35,
@@ -48290,6 +48325,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       }catch(_){}
       if(_v112Wait){
+        _noteGateHold(_convNow<(_isLate112?62:65)?'timing-confidence':!_oddsOk112?'timing-price':'timing-wait',_v112Why,
+          {controller:'v112',timing:_v112Timing,phase:_isEarly112?'early':_isLate112?'late':'mid',
+            confidence:_convNow,requiredConfidence:_isLate112?62:65,
+            directionalPrice:_kForDir,maxDirectionalPrice:_oddsCeil112,oddsOk:_oddsOk112,
+            secondsLeft:_secsLeft,cutoff:callLockDeadline(windowType)});
         // Track delay duration per window
         if(!_v104_1_delayStateRef.current||_v104_1_delayStateRef.current.windowId!==computeWindowId(windowType)){
           _v104_1_delayStateRef.current={windowId:computeWindowId(windowType),ticks:0,firstSeenAt:Date.now(),firstKForDir:_kForDir,firstConv:_convNow,firstDir:_dirNow};
@@ -48305,6 +48345,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _v104_1_delayStateRef.current.ticks++;
         // Don't lock this tick — let conditions evolve. Re-evaluated next tick.
         return;
+      }
+      // The timing controller now permits progress. Do not leave its previous
+      // wait reason masking a later sample/commit gate in this same tick.
+      if(callGateHoldRef.current?.windowId===computeWindowId(windowType)&&
+         callGateHoldRef.current.code?.startsWith('timing-')){
+        callGateHoldRef.current=null;
+        tc.blockedDecision=currentCallBlockerRef.current=describeCallBlocker({call:tc,readiness:startupReadiness,
+          hold:callCommitHoldRef.current,samples:taraCallSampleRef.current,quote:_kalshiQuote,windowId:computeWindowId(windowType),
+          asset:currentAssetRef.current||'BTC',now:Date.now()});
       }
       // If we got here with a delay state, we're about to lock — stamp WHY
       if(_v104_1_delayStateRef.current&&_v104_1_delayStateRef.current.windowId===computeWindowId(windowType)){
@@ -48405,6 +48454,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v104_1_abortCountRef.current.count=(_v104_1_abortCountRef.current.count||0)+1;
           _v104_1_abortCountRef.current.lastAbortAt=Date.now();
           _v104_1_delayStateRef.current=null; // clear state — let window keep developing
+          _noteGateHold('adverse-kalshi-abort',`Adverse Kalshi: directional price dropped ${_v1074_8_drop}pts (${_v1074_8_firstKForDir}->${_kForDir}) during ${Math.round(_v1074_8_delayMs/1000)}s patient wait.`,
+            {confidence:_convNow,firstDirectionalPrice:_v1074_8_firstKForDir,directionalPrice:_kForDir,
+              drop:_v1074_8_drop,requiredDrop:20,waitMs:_v1074_8_delayMs,requiredWaitMs:30000,
+              abortCount:_v104_1_abortCountRef.current.count});
           return; // skip lock this tick
         }
         _v104_1_pendingDelayStampRef.current={
@@ -48615,6 +48668,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   All other auto-commit paths defer until grace expires.
     const _msSinceRolloverLC=Date.now()-(_rolloverGraceRef.current||0);
     if(_rolloverGraceRef.current>0&&_msSinceRolloverLC<5000){
+      _noteGateHold('rollover-grace',`Observing the new window: ${Math.ceil((5000-_msSinceRolloverLC)/1000)}s grace remaining.`,
+        {scope:'window',remainingMs:5000-_msSinceRolloverLC,requiredMs:5000});
       return; // grace active — let the engine's SIT_OUT render, no auto-commits
     }
     // Track sample stability — if direction flips, reset count
@@ -53797,7 +53852,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.4</small>
+              <small>DECISION ENGINE · V14.4.5</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
