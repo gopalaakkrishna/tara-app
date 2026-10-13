@@ -12,7 +12,10 @@ export function describeCallBlocker({call,readiness,hold,gateHold,samples,quote,
     at:hold.at,direction:hold.direction||null,appliesToCurrentDirection:!!currentHold}:null;
   let code=call?.signalBlocker?.code||'signal',reason=call?.caution||call?.reason||'Waiting for a qualifying signal.',
     gate=call?.signalBlocker?{...call.signalBlocker.details,code,reason}:null;
-  if(!readiness?.ready){code=readiness?.code||'startup';reason=readiness?.reason||'Waiting for startup data.';gate=null;}
+  if(currentHold&&hold.code==='shared-lock-restore-error'){
+    code=hold.code;reason=hold.reason;gate={...hold.details,code,reason,at:hold.at};
+  }
+  else if(!readiness?.ready){code=readiness?.code||'startup';reason=readiness?.reason||'Waiting for startup data.';gate=null;}
   else if(currentHold){
     code=hold.code||'commit-check';reason=hold.reason;
     gate={...hold.details,code,reason,at:hold.at,direction:hold.direction||null};

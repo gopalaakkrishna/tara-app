@@ -23,6 +23,8 @@ import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executio
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability} from './forecastTiming.js';
 import {appendDecisionTrace,captureDecisionTrace} from './callDecisionTrace.js';
+import {sharedWindowId,matchesSharedWindow,restoredSnapshot,ledgerDecision,chooseSharedSnapshot,sharedSnapshotIdentity,restoredEngineLock,
+  readDecisionCache,cacheSharedDecision,publishSharedDecision} from './sharedDecision.js';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -350,11 +352,12 @@ const cloudSupabaseWrite=async(path,data)=>{
 
 // One-shot read: fetch a single doc by path. Returns the data payload or null.
 //   Matches cloudRead signature.
-const cloudSupabaseRead=async(path)=>{
+const cloudSupabaseRead=async(path,{throwOnError=false}={})=>{
   if(!_sbClient||!path)return null;
   try{
     const {data,error}=await _sbClient.from('tara_state').select('data,updated_at').eq('doc_path',path).maybeSingle();
     if(error){
+      if(throwOnError)throw error;
       // PGRST116 = no rows found, which is "missing doc" (not an error for us)
       if(error.code!=='PGRST116')console.warn('[Supabase] read failed',path,error.message);
       return null;
@@ -362,6 +365,7 @@ const cloudSupabaseRead=async(path)=>{
     if(!data)return null;
     return data.data; // unwrap the jsonb column
   }catch(e){
+    if(throwOnError)throw e;
     console.warn('[Supabase] read threw',path,e?.message);
     return null;
   }
@@ -1307,7 +1311,27 @@ const cloudWrite=async(path,data)=>{
   _incActiveWrites();
   let _ok=false;
   try{
-    _ok=await cloudSupabaseWrite(path,data);
+    if(path.startsWith('state/currentLock_')){
+      if(!_sbClient)return false;
+      const result=await publishSharedDecision(path,data,{
+        readRow:async p=>{
+          const r=await _sbClient.from('tara_state').select('data,updated_at').eq('doc_path',p).maybeSingle();
+          if(r.error)throw r.error;return r.data;
+        },
+        compareAndSwap:async(p,row,next)=>{
+          let query=_sbClient.from('tara_state').update({data:next,updated_at:new Date().toISOString()})
+            .eq('doc_path',p).eq('updated_at',row.updated_at);
+          query=row.data?._revision?query.eq('data->>_revision',row.data._revision):query.is('data->>_revision',null);
+          const r=await query.select('doc_path');if(r.error)throw r.error;return !!r.data?.length;
+        },
+        insertIfAbsent:async(p,next)=>{
+          const r=await _sbClient.from('tara_state').upsert({doc_path:p,data:next,updated_at:new Date().toISOString()},
+            {onConflict:'doc_path',ignoreDuplicates:true}).select('doc_path');
+          if(r.error)throw r.error;return !!r.data?.length;
+        },
+      });
+      _ok=result.ok||['stale-window-payload','newer-shared-window'].includes(result.reason);
+    }else _ok=await cloudSupabaseWrite(path,data);
     if(!_ok){
       _setCloudStatus({state:'error',lastError:{path,message:'Supabase write returned false',at:Date.now()}});
     }
@@ -1535,21 +1559,25 @@ try{if(typeof window!=='undefined'){window._tara_lifecycle=()=>_loadLifecycle();
 const cloudWatch=(path,callback)=>{
   if(!path||typeof callback!=='function'){try{callback&&callback(null,'disabled');}catch(_){}return()=>{};}
   _setCloudStatus({listeners:_cloudSyncStatus.listeners+1});
+  let active=true,realtimeSeen=false;
   // Initial read so the callback fires with current state (matches old onSnapshot behavior).
-  cloudSupabaseRead(path).then(d=>{
+  cloudSupabaseRead(path,{throwOnError:path.startsWith('state/currentLock_')}).then(d=>{
     _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
-    try{callback(d,'ok');}catch(_){}
+    try{if(active&&!realtimeSeen)callback(d,'ok');}catch(_){}
   }).catch(err=>{
     console.warn('[Cloud watch initial-read failed]',path,err?.message);
     _setCloudStatus({state:'error',lastError:{path,message:err?.message,at:Date.now()}});
-    try{callback(null,'error');}catch(_){}
+    try{if(active&&!realtimeSeen)callback(null,'error');}catch(_){}
   });
   // Subscribe to subsequent changes.
   const unsub=cloudSupabaseWatch(path,(d)=>{
+    if(!active)return;
+    realtimeSeen=true;
     _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
     try{callback(d,'ok');}catch(_){}
   });
   return()=>{
+    active=false;
     _setCloudStatus({listeners:Math.max(0,_cloudSyncStatus.listeners-1)});
     try{unsub();}catch(_){}
   };
@@ -5838,8 +5866,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.13-v14.4.8-forecast-and-fresh-formation';
-const TARA_VERSION_DISPLAY='TARA 14.4.8';
+const TARA_BUILD_VERSION='2026.10.13-v14.4.9-shared-decision-restoration';
+const TARA_VERSION_DISPLAY='TARA 14.4.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38277,14 +38305,18 @@ function TaraApp(){
   },[_deriveMultipliers]);
   // V5.6: Save/clear the active window's lock state to Firestore. Refresh restores from this.
   //   _persistLock writes whatever the refs currently hold (engine lock + Tara snapshot +
-  //   sample formation progress). _clearLock wipes the doc — used only on rollover when
-  //   the window changes and the previous lock is no longer relevant.
+  //   sample formation progress). _clearLock retires local refs only; the shared
+  //   document is replaced conditionally when a new current window publishes.
   const _hasRestoredLockRef=useRef(false);
   // V7.10.3: separate ref that flips true ONLY after cloudRead('state/currentLock')
   //   resolves. Lifecycle commit paths (V7.8 Path A/B, V7.9 NO_TRADE) gate on this so
   //   a tab opened mid-window doesn't fire its own commit before cloud data arrives —
   //   which would create a different snapshot per tab for the same window.
   const _cloudRestoreCompletedRef=useRef(false);
+  const _cloudRestoreErrorRef=useRef(null);
+  const _firstSharedRestoreCompletedRef=useRef(false);
+  const _sharedLedgerLookupRef=useRef(null);
+  const _sharedRestoreGenerationRef=useRef(0);
   // V7.10.4: lock path now includes asset + windowType so BTC-15m and ETH-5m don't share
   //   the same Firestore doc. Without this, switching assets between browsers means
   //   Browser A's BTC lock would be clobbered by Browser B's ETH state.
@@ -38293,10 +38325,19 @@ function TaraApp(){
   //   _persistLock reads this to decide whether to write back. Convergence rule: whoever
   //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
   const _cloudLockMirrorRef=useRef(null);
+  const _lastSharedProgressPersistRef=useRef({at:0,windowId:null,engineAt:null});
   const callCommitHoldRef=useRef(null);
   const callGateHoldRef=useRef(null); // diagnostic only; never a lock/persistence condition
   const callDecisionTraceRef=useRef(null);
   const currentCallBlockerRef=useRef(null);
+  const _completeSharedRestore=()=>{
+    _cloudRestoreErrorRef.current=null;_cloudRestoreCompletedRef.current=true;
+    _hasRestoredLockRef.current=true;_firstSharedRestoreCompletedRef.current=true;
+    if(callGateHoldRef.current?.code?.startsWith('shared-lock-restore')){
+      callGateHoldRef.current=null;
+      if(currentCallBlockerRef.current?.code?.startsWith('shared-lock-restore'))currentCallBlockerRef.current=null;
+    }
+  };
   const _prepareCallCommit=(snapshot)=>{
     const windowId=computeWindowId(windowType);
     const decision=assessCallCommit(snapshot,{windowId,windowType,asset:currentAssetRef.current||'BTC',quote:_kalshiQuote,readiness:startupReadiness,now:Date.now()});
@@ -38361,6 +38402,7 @@ function TaraApp(){
     snapshot.originalDecision ||= captureOriginalDecision(snapshot);
   };
   const _persistLock=()=>{
+    if(!_cloudRestoreCompletedRef.current)return; // never publish before a successful shared read
     if(!taraCallSnapshotRef.current&&callCommitHoldRef.current?.windowId===computeWindowId(windowType))return;
     if(_sealCallSnapshot(taraCallSnapshotRef.current)===false)return;
     if(!_sbClient)return; // V10.2.0: now gates on Supabase, not Firestore
@@ -38385,7 +38427,7 @@ function TaraApp(){
         return;
       }
     }
-    cloudWriteDebounced(_lockCloudPath(),{
+    const _doc={
       windowId:_expectedWid,
       windowType,
       asset:currentAssetRef.current||currentAsset||'BTC',
@@ -38393,9 +38435,58 @@ function TaraApp(){
       taraSnapshot:_snap?{..._snap}:null,
       taraSamples:taraCallSampleRef.current?{...taraCallSampleRef.current}:null,
       savedAt:Date.now(),
-    },300);
+    };
+    cacheSharedDecision(localStorage,_doc,{windowId:_expectedWid,windowType,asset:_doc.asset,now:Date.now()});
+    // Backup cadence is not decision cadence: avoid a conditional server read
+    // for every forming tick. A newly committed Call/engine lock is immediate.
+    const engineAt=Number(_doc.engineLock?._committedAt)||Number(_doc.engineLock?.lockedAt)||null;
+    const previous=_lastSharedProgressPersistRef.current;
+    if(!_snap&&previous.windowId===_expectedWid&&previous.engineAt===engineAt&&Date.now()-previous.at<10000)return;
+    _lastSharedProgressPersistRef.current={at:Date.now(),windowId:_expectedWid,engineAt};
+    cloudWriteDebounced(_lockCloudPath(),_doc,300);
   };
-  const _clearLock=()=>{_cloudLockMirrorRef.current=null;cloudDelete(_lockCloudPath());};
+  // Clear this tab's stale mirror only. Deleting a shared mutable path at mount
+  // or rollover could erase another device's valid decision for the new window.
+  const _clearLock=()=>{_cloudLockMirrorRef.current=null;callCommitHoldRef.current=null;
+    callGateHoldRef.current=null;currentCallBlockerRef.current=null;callDecisionTraceRef.current=null;};
+  const _applySharedDecision=(data,source='shared')=>{
+    if(source==='manual')_sharedRestoreGenerationRef.current++;
+    const context={windowId:computeWindowId(windowType),windowType,asset:currentAssetRef.current||'BTC',now:Date.now()};
+    if(source!=='local')_cloudLockMirrorRef.current=matchesSharedWindow(data,context)?data:null;
+    if(data&&!matchesSharedWindow(data,context))return false;
+    const cached=readDecisionCache(localStorage,context);
+    const recorded=ledgerDecision(taraCallLogRef.current,context);
+    const local=chooseSharedSnapshot(taraCallSnapshotRef.current,chooseSharedSnapshot(cached?.taraSnapshot,recorded,context),context);
+    const winner=chooseSharedSnapshot(data?.taraSnapshot,local,context);
+    let changed=false;
+    if(winner&&sharedSnapshotIdentity(winner)!==sharedSnapshotIdentity(taraCallSnapshotRef.current)){
+      const previous=taraCallSnapshotRef.current;
+      taraCallSnapshotRef.current=winner;changed=true;
+      if(previous?.locked&&isDirection(previous.call)&&isDirection(winner.call)&&previous.call!==winner.call){
+        try{pushToast('lock-restored-'+context.windowId,`Shared Call restored: ${winner.call}`,
+          `An earlier captured ${winner.call} decision is authoritative. The prior ${previous.call} alert is not re-sent.`,
+          {color:'#23B981',durationMs:12000,cooldown:0});}catch(_){}
+      }
+    }
+    let saved=null;try{saved=JSON.parse(localStorage.getItem('taraLockedTimeSeries_v1')||'null');}catch(_){}
+    const engine=restoredEngineLock(data?.engineLock,context,lockedCallRef.current,saved);
+    const localEngine=restoredEngineLock(lockedCallRef.current,context);
+    if(engine&&(!localEngine||(Number(engine._committedAt)||Number(engine.lockedAt)||0)+1000<
+      (Number(localEngine._committedAt)||Number(localEngine.lockedAt)||0))){
+      lockedCallRef.current=engine;engineLockedDirRef.current=engine.dir;
+      taraAdviceRef.current=engine.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';changed=true;
+    }
+    // Engine-only locks and forming samples never become a committed Tara Call.
+    if(data?.taraSamples&&!winner&&!taraCallSampleRef.current?.dir&&isDirection(data.taraSamples.dir)){
+      const count=Number(data.taraSamples.count);
+      if(Number.isFinite(count)&&count>=0){taraCallSampleRef.current={dir:data.taraSamples.dir,count};changed=true;}
+    }
+    const canonical={...(data||cached||{}),...context,taraSnapshot:winner,
+      engineLock:lockedCallRef.current, taraSamples:taraCallSampleRef.current};
+    if(winner)cacheSharedDecision(localStorage,canonical,context);
+    if(changed)setForceRender(p=>p+1);
+    return changed;
+  };
   // V7.10.5: regimeMemory now persists + syncs. Was in-memory only with hardcoded V144
   //   seeds — never saved on update, never synced. Now: localStorage cached, cloud-synced
   //   via learnings/regimeMemory, max-per-cell merge for cross-device convergence.
@@ -42900,10 +42991,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   stale lock display. lockedCallRef is a ref (not state) — without this,
         //   old lock stays visible until next organic render.
         setForceRender(p=>p+1);
-        _clearLock(); // V5.6: wipe cloud lock — new window starts clean
-        // V10.7.66: also explicitly null the cloud snapshot path so lock-watch
-        //   can't re-adopt stale cloud data before cloud clears propagate.
-        //   _clearLock handles the primary path but the snapshot doc may lag.
+        _clearLock(); // retire local mirror; never delete another tab's decision
+        // Canonical window validation rejects prior-window documents. The new
+        // window's conditional publication replaces old state without deletion.
         // V13.4.254: removed a cloudWrite('state/taraSnapshot',null) here -- it
         //   deleted a doc that nothing in this file ever writes or reads.
         _hasRestoredLockRef.current=false; // allow restore on next window if user refreshes
@@ -42956,233 +43046,89 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   the same earlier commit in its mirror and defers. This converges both browsers to the
   //   FIRST commit, not the last (which last-write-wins would do).
   useEffect(()=>{
-    // V10.7.85: when Supabase is paused, mark restore complete immediately so
-    //   lifecycle commit paths don't wait forever for a cloud read that won't come.
+    _cloudRestoreCompletedRef.current=false;
+    _cloudRestoreErrorRef.current=null;
+    _applySharedDecision(null,'local'); // immutable cache/ledger capture, never a new Call
     if(_SB_PAUSED||!_sbClient){_cloudRestoreCompletedRef.current=true;return;}
-    // V10.9.30 EGRESS ROOT FIX: was `!currentPrice` (state) which changes on EVERY price
-    //   tick (multiple/sec). With currentPrice in deps, this effect re-subscribed the
-    //   Supabase realtime channel + did a fresh cloudRead of the lock doc every tick —
-    //   the dominant egress driver (a GET every 1-3s, all day). Gate on the ref and use a
-    //   stable boolean (_priceAlive) in deps so we subscribe ONCE per window+asset.
-    if(!currentPriceRef.current||!currentAsset||!windowType)return;
-    let cancelled=false;
-    const expectedWid=computeWindowId(windowType);
-    const _expectedAsset=currentAssetRef.current||currentAsset||'BTC';
-    const path=_lockCloudPath();
-    _hasRestoredLockRef.current=true; // sentinel: subscription is active for this window
-    const unsub=cloudWatch(path,(d)=>{
-      if(cancelled)return;
-      // First message (whether data or null) marks restore as complete. Lifecycle paths
-      //   gate on this so they don't fire their own commit before cloud has had a turn.
-      _cloudRestoreCompletedRef.current=true;
-      // Mirror the doc for _persistLock's pre-write check (even when null)
-      _cloudLockMirrorRef.current=d||null;
-      if(!d)return; // empty doc — no saved lock for this asset+window
-      // Validate the cloud doc matches our current window+asset. With per-asset paths this
-      //   is mostly belt-and-suspenders — a stale doc from a previous window-type or asset
-      //   shouldn't be in this path, but the doc embeds windowId so we double-check.
-      if(d.windowId!==expectedWid){
-        console.info('[Firestore lock-watch] doc is from a different window — ignoring',{saved:d.windowId,now:expectedWid,path});
-        return;
+    if(!_priceAlive||!timeState.nextWindowMs||!currentAsset||!windowType)return;
+    let cancelled=false,retryTimer=null,retries=0,receipt=0;
+    const expectedWid=computeWindowId(windowType),asset=currentAssetRef.current||'BTC',path=_lockCloudPath();
+    const active=()=>!cancelled&&expectedWid===computeWindowId(windowType)&&asset===(currentAssetRef.current||'BTC');
+    const onValue=async(d,status='ok',errorReason=null)=>{
+      if(!active())return;
+      const token=++receipt;
+      const generation=++_sharedRestoreGenerationRef.current;
+      if(status!=='ok'){
+        _cloudRestoreErrorRef.current=errorReason||'Shared decision read failed; retaining any captured local Call and retrying. No replacement decision will be published.';
+        if(!retryTimer)retryTimer=setTimeout(()=>{
+          retryTimer=null;if(!active())return;
+          cloudSupabaseRead(path,{throwOnError:true}).then(value=>onValue(value,'ok')).catch(()=>onValue(null,'error'));
+        },Math.min(30000,4000*2**Math.min(retries++,3)));
+        setForceRender(p=>p+1);return;
       }
-      if(d.windowType&&d.windowType!==windowType)return;
-      if(d.asset&&d.asset!==_expectedAsset)return;
-      let adopted=[];
-      // V9.1.3: shared first-write-wins comparator. Cloud is authoritative when:
-      //   - local has nothing, OR
-      //   - local lacks _committedAt (created this session before _persistLock ran), OR
-      //   - cloud's commit is meaningfully earlier than local's (>1s tolerance).
-      const _shouldAdoptCloud=(cloudObj,localObj)=>{
-        if(!cloudObj)return false;
-        // V10.7.66: Window ID guard — never adopt a cloud snapshot from a previous window.
-        //   This was the root cause of rollover lock sticking: local snapshot clears at
-        //   rollover, cloud lock-watch fires, cloud still has old window's lock,
-        //   _shouldAdoptCloud(cloud, null) returns true → re-adopts stale lock.
-        const _cloudWindowId=cloudObj.windowId||cloudObj.lockedWindowId||null;
-        const _currentWindowId=timeState?.nextWindow||timeState?.startWindow||lastWindowRef.current||null;
-        if(_cloudWindowId&&_currentWindowId&&_cloudWindowId!==_currentWindowId){
-          return false; // cloud is from a different window — never adopt
+      if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
+      const context={windowId:expectedWid,windowType,asset,now:Date.now()};
+      // A deleted shared slot is not proof that no Call was ever captured.
+      // Consult the canonical cloud ledger once on cold load, or on a late
+      // return with no captured decision. Never poll the large ledger per tick.
+      const hasCapture=restoredSnapshot(taraCallSnapshotRef.current,context)||
+        (matchesSharedWindow(d,context)&&restoredSnapshot(d?.taraSnapshot,context));
+      const secondsLeft=(Date.parse(expectedWid.replace(/^(5m|15m)-/,''))+(windowType==='15m'?900000:300000)-Date.now())/1000;
+      if(!hasCapture&&(!_firstSharedRestoreCompletedRef.current||secondsLeft<=callLockDeadline(windowType))&&
+        _sharedLedgerLookupRef.current!==expectedWid){
+        try{
+          const ledger=await cloudSupabaseRead('memory/taraCallLog',{throwOnError:true});
+          if(!active()||token!==receipt||generation!==_sharedRestoreGenerationRef.current)return;
+          const captured=ledgerDecision(ledger?.entries||[],{...context,now:Date.now()});
+          if(captured)_applySharedDecision({windowId:expectedWid,windowType,asset,taraSnapshot:captured},'ledger');
+          _sharedLedgerLookupRef.current=expectedWid;
+        }catch(e){
+          if(!active()||token!==receipt||generation!==_sharedRestoreGenerationRef.current)return;
+          onValue(null,'error','Shared decision history lookup failed; retaining captured local decisions and retrying before creating a replacement.');return;
         }
-        if(!localObj)return true;
-        const _cT=Number(cloudObj._committedAt)||0;
-        const _lT=Number(localObj._committedAt)||0;
-        if(_cT>0&&_lT===0)return true; // local uncommitted → cloud authoritative
-        if(_cT>0&&_lT>0&&_cT+1000<_lT)return true; // cloud earlier
-        return false;
-      };
-      // Engine lock — V9.1.3 first-write-wins (was: only adopt if no local lock)
-      if(d.engineLock&&_shouldAdoptCloud(d.engineLock,lockedCallRef.current)){
-        // V9.10.8: PRESERVE locally-accumulated mid-trade arrays across cloud adoption.
-        //   Cloud's engineLock doc contains lock-formation metadata (dir, lockedAt,
-        //   posterior, regime, etc.) but NOT timeSeries or releaseSignalsHistory — those
-        //   only exist in-memory, pushed by V9.8.14 every 5s while the trade is live. The
-        //   pre-V9.10.8 line `lockedCallRef.current = {...d.engineLock}` replaced the whole
-        //   object whenever this cloud listener fired during the trade, wiping the arrays.
-        //   This was the root cause of the bimodal timeSeries pattern: trades where the
-        //   cloud listener happened not to fire mid-trade got full 170-sample arrays;
-        //   trades where it did got 0-2 samples. Fix: snapshot the local arrays before the
-        //   spread, then restore them onto the adopted object.
-        // V9.11.2: also check localStorage as a fallback for refreshed-mid-trade case.
-        //   When the user refreshes the tab during a locked trade, lockedCallRef is fresh
-        //   (no in-memory array), but localStorage may have the persisted samples from
-        //   before the refresh. Prefer in-memory if it has anything, fall back to storage.
-        let _preservedTS=Array.isArray(lockedCallRef.current?.timeSeries)?lockedCallRef.current.timeSeries:null;
-        const _preservedRH=Array.isArray(lockedCallRef.current?.releaseSignalsHistory)?lockedCallRef.current.releaseSignalsHistory:null;
-        if(!_preservedTS||_preservedTS.length===0){
-          try{
-            const _raw=localStorage.getItem('taraLockedTimeSeries_v1');
-            if(_raw){
-              const _saved=JSON.parse(_raw);
-              if(_saved&&Array.isArray(_saved.ts)&&_saved.ts.length>0&&_saved.windowId===d.engineLock?.windowId){
-                _preservedTS=_saved.ts;
-              }
-            }
-          }catch(_){}
-        }
-        lockedCallRef.current={...d.engineLock};
-        // V9.17.17: ensure restored lock has windowId so auto-exec can validate it
-        //   against the current window. Cloud doc top-level windowId is the source of
-        //   truth — engineLock subobject may or may not have it depending on when
-        //   it was saved (pre-V9.17.17 locks won't). Stamp from the outer doc field.
-        if(!lockedCallRef.current.windowId&&d.windowId)lockedCallRef.current.windowId=d.windowId;
-        if(_preservedTS&&_preservedTS.length>0)lockedCallRef.current.timeSeries=_preservedTS;
-        if(_preservedRH&&_preservedRH.length>0)lockedCallRef.current.releaseSignalsHistory=_preservedRH;
-        taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
-        engineLockedDirRef.current=d.engineLock.dir;
-        adopted.push(`engine ${d.engineLock.dir}`);
       }
-      // V9.1.3: Tara snapshot — same first-write-wins rule applied to snapshot.
-      //   Previously when local lacked _committedAt (created mid-session before persist
-      //   stamped it), the comparison failed and local kept its fresh-but-wrong commit
-      //   even though cloud had the original. Now cloud overrides whenever cloud has a
-      //   timestamp and local doesn't.
-      if(d.taraSnapshot&&_shouldAdoptCloud(d.taraSnapshot,taraCallSnapshotRef.current)){
-        const _wasOverride=!!taraCallSnapshotRef.current;
-        // V13.4.177: SILENT DIRECTION REVERSAL. first-write-wins can replace an
-        //   already-COMMITTED local snapshot with an earlier cloud one. When those two
-        //   disagree on direction, the on-screen call silently flips to the opposite
-        //   side of what was already broadcast and logged -- and it cannot re-alert,
-        //   because sentLock is one-shot per window (set at L46110, reset only on
-        //   window rollover at L46016). Observed live: Discord alerted DOWN at 3:26 on
-        //   the 3:15-3:30 window while the card read LOCKED UP a minute later.
-        //   The convergence rule itself is left alone (it exists so two devices agree
-        //   on the earliest commit) -- but a reversal of a LOCKED directional call is
-        //   never allowed to be silent again.
-        const _prevSnap=taraCallSnapshotRef.current;
-        const _prevDir=(_prevSnap&&(_prevSnap.call==='UP'||_prevSnap.call==='DOWN'))?_prevSnap.call:null;
-        const _newDir=(d.taraSnapshot.call==='UP'||d.taraSnapshot.call==='DOWN')?d.taraSnapshot.call:null;
-        const _isReversal=!!(_prevDir&&_newDir&&_prevDir!==_newDir&&_prevSnap.locked);
-        taraCallSnapshotRef.current={...d.taraSnapshot};
-        if(_isReversal){
-          try{console.warn('[V13.4.177] LOCKED CALL REVERSED BY CLOUD: '+_prevDir+' -> '+_newDir+' on '+(d.windowId||'this window')+'. Discord/Notification already alerted '+_prevDir+' and will NOT re-alert this window.');}catch(_w){}
-          try{if(typeof pushToast==='function')pushToast(
-            'lock-reversed-'+(d.windowId||'w'),
-            `Call reversed: ${_prevDir} → ${_newDir}`,
-            `Another device committed ${_newDir} earlier. Discord alerted ${_prevDir} and will not re-alert this window.`,
-            {color:'#23B981',durationMs:12000,cooldown:0}
-          );}catch(_t){}
-        }
-        adopted.push(_wasOverride?`tara ${d.taraSnapshot.call} (override · cloud authoritative)`:`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
-      }
-      // Mid-formation sample progress
-      if(d.taraSamples&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
-        taraCallSampleRef.current={...d.taraSamples};
-        adopted.push(`forming ${d.taraSamples.dir} ${d.taraSamples.count}`);
-      }
-      if(adopted.length){
-        console.info('[Firestore lock-watch] adopted from cloud:',adopted.join(' · '),'·',path);
-        setForceRender(p=>p+1);
-      }
-    });
-    return()=>{cancelled=true;unsub();};
-  },[_priceAlive,windowType,currentAsset]);
+      if(!active()||token!==receipt||generation!==_sharedRestoreGenerationRef.current)return;
+      _applySharedDecision(d,'watch');
+      _completeSharedRestore();
+      if(taraCallSnapshotRef.current&&sharedSnapshotIdentity(restoredSnapshot(d?.taraSnapshot,context))!==
+        sharedSnapshotIdentity(taraCallSnapshotRef.current))_persistLock();
+      setForceRender(p=>p+1);
+    };
+    const unsub=cloudWatch(path,onValue);
+    return()=>{cancelled=true;if(retryTimer)clearTimeout(retryTimer);unsub();};
+  },[_priceAlive,windowType,currentAsset,timeState.nextWindowMs]);
 
-  // V11.2.2 BACKGROUND-WAKE LOCK RESYNC.
-  //   Why this exists: a backgrounded/inactive tab has its setInterval decision loop and
-  //   price polls throttled by the browser (>=1/min, frozen on mobile), so it cannot
-  //   compute its own lock on time; AND its Supabase realtime WebSocket can drop while
-  //   hidden, and postgres_changes does NOT replay events missed during the gap. Net
-  //   effect: secondary devices show no call / a late call until a manual Force Resync.
-  //   The live lock-watch effect above will NOT re-fire on foreground because its deps
-  //   (_priceAlive,windowType,currentAsset) don't change when a tab regains focus and
-  //   currentPrice never nulls. So we add a dedicated foreground re-read here.
-  //   On visibilitychange->visible OR window focus: do ONE read of the lock doc and adopt
-  //   via the SAME first-write-wins rule the realtime watch uses. One GET per foreground
-  //   transition (cooldown-guarded), so egress impact is negligible. Purely additive and
-  //   never overrides an earlier local commit, so it cannot corrupt a lock.
+  // Wake and manual restore share canonical epoch window IDs and one adopter.
   useEffect(()=>{
     if(_SB_PAUSED||!_sbClient)return;
-    let _busy=false,_lastAt=0;
-    const _resyncLockOnWake=async()=>{
-      const _now=Date.now();
-      if(_busy||(_now-_lastAt)<1500)return;
-      if(!currentAsset||!windowType)return;
-      _busy=true;_lastAt=_now;
+    let cancelled=false,busy=false,lastAt=0;
+    const resync=async()=>{
+      const now=Date.now();if(busy||now-lastAt<1500)return;
+      const wid=computeWindowId(windowType),asset=currentAssetRef.current||'BTC',path=_lockCloudPath();
+      const generation=++_sharedRestoreGenerationRef.current;
+      busy=true;lastAt=now;
       try{
-        const path=_lockCloudPath();
-        const d=await cloudSupabaseRead(path);
-        _cloudLockMirrorRef.current=d||null;
-        if(!d)return;
-        const expectedWid=computeWindowId(windowType);
-        if(d.windowId!==expectedWid)return;
-        const _expectedAsset=currentAssetRef.current||currentAsset||'BTC';
-        if(d.windowType&&d.windowType!==windowType)return;
-        if(d.asset&&d.asset!==_expectedAsset)return;
-        const _shouldAdopt=(cloudObj,localObj)=>{
-          if(!cloudObj)return false;
-          const _cWid=cloudObj.windowId||cloudObj.lockedWindowId||null;
-          const _curWid=timeState?.nextWindow||timeState?.startWindow||lastWindowRef.current||null;
-          if(_cWid&&_curWid&&_cWid!==_curWid)return false;
-          if(!localObj)return true;
-          const _cT=Number(cloudObj._committedAt)||0,_lT=Number(localObj._committedAt)||0;
-          if(_cT>0&&_lT===0)return true;
-          if(_cT>0&&_lT>0&&(_cT+1000)<_lT)return true;
-          return false;
-        };
-        let adopted=false;
-        if(d.engineLock&&_shouldAdopt(d.engineLock,lockedCallRef.current)){
-          let _ts=Array.isArray(lockedCallRef.current?.timeSeries)?lockedCallRef.current.timeSeries:null;
-          const _rh=Array.isArray(lockedCallRef.current?.releaseSignalsHistory)?lockedCallRef.current.releaseSignalsHistory:null;
-          if(!_ts||_ts.length===0){try{const _raw=localStorage.getItem('taraLockedTimeSeries_v1');if(_raw){const _sv=JSON.parse(_raw);if(_sv&&Array.isArray(_sv.ts)&&_sv.ts.length>0&&_sv.windowId===d.engineLock?.windowId)_ts=_sv.ts;}}catch(_){}}
-          lockedCallRef.current={...d.engineLock};
-          if(!lockedCallRef.current.windowId&&d.windowId)lockedCallRef.current.windowId=d.windowId;
-          if(_ts&&_ts.length>0)lockedCallRef.current.timeSeries=_ts;
-          if(_rh&&_rh.length>0)lockedCallRef.current.releaseSignalsHistory=_rh;
-          taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
-          engineLockedDirRef.current=d.engineLock.dir;
-          adopted=true;
+        const d=await cloudSupabaseRead(path,{throwOnError:true});
+        if(cancelled||generation!==_sharedRestoreGenerationRef.current||wid!==computeWindowId(windowType)||asset!==(currentAssetRef.current||'BTC'))return;
+        const context={windowId:wid,windowType,asset,now:Date.now()};
+        _applySharedDecision(null,'local');
+        if(!restoredSnapshot(taraCallSnapshotRef.current,context)&&!(matchesSharedWindow(d,context)&&restoredSnapshot(d?.taraSnapshot,context))&&
+          _sharedLedgerLookupRef.current!==wid){
+          const ledger=await cloudSupabaseRead('memory/taraCallLog',{throwOnError:true});
+          if(cancelled||generation!==_sharedRestoreGenerationRef.current||wid!==computeWindowId(windowType)||asset!==(currentAssetRef.current||'BTC'))return;
+          const captured=ledgerDecision(ledger?.entries||[],{...context,now:Date.now()});
+          if(captured)_applySharedDecision({windowId:wid,windowType,asset,taraSnapshot:captured},'ledger');
+          _sharedLedgerLookupRef.current=wid;
         }
-        if(d.taraSnapshot&&_shouldAdopt(d.taraSnapshot,taraCallSnapshotRef.current)){
-          // V13.4.177: same silent-reversal guard as the realtime watch above.
-          const _pSnap=taraCallSnapshotRef.current;
-          const _pDir=(_pSnap&&(_pSnap.call==='UP'||_pSnap.call==='DOWN'))?_pSnap.call:null;
-          const _nDir=(d.taraSnapshot.call==='UP'||d.taraSnapshot.call==='DOWN')?d.taraSnapshot.call:null;
-          const _rev=!!(_pDir&&_nDir&&_pDir!==_nDir&&_pSnap.locked);
-          taraCallSnapshotRef.current={...d.taraSnapshot};
-          if(_rev){
-            try{console.warn('[V13.4.177] LOCKED CALL REVERSED BY CLOUD (wake-resync): '+_pDir+' -> '+_nDir+' on '+(d.windowId||'this window')+'. Discord already alerted '+_pDir+' and will NOT re-alert this window.');}catch(_w){}
-            try{if(typeof pushToast==='function')pushToast(
-              'lock-reversed-'+(d.windowId||'w'),
-              `Call reversed: ${_pDir} → ${_nDir}`,
-              `Another device committed ${_nDir} earlier. Discord alerted ${_pDir} and will not re-alert this window.`,
-              {color:'#23B981',durationMs:12000,cooldown:0}
-            );}catch(_t){}
-          }
-          adopted=true;
-        }
-        if(d.taraSamples&&taraCallSampleRef.current&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
-          taraCallSampleRef.current={...d.taraSamples};
-          adopted=true;
-        }
-        if(adopted){console.info('[V11.2.2] wake-resync adopted lock from cloud . '+path);setForceRender(p=>p+1);}
-      }catch(e){console.warn('[V11.2.2] wake-resync failed',e?.message);}
-      finally{_busy=false;}
+        _applySharedDecision(d,'wake');_completeSharedRestore();setForceRender(p=>p+1);
+        if(taraCallSnapshotRef.current&&sharedSnapshotIdentity(restoredSnapshot(d?.taraSnapshot,context))!==
+          sharedSnapshotIdentity(taraCallSnapshotRef.current))_persistLock();
+      }catch(e){if(!cancelled&&generation===_sharedRestoreGenerationRef.current&&wid===computeWindowId(windowType)&&asset===(currentAssetRef.current||'BTC')){_cloudRestoreErrorRef.current='Shared decision wake read failed; retained captured decision. Waiting for a successful retry.';setForceRender(p=>p+1);}}
+      finally{busy=false;}
     };
-    const _onVis=()=>{if(document.visibilityState==='visible')_resyncLockOnWake();};
-    const _onFocus=()=>_resyncLockOnWake();
-    document.addEventListener('visibilitychange',_onVis);
-    window.addEventListener('focus',_onFocus);
-    return()=>{document.removeEventListener('visibilitychange',_onVis);window.removeEventListener('focus',_onFocus);};
+    const onVis=()=>{if(document.visibilityState==='visible')resync();};
+    document.addEventListener('visibilitychange',onVis);window.addEventListener('focus',resync);
+    return()=>{cancelled=true;document.removeEventListener('visibilitychange',onVis);window.removeEventListener('focus',resync);};
   },[windowType,currentAsset]);
 
   // V12.9: WAKE-TIME MISSED-WINDOW DETECTOR
@@ -48155,7 +48101,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // Read the shared window first so a late-opening tab cannot replace a
     // pre-existing Call with a new deadline sitout.
     if(!_cloudRestoreCompletedRef.current&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000)){
-      _noteGateHold('shared-lock-restore','Waiting for the shared window decision to finish loading.',{scope:'window'});
+      _noteGateHold(_cloudRestoreErrorRef.current?'shared-lock-restore-error':'shared-lock-restore',
+        _cloudRestoreErrorRef.current||'Waiting for the shared window decision to finish loading.',{scope:'window'});
       return;
     }
 
@@ -52778,51 +52725,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 // Lock is from an older window — skip (auto-cleanup happens at next rollover)
                 console.info('[V8.6.1] Lock for',path,'is from stale window',data.windowId,'(live:',_liveWid,') — skipping');
               } else {
-                // V9.1.3: force-resync now uses the same first-write-wins rule.
-                //   Cloud is authoritative when local lacks _committedAt or cloud is
-                //   meaningfully earlier. Force-resync should pull the canonical lock,
-                //   not just fill empty slots.
-                const _shouldAdopt=(cloudObj,localObj)=>{
-                  if(!cloudObj)return false;
-                  if(!localObj)return true;
-                  const _cT=Number(cloudObj._committedAt)||0;
-                  const _lT=Number(localObj._committedAt)||0;
-                  if(_cT>0&&_lT===0)return true;
-                  if(_cT>0&&_lT>0&&_cT+1000<_lT)return true;
-                  return false;
-                };
-                if(data.engineLock&&_shouldAdopt(data.engineLock,lockedCallRef.current)){
-                  // V9.10.8: preserve locally-accumulated mid-trade arrays across cloud
-                  //   adoption — see full explanation at the primary cloud-watch handler.
-                  // V9.11.2: also check localStorage when in-memory is empty (refresh case).
-                  let _preservedTS=Array.isArray(lockedCallRef.current?.timeSeries)?lockedCallRef.current.timeSeries:null;
-                  const _preservedRH=Array.isArray(lockedCallRef.current?.releaseSignalsHistory)?lockedCallRef.current.releaseSignalsHistory:null;
-                  if(!_preservedTS||_preservedTS.length===0){
-                    try{
-                      const _raw=localStorage.getItem('taraLockedTimeSeries_v1');
-                      if(_raw){
-                        const _saved=JSON.parse(_raw);
-                        if(_saved&&Array.isArray(_saved.ts)&&_saved.ts.length>0&&_saved.windowId===data.engineLock?.windowId){
-                          _preservedTS=_saved.ts;
-                        }
-                      }
-                    }catch(_){}
-                  }
-                  lockedCallRef.current={...data.engineLock};
-                  if(_preservedTS&&_preservedTS.length>0)lockedCallRef.current.timeSeries=_preservedTS;
-                  if(_preservedRH&&_preservedRH.length>0)lockedCallRef.current.releaseSignalsHistory=_preservedRH;
-                  taraAdviceRef.current=data.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
-                  engineLockedDirRef.current=data.engineLock.dir;
-                }
-                if(data.taraSnapshot&&_shouldAdopt(data.taraSnapshot,taraCallSnapshotRef.current)){
-                  taraCallSnapshotRef.current={...data.taraSnapshot};
-                }
-                if(data.taraSamples&&!taraCallSampleRef.current){
-                  taraCallSampleRef.current={...data.taraSamples};
-                }
-                _cloudLockMirrorRef.current=data;
+                _applySharedDecision(data,'manual');
+                _completeSharedRestore();
                 _applied++;
-                console.info('[V9.1.3] Applied lock from',path,':',data.engineLock?.dir||data.taraSnapshot?.call);
+                console.info('[shared-decision] Applied canonical decision from',path);
               }
             }
           }
@@ -53873,7 +53779,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.8</small>
+              <small>DECISION ENGINE · V14.4.9</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

@@ -142,8 +142,8 @@ test('waiting persistence cannot publish a null snapshot over another device loc
   const h=boundaryHarness(600),snap={...candidate,tier:'time-cap-commit'};
   h.taraCallSnapshotRef.current=snap;h.prepare(snap);
   let sealCalls=0;
-  const persist=new Function('taraCallSnapshotRef','callCommitHoldRef','computeWindowId','windowType','_sealCallSnapshot',body+'; return _persistLock;')(
-    h.taraCallSnapshotRef,h.callCommitHoldRef,()=>windowId,'15m',()=>{sealCalls++;throw new Error('must not reach persistence');});
+  const persist=new Function('taraCallSnapshotRef','callCommitHoldRef','computeWindowId','windowType','_sealCallSnapshot','_cloudRestoreCompletedRef',body+'; return _persistLock;')(
+    h.taraCallSnapshotRef,h.callCommitHoldRef,()=>windowId,'15m',()=>{sealCalls++;throw new Error('must not reach persistence');},{current:true});
   persist();
   assert.equal(sealCalls,0);
 });
