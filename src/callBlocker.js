@@ -10,13 +10,14 @@ export function describeCallBlocker({call,readiness,hold,gateHold,samples,quote,
   const currentHold=recentHold&&(!hold.direction||hold.scope==='window'||hold.direction===call?.call);
   const lastGate=recentHold&&!currentHold?{...hold.details,code:hold.code||'commit-check',reason:hold.reason,
     at:hold.at,direction:hold.direction||null,appliesToCurrentDirection:!!currentHold}:null;
-  let code='signal',reason=call?.caution||call?.reason||'Waiting for a qualifying signal.',gate=null;
-  if(!readiness?.ready){code=readiness?.code||'startup';reason=readiness?.reason||'Waiting for startup data.';}
+  let code=call?.signalBlocker?.code||'signal',reason=call?.caution||call?.reason||'Waiting for a qualifying signal.',
+    gate=call?.signalBlocker?{...call.signalBlocker.details,code,reason}:null;
+  if(!readiness?.ready){code=readiness?.code||'startup';reason=readiness?.reason||'Waiting for startup data.';gate=null;}
   else if(currentHold){
     code=hold.code||'commit-check';reason=hold.reason;
     gate={...hold.details,code,reason,at:hold.at,direction:hold.direction||null};
   }
-  else if(!checked.ok){code='market-quote';reason=`Waiting for a current Kalshi quote (${checked.reason}).`;}
+  else if(!checked.ok){code='market-quote';reason=`Waiting for a current Kalshi quote (${checked.reason}).`;gate=null;}
   else if(lastGate&&isDirection(call?.call)&&isDirection(hold.direction)){
     code='direction-changed';reason=`Direction changed to ${call.call} after ${hold.direction} was blocked: ${hold.reason}`;
   }

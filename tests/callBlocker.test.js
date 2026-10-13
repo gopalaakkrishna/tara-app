@@ -54,23 +54,31 @@ test('diagnostic and commit holds use the latest valid evaluated branch without 
   assert.equal(older.at,now-1000);assert.equal(newer.reason,'Model does not support proposed direction');
 });
 
+test('readiness or quote failure cannot carry an unrelated forecast gate payload',()=>{
+  const call={call:'SIT_OUT',reason:'Forecast unavailable',signalBlocker:{code:'forecast-unavailable',details:{requiredAlignment:1}}};
+  for(const patch of [{readiness:{ready:false,code:'startup-history',reason:'Loading candles'}},{quote:{...quote,at:now-31000}}]){
+    const b=describeCallBlocker({...baseline,call,...patch});
+    assert.notEqual(b.code,'forecast-unavailable');assert.equal(b.gate,null);
+  }
+});
+
 function liveHarness({confidence=58,direction='DOWN',secondsLeft=600,price=78,maxPrice=100}={}) {
   const clock=close-secondsLeft*1000,tc={call:direction,confidence},current={current:null},holds={current:null},delay={current:null};
   const samples={current:{dir:'UP',count:405.9}},liveQuote={...quote,at:clock};
   const noteBody=app.slice(app.indexOf('    const _noteGateHold='),app.indexOf('    // Read the shared window first',app.indexOf('    const _noteGateHold=')));
   const commitHold={current:null};
   const note=new Function('computeWindowId','windowType','currentAssetRef','Date','callGateHoldRef','isDirection','tc',
-    'currentCallBlockerRef','describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','callCommitHoldRef',noteBody+';return _noteGateHold;')(
+    'currentCallBlockerRef','describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','callCommitHoldRef','_traceDecision',noteBody+';return _noteGateHold;')(
       ()=>windowId,'15m',{current:'BTC'},{now:()=>clock},holds,isDirection,tc,current,describeCallBlocker,
-      baseline.readiness,samples,liveQuote,commitHold);
-  const timingBody=app.slice(app.indexOf('      const _winLenSec112='),app.indexOf("      // If we got here with a delay state,"));
+      baseline.readiness,samples,liveQuote,commitHold,()=>{});
+  const timingBody=app.slice(app.indexOf('      const _winLenSec112='),app.indexOf("      // Timing permits progress,"));
   const timing=new Function('windowType','_secsLeft','_convNow','_kForDir','getEntryMaxCost','_hasTimeToWait',
     'tc','_v112Live','_v1364_oppRef','computeWindowId','_v104_1_delayStateRef','currentAssetRef','currentAsset',
     '_lifecycleRecordSnapshot','Date','_noteGateHold','callLockDeadline','callCommitHoldRef','currentCallBlockerRef',
-    'describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','_dirNow','callGateHoldRef','readCallCostBand','localStorage',timingBody+';return "progress";');
+    'describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','_dirNow','callGateHoldRef','readCallCostBand','localStorage','_traceDecision',timingBody+';return "progress";');
   const run=()=>timing('15m',secondsLeft,confidence,price,()=>maxPrice,secondsLeft>180,tc,{},
     {current:null},()=>windowId,delay,{current:'BTC'},'BTC',()=>{},{now:()=>clock},note,callLockDeadline,
-    commitHold,current,describeCallBlocker,baseline.readiness,samples,liveQuote,direction,holds,readCallCostBand,{getItem:()=> 'off'});
+    commitHold,current,describeCallBlocker,baseline.readiness,samples,liveQuote,direction,holds,readCallCostBand,{getItem:()=> 'off'},()=>{});
   return {run,note,tc,holds,commitHold,current,clock};
 }
 

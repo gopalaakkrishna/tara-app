@@ -21,6 +21,8 @@ import MarketIntelligencePanel from './MarketIntelligencePanel.jsx';
 import {assessSpotResponse, freshOkxResults, freshFeedStatus, observedFundingPair} from './marketDataQuality.js';
 import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executionIntegrity.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
+import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability} from './forecastTiming.js';
+import {appendDecisionTrace,captureDecisionTrace} from './callDecisionTrace.js';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -5836,8 +5838,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.13-v14.4.7-live-call-price-policy';
-const TARA_VERSION_DISPLAY='TARA 14.4.7';
+const TARA_BUILD_VERSION='2026.10.13-v14.4.8-forecast-and-fresh-formation';
+const TARA_VERSION_DISPLAY='TARA 14.4.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9628,7 +9630,8 @@ const computeFutureGrandTrend=(candles,length=70,forecast=100)=>{
 const computeFGT=(candles,length=70,forecast=100)=>{
   // Need at least length*2 + forecast bars for a meaningful computation
   // Plus current bar. Be lenient: scale length down if needed.
-  if(!candles||candles.length<20)return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:'insufficient'};
+  if(!Array.isArray(candles)||candles.length<20)return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:'insufficient'};
+  if(candles.some(c=>!Number.isFinite(Number(c?.c))||Number(c?.c)<=0))return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:'invalid-candles'};
   // Adapt parameters to available data
   // PineScript: oldest is highest index, newest is index 0 in our convention (Tara's liveHistory[0] is newest)
   // We'll work with reversed array: oldest first
@@ -9637,7 +9640,10 @@ const computeFGT=(candles,length=70,forecast=100)=>{
   // Auto-scale length and forecast to available history
   const _length=Math.min(length,Math.floor(n/3));
   const _forecast=Math.min(forecast,Math.floor(n/2));
-  if(_length<5||_forecast<5)return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:'too-short'};
+  if(_length<5||!Number.isFinite(_forecast)||_forecast<=0)return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:_forecast<=0?'window-closed':'too-short'};
+  // Estimate a stable historical slope over at least five bars, then project
+  // only over the requested (possibly fractional) horizon before settlement.
+  const _slopeLookback=Math.max(5,Math.ceil(_forecast));
   // Build t series
   const t=new Array(n);
   for(let i=0;i<n;i++){
@@ -9656,7 +9662,7 @@ const computeFGT=(candles,length=70,forecast=100)=>{
     t[i]=0.9*tLag+0.1*src+changeTerm;
   }
   const _tLast=t[n-1];
-  const _tBack=t[Math.max(0,n-1-_forecast)];
+  const _tBack=t[Math.max(0,n-1-_slopeLookback)];
   // V10.7.35 — SLOPE FIX: Pine Script FGT direction comes from the SLOPE of the
   //   t-series line, NOT from comparing the projected value to current price.
   //   OLD (wrong): forecastBps = (fcast - currentPrice) / currentPrice * 10000
@@ -9666,12 +9672,12 @@ const computeFGT=(candles,length=70,forecast=100)=>{
   //     → slope = tLast - tBack = projected change in t-series over forecast bars
   //     → matches Pine Script line color logic (green if y2>y1, red if y2<y1)
   const currentPrice=bars[n-1].c;
-  const slope=_tLast-_tBack;
+  const slope=(_tLast-_tBack)*(_forecast/_slopeLookback);
   const forecastBps=Math.round((slope/currentPrice)*10000);
   let forecastDir='NEUTRAL';
   if(forecastBps>3)forecastDir='UP';
   else if(forecastBps<-3)forecastDir='DOWN';
-  return{forecastDir,forecastBps,fcast:Math.round(_tLast+slope),valid:true,length:_length,forecast:_forecast,slope:Math.round(slope*100)/100};
+  return{forecastDir,forecastBps,fcast:Math.round(_tLast+slope),valid:true,length:_length,forecast:_forecast,slopeLookback:_slopeLookback,slope:Math.round(slope*100)/100};
 };
 
 // V134: Volume Profile — find where most trading happened recently
@@ -11327,7 +11333,7 @@ const computeV99Posterior=(params)=>{
   // Then convert to "implied posterior" — direction Tara expects price to land
   const _v5sNum=velocityRef?.current?.v5s||0;     // $/sec recent
   const _accelNum=velocityRef?.current?.accel||0; // $/sec² (v5s - v15s diff)
-  const _secsLeft=Math.max(0,(is15m?900:300)-(clockSeconds||0));
+  const _secsLeft=forecastSecondsRemaining(clockSeconds,is15m);
   // V134: SMOOTH TRAJECTORY — blend 5s with 30s velocity to prevent tick-induced flip-flops
   // Old version used only v5s × √secs which caused 30+ point posterior swings on a single tick
   // Now we use a 70/30 blend favoring stable velocity; recent ticks still matter but don't dominate
@@ -11489,11 +11495,11 @@ const computeV99Posterior=(params)=>{
     // V5.7.7: forecast cap — each timeframe's projection horizon clamps to bars-remaining-in-window
     //   so FGT can't project hours ahead when only minutes remain. The case that motivates this:
     //   15:00 settlement at 14:55 with 5m forecast=40 was projecting 200 minutes forward and
-    //   reading -23 bps, voting DOWN. After cap (forecast=1 with 60s left, =0 with <60s) it
-    //   contributes nothing, letting tape/flow/Kalshi drive the call.
+    // V14.4.8: use fractional forecast bars and a separate historical slope
+    // lookback. A short remaining horizon is not missing historical data, and
+    // the forward projection must never extend beyond this window's close.
     const _capForecast=(tfMinutes,baseFore)=>{
-      const _barsLeft=Math.floor(_secsLeft/(tfMinutes*60));
-      return Math.max(0,Math.min(baseFore,_barsLeft));
+      return cappedForecastBars(_secsLeft,tfMinutes,baseFore);
     };
     const tfList=[
       {label:'1m',data:tfCandles.c1m,length:30,forecast:_capForecast(1,30),weight:1.0},
@@ -38289,6 +38295,7 @@ function TaraApp(){
   const _cloudLockMirrorRef=useRef(null);
   const callCommitHoldRef=useRef(null);
   const callGateHoldRef=useRef(null); // diagnostic only; never a lock/persistence condition
+  const callDecisionTraceRef=useRef(null);
   const currentCallBlockerRef=useRef(null);
   const _prepareCallCommit=(snapshot)=>{
     const windowId=computeWindowId(windowType);
@@ -38305,6 +38312,11 @@ function TaraApp(){
         lastGate:null,
         gate:{...callCommitHoldRef.current.details,code:'commit-check',reason:decision.reason,
           at:callCommitHoldRef.current.at,direction:callCommitHoldRef.current.direction}};
+      callDecisionTraceRef.current=appendDecisionTrace(callDecisionTraceRef.current,{windowId,at:Date.now(),
+        code:'commit-check',reason:decision.reason,direction:callCommitHoldRef.current.direction,
+        intendedDirection:snapshot?.wouldHaveBeen||snapshot?.direction||null,
+        rejectedTier:snapshot?.tier||null,confidence:snapshot?.confidence??null,
+        secondsLeft:decision.secondsLeft,dataReady:!!startupReadiness.ready,gate:callCommitHoldRef.current.details});
       if(taraCallSnapshotRef.current===snapshot)taraCallSnapshotRef.current=null;
       lockedCallRef.current=null;
       return false;
@@ -38339,6 +38351,13 @@ function TaraApp(){
     }
     snapshot.dir=snapshot.call;
     snapshot.direction=snapshot.call;
+    if(!snapshot.originalDecision){
+      callDecisionTraceRef.current=appendDecisionTrace(callDecisionTraceRef.current,{windowId:_wid,at:Date.now(),
+        code:snapshot.call==='SIT_OUT'?'sitout-committed':'call-committed',direction:snapshot.call,
+        confidence:snapshot.confidence??null,reason:snapshot.reason||'',gate:snapshot.blockedDecision?.gate||null});
+    }
+    snapshot.decisionTrace ||= captureDecisionTrace(callDecisionTraceRef.current,_wid);
+    snapshot.forecastAvailability ||= forecastAvailability(analysis?.fgtResults);
     snapshot.originalDecision ||= captureOriginalDecision(snapshot);
   };
   const _persistLock=()=>{
@@ -45377,7 +45396,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
     const fgtMin=tapeStronglyAgrees||kalshiStronglyAgrees?0.5:1.0; // V5.6.4: was 0.0/0.4/0.7
     if(fgtAbs<fgtMin&&!isFastTrackRegime&&!_v10_3_2_highConv){
-      return{call:'SIT_OUT',reason:`${_dirLead} — FGT ${fgtAbs.toFixed(1)}/4 mixed across timeframes`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      const availability=forecastAvailability(analysis.fgtResults);
+      const unavailable=availability.validCount<availability.total;
+      const reason=unavailable?`${_dirLead} — FGT forecasts ${availability.status} (${availability.validCount}/${availability.total} available); insufficient alignment ${fgtAbs.toFixed(1)}/4`:
+        `${_dirLead} — FGT ${fgtAbs.toFixed(1)}/4 mixed across timeframes`;
+      return{call:'SIT_OUT',reason,confidence:0,direction:dir,conviction,phase:'WATCHING',
+        signalBlocker:{code:unavailable?'forecast-unavailable':'forecast-mixed',details:{alignment:fgtAbs,requiredAlignment:fgtMin,availability}}};
     }
     // V6.0.9 Gate 4.5: LATE-COMMIT GUARD. When elapsed > 70% of window, only high-quality
     //   tiers (super-confluence, confluence, tape-led, exceptional, strong+) can commit.
@@ -48105,6 +48129,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
     const tc=taraCall;
     const isCall=tc.call==='UP'||tc.call==='DOWN';
+    const _traceDecision=(code,reason,gate={})=>{
+      const windowId=computeWindowId(windowType),at=Date.now();
+      const direction=isDirection(tc.call)?tc.call:null;
+      const k=kalshiYesPrice==null?NaN:Number(kalshiYesPrice);
+      callDecisionTraceRef.current=appendDecisionTrace(callDecisionTraceRef.current,{windowId,at,code,reason,direction,
+        confidence:tc.confidence??null,directionalPrice:direction&&Number.isFinite(k)?(direction==='UP'?k:100-k):null,
+        secondsLeft:(Date.parse(windowId.replace(/^(5m|15m)-/,''))+(windowType==='15m'?900000:300000)-at)/1000,
+        samples:taraCallSampleRef.current?.count??0,claimedDirection:taraCallSampleRef.current?.dir||null,
+        requiredSamples:tc._ctx?.needSamples??null,dataReady:!!startupReadiness.ready,
+        quoteIssue:inspectDecisionQuote(_kalshiQuote,{windowId,asset:currentAssetRef.current||'BTC',now:at}).reason||null,gate});
+    };
     // Observation only. Stamp the branch which actually returns without a lock,
     // before the next render/deadline, instead of reporting sample formation.
     const _noteGateHold=(code,reason,details={})=>{
@@ -48115,6 +48150,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         hold:callCommitHoldRef.current,gateHold:callGateHoldRef.current,
         samples:taraCallSampleRef.current,quote:_kalshiQuote,windowId,asset,now});
       tc.blockedDecision=currentCallBlockerRef.current;
+      _traceDecision(code,reason,details);
     };
     // Read the shared window first so a late-opening tab cannot replace a
     // pre-existing Call with a new deadline sitout.
@@ -48321,7 +48357,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           hold:callCommitHoldRef.current,samples:taraCallSampleRef.current,quote:_kalshiQuote,windowId:computeWindowId(windowType),
           asset:currentAssetRef.current||'BTC',now:Date.now()});
       }
-      // If we got here with a delay state, we're about to lock — stamp WHY
+      _traceDecision('timing-approved',_v112Why,{controller:'v112',timing:_v112Timing,confidence:_convNow,
+        requiredConfidence:_isLate112?62:65,directionalPrice:_kForDir,maxDirectionalPrice:_oddsCeil112});
+      // Timing permits progress, not necessarily a lock — later checks still apply.
       if(_v104_1_delayStateRef.current&&_v104_1_delayStateRef.current.windowId===computeWindowId(windowType)){
         let _trigger='conditions-improved';
         if(!_hasTimeToWait)_trigger='deadline';
@@ -48639,8 +48677,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       return; // grace active — let the engine's SIT_OUT render, no auto-commits
     }
     // Track sample stability — if direction flips, reset count
-    const ref=taraCallSampleRef.current;
+    let ref=taraCallSampleRef.current;
     if(!isCall){
+      _noteGateHold(tc.signalBlocker?.code||'signal',tc.reason||'Waiting for a qualifying signal.',tc.signalBlocker?.details||{});
       // V5.6.11 FIX: DO NOT reset accumulated samples on every gate-dip. Previously this
       //   wiped progress whenever conviction dipped below floor for even one tick — meaning
       //   if conviction wobbled around 10pt, samples never accumulated and Tara stayed in
@@ -48864,17 +48903,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       return;
     }
     if(ref.dir!==null&&ref.dir!==tc.call){
-      // V5.5d: Direction flipped during formation. Old behavior: reset count and start
-      //   forming the new direction. User: 'if the outcome flips against tara's call I
-      //   dont want tara to flip too'. Now: keep the original direction claimed, treat
-      //   opposite samples as noise (no count change). If price returns to original
-      //   direction, samples resume counting. Otherwise she ends up SIT_OUT this window.
-      // V14.4.6: preserve the claim, but never commit it using the opposite
-      // candidate's score/quality/timing approval. Wait for this claim to return.
-      _noteGateHold('direction-stability',`Waiting for ${ref.dir} to regain agreement; current candidate is ${tc.call}.`,
-        {claimedDirection:ref.dir,candidateDirection:tc.call,samples:ref.count,scope:'window'});
-      return;
-    } else if(ref.dir===null){
+      // A provisional lean is not a committed Call. Re-form the new qualified
+      // candidate with fresh samples; never borrow the old direction's progress.
+      // The snapshot guard at effect entry makes committed Calls immutable.
+      _traceDecision('formation-direction-reset',`Reforming ${tc.call}; discarded ${ref.count} ${ref.dir} samples.`,
+        {previousDirection:ref.dir,previousSamples:ref.count,newDirection:tc.call});
+      ref=taraCallSampleRef.current={dir:null,count:0};
+    }
+    if(ref.dir===null){
       // First directional sample — claim this direction for the window.
       // V5.6.7: Sample weight is conviction-magnitude-aware. weight = clamp(conv/14, 0.5, 1.5).
       //   conv=21 → 1.5 (50% faster lock), conv=14 → 1.0 (par), conv=10 → 0.71, floor 0.5.
@@ -49576,6 +49612,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           windowId:_wid,
           originalDecision:snapshot.originalDecision,
           callPolicy:snapshot.callPolicy||null,
+          decisionTrace:snapshot.decisionTrace||null,
+          forecastAvailability:snapshot.forecastAvailability||null,
           blockedDecision:snapshot.blockedDecision||null,
           marketTicker:snapshot.marketTicker||null,
           marketCloseTime:snapshot.marketCloseTime||null,
@@ -50813,6 +50851,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
       // Path C: timer expired but it's a coin flip — KEEP WAITING for samples to resolve
       if(_etaExpired&&_isCoinFlip){
+        _noteGateHold('formation-coinflip',`Waiting for direction: posterior ${_post.toFixed(1)}%, timer expired but read remains a coin flip.`,{posterior:_post,samples});
         return; // skip this tick; resolution will come from sample formation or 90s cap
       }
     }
@@ -51171,6 +51210,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(_tapeOpposesClaim&&!_fgtAgreesClaim){
         // Conditions inverted strongly. Release claim + reset samples to re-form.
         taraCallSampleRef.current={dir:null,count:0};
+        _noteGateHold('formation-tape-release',`Releasing provisional ${claimedDir}: tape ${_curBuyPct}% opposes it and FGT ${_fgtVal} does not confirm.`,
+          {previousDirection:claimedDir,previousSamples:samples,tapeBuyPct:_curBuyPct,fgt:_fgtVal});
         try{console.info('[V6.5.7] claimedDir',claimedDir,'released — tape',_curBuyPct,'% opposes, FGT',_fgtVal);}catch(_){}
         return; // skip this lock attempt; next tick will re-form from current conditions
       }
@@ -51184,6 +51225,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   _instantForceReady (hard user-force) bypasses this — if the user is
     //   manually forcing a lock, they've made the call.
     if(feedFrozenRef.current&&!_instantForceReady){
+      _noteGateHold('feed-frozen','Live tick feed is frozen; refusing a new Call.',{samples,requiredSamples:needSamples});
       // Don't fire lock. Engine continues running so user sees what it would do,
       // but no entry is created and no sound fires. UI shows the FEED FROZEN
       // banner; the call card will show a stale-feed footer note.
@@ -51537,7 +51579,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _persistLock();
         return;
       }
-      const _committedReason=ref.dir===tc.call?tc.reason:`Locked ${_committedCall} — original lean held through flip`;
+      const _committedReason=claimedDir===tc.call?tc.reason:`Locked ${_committedCall} — original lean held through flip`;
       taraCallSnapshotRef.current={
         call:_committedCall,direction:_committedCall,confidence:tc.confidence,reason:_committedReason,
         // V9.9.5: tier label persisted on snapshot so Discord broadcast can render it,
@@ -51734,6 +51776,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         reversalRisk:_reversalRisk,
         originalDecision:taraCallSnapshotRef.current.originalDecision,
         callPolicy:taraCallSnapshotRef.current.callPolicy||null,
+        decisionTrace:taraCallSnapshotRef.current.decisionTrace||null,
+        forecastAvailability:taraCallSnapshotRef.current.forecastAvailability||null,
         // V6.4: explicit lock timestamp + window-open timestamp so we can analyze how long
         //   Tara takes to lock under different conditions. secondsIntoWindow = lockedAt - windowOpenedAt.
         lockedAt:Date.now(),
@@ -52027,6 +52071,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // V5.6: Mid-formation persist — refresh during ANALYZING/FORMING restores sample
       //   count so Tara picks up where she left off instead of resetting to 0/N. Debounced
       //   so this doesn't hammer Firestore on every tick.
+      _noteGateHold('sample-stability',`Forming ${tc.call}: ${samples.toFixed(1)}/${needSamples} fresh stability samples.`,
+        {samples,requiredSamples:needSamples,tier:tierLabel,confidence:tc.confidence});
       _persistLock();
     }
   },[analysis?.isSystemLocked,taraCall.call,taraCall.direction,taraCall.confidence,timeState.minsRemaining,timeState.secsRemaining,analysis?.rawProbAbove,taraCall.reason,qualityGate?.score,analysis?.mtfAlignment,analysis?.regime,analysis?.windowAmplitude?.label]);
@@ -53827,7 +53873,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.7</small>
+              <small>DECISION ENGINE · V14.4.8</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

@@ -8,6 +8,8 @@ import * as integrity from '../../src/callIntegrity.js';
 import * as policy from '../../src/callPolicy.js';
 import {describeCallBlocker} from '../../src/callBlocker.js';
 import {postProcessLegacyCall,readCallCostBand} from '../../src/callCandidateRules.js';
+import * as forecasts from '../../src/forecastTiming.js';
+import * as tracing from '../../src/callDecisionTrace.js';
 const traverse=traverseModule.default||traverseModule;
 export const app=readFileSync(new URL('../../src/App.jsx',import.meta.url),'utf8');
 function compile(body, result='') {
@@ -43,7 +45,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
   const logs=[],errors=[],audit=[],cloud=[],timers=[],storage=new Map();
   const ref=current=>({current});
   const FakeDate=class extends Date {constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-  const scope={...integrity,...policy,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
+  const scope={...integrity,...policy,...forecasts,...tracing,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
     captureOriginalDecision:(entry,options={})=>integrity.captureOriginalDecision(entry,{now:clock,...options}),
     console:{info(){},warn(){},error(...args){errors.push(args.map(String).join(' '));}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
@@ -63,7 +65,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     taraLearningsRef:ref({multipliers:{confluenceConfBoost:{'single-signal':4}}}),taraCallLogRef:ref([]),
     _v97DiagRef:ref({}),kalshiHistoryRef:ref([]),windowOpenTimeRef:ref(start),regimeTransitionRef:ref(null),
     taraCallSnapshotRef:ref(null),taraCallSampleRef:ref({dir:claimedDirection===undefined?(probabilityUp>=50?'UP':'DOWN'):claimedDirection,count:samples}),
-    lockedCallRef:ref(null),callCommitHoldRef:ref(null),callGateHoldRef:ref(null),currentCallBlockerRef:ref(null),
+    lockedCallRef:ref(null),callCommitHoldRef:ref(null),callGateHoldRef:ref(null),currentCallBlockerRef:ref(null),callDecisionTraceRef:ref(null),
     _cloudRestoreCompletedRef:ref(true),_v104_1_abortCountRef:ref({windowId,count:0,lastAbortAt:0}),
     _v104_1_delayStateRef:ref(null),_v104_1_pendingDelayStampRef:ref(null),_v1364_oppRef:ref(null),_v112Live:{},
     NO_ENTRY_GATES:noEntryGates,NO_SITOUT_MODE:false,LOCK_DEADLINE_SEC:30,
@@ -77,7 +79,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     getMarketSessions:()=>({dominant:'OFF-HOURS'}),getPhaseKey:()=>null,buildCalibrationTable:()=>({}),lookupCalibration:()=>({found:false}),
     brtiApprox:null,dayContext:null,whaleLog:[],adaptiveWeightsByAssetRef:ref({}),_otherAssetRef:ref({}),
     tradingSettings:{tier1OnlyMode:tier1Only},sessionTierMode:'off',_resolveSessionTierMultiplier:()=>1,
-    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.13-v14.4.7-live-call-price-policy',
+    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.13-v14.4.8-forecast-and-fresh-formation',
     _lossCooldownRef:ref(null),taraCallLog:logs,_ana:null,computeReversalRisk:()=>({flag:'NONE',score:0}),
     playAlert(){},brtiApproxRef:ref(null),lastKalshiSuccessRef:ref(clock),_windowCushionHistoryRef:ref([]),
     kalshiStrikeRef:ref(83200),_mountTimeRef:ref(clock-180000),_deriveSitoutCategory:()=>null,

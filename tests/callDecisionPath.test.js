@@ -99,12 +99,13 @@ test('legacy price and final edge guards cannot veto a qualified candidate when 
   assert.match(app,/if\(_edgeAtCommit<=-7\)/);
 });
 
-test('a retained claim cannot seal or log the opposite candidate confidence',()=>{
+test('an opposite provisional candidate discards old samples rather than borrowing them or remaining pinned',()=>{
   const h=makeHarness({probabilityUp:20.055,yesPrice:42,mtf:-2,tapeBuy:10,quality:80,regime:'TRENDING DOWN',claimedDirection:'UP',samples:999,secondsLeft:421});
-  assert.equal(h.run(),null);assert.equal(h.scope.currentCallBlockerRef.current.code,'direction-stability');
-  assert.equal(h.scope.taraCallSampleRef.current.dir,'UP');assert.equal(h.scope.taraCallSampleRef.current.count,999);
+  assert.equal(h.run(),null);assert.equal(h.scope.currentCallBlockerRef.current.code,'sample-stability');
+  assert.equal(h.scope.taraCallSampleRef.current.dir,'DOWN');assert.equal(h.scope.taraCallSampleRef.current.count,1.5);
   assert.equal(h.logs.length,0);assert.equal(h.cloud.length,0);
-  h.advance(420);assert.equal(h.run().call,'SIT_OUT');assert.match(h.logs[0].reason,/current candidate is DOWN/);
+  h.advance(420);assert.equal(h.run().call,'SIT_OUT');assert.match(h.logs[0].reason,/fresh stability samples/);
+  assert.ok(h.logs[0].decisionTrace.events.some(e=>e.code==='formation-direction-reset'));
 });
 
 test('flat-gap waiting reports the actual unchanged signal threshold rather than generic formation',()=>{
