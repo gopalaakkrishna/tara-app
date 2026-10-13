@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {describeCallBlocker} from '../src/callBlocker.js';
+import {readCallCostBand} from '../src/callCandidateRules.js';
 import {captureOriginalDecision,isDirection,normalizeCallLedger} from '../src/callIntegrity.js';
 import {callLockDeadline,deadlineSitout} from '../src/callPolicy.js';
 
@@ -66,10 +67,10 @@ function liveHarness({confidence=58,direction='DOWN',secondsLeft=600,price=78,ma
   const timing=new Function('windowType','_secsLeft','_convNow','_kForDir','getEntryMaxCost','_hasTimeToWait',
     'tc','_v112Live','_v1364_oppRef','computeWindowId','_v104_1_delayStateRef','currentAssetRef','currentAsset',
     '_lifecycleRecordSnapshot','Date','_noteGateHold','callLockDeadline','callCommitHoldRef','currentCallBlockerRef',
-    'describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','_dirNow','callGateHoldRef',timingBody+';return "progress";');
+    'describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','_dirNow','callGateHoldRef','readCallCostBand','localStorage',timingBody+';return "progress";');
   const run=()=>timing('15m',secondsLeft,confidence,price,()=>maxPrice,secondsLeft>180,tc,{},
     {current:null},()=>windowId,delay,{current:'BTC'},'BTC',()=>{},{now:()=>clock},note,callLockDeadline,
-    commitHold,current,describeCallBlocker,baseline.readiness,samples,liveQuote,direction,holds);
+    commitHold,current,describeCallBlocker,baseline.readiness,samples,liveQuote,direction,holds,readCallCostBand,{getItem:()=> 'off'});
   return {run,note,tc,holds,commitHold,current,clock};
 }
 

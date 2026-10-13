@@ -7,6 +7,7 @@ import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
 import {callLogSyncSignature,callLogSyncStatus} from './callLogSync.js';
+import {postProcessLegacyCall,readCallCostBand} from './callCandidateRules.js';
 import {readCapturedCallSettlement} from './callSettlement.js';
 import {coinbaseCandleRange} from './candleRequests.js';
 import { useCallLedger } from './useCallLedger.js';
@@ -5835,8 +5836,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.13-v14.4.5-cloud-sync-and-exact-blockers';
-const TARA_VERSION_DISPLAY='TARA 14.4.5';
+const TARA_BUILD_VERSION='2026.10.13-v14.4.6-consistent-call-decision-path';
+const TARA_VERSION_DISPLAY='TARA 14.4.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -45535,7 +45536,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       },
     };
   })();
-  // V10.6.8b — DEAD-WINDOW-ONLY SITOUT RULE
+  // V10.6.8b — LEGACY DEAD-WINDOW-ONLY SITOUT RULE (opt-in only)
+  // V14.4.6: the history below describes the old mode, not current policy.
+  // NO_SITOUT_MODE=false keeps failed quality checks as waits before cutoff.
   // User rule (May 19, 1pm): "sit out ONLY when the price is literally not
   //   moving at all." Every other sitout reason gets overridden into a
   //   directional commit using posterior (which is the synthesized view of
@@ -45552,55 +45555,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   conflicts) → committed to posterior direction. The posterior already
   //   encodes those signals' disagreement as weaker conviction — but a lean
   //   is a lean. Take the side, ride the movement.
-  const _v10_6_8_postProcess=(call)=>{
-    if(!call||call.call!=='SIT_OUT')return call;
-    if(call.startupBlocked)return call;
-    const _reason=String(call.reason||'').toLowerCase();
-    // Physical constraints — engine hasn't formed a view yet
-    if(_reason.includes('engine still loading'))return call;
-    if(_reason.includes('new window'))return call;
-    if(_reason.includes('searching for direction'))return call;
-    if(_reason.includes('observing fresh data'))return call;
-    // V13.4.341: cold-start warm-up gate is the SAME physical constraint as
-    //   'engine still loading' above -- analysis stopped returning null once
-    //   liveHistory hit 30 candles, but tape-flow/VWAP are documented (see the
-    //   V10.7.86 warm-state comment) as still unreliable for the rest of the
-    //   warm-up window. Without this line, this postProcess would force-commit
-    //   straight through the cold-start SIT_OUT using the very posterior the
-    //   gate exists to distrust -- silently undoing it every time.
-    if(_reason.includes('cold-start-warming-up'))return call;
-    // Dead-window check — the ONE legitimate sitout
-    const _wa=analysis?.windowAmplitude;
-    const _rangeBps=_wa?.rangeBps||0;
-    const _isOpening=_wa?.label==='OPENING';
-    // V13.4.255: the dead-window sit-out is GONE from the display layer.
-    //   It was the last place the screen and the record disagreed. The commit
-    //   lifecycle stopped sitting out on dead windows in v13.4.250 (the
-    //   no-go-edge-dead-window category was dropped from _SITOUT_KEEP), so the
-    //   card could read "true sitout" while a directional call was committed,
-    //   logged, and -- since v13.4.252 -- actually ordered. One rule now.
-    //
-    //   The condition is still computed and stamped so it stays visible in
-    //   telemetry; it just no longer overrides the call.
-    const _isDead=!_isOpening&&_rangeBps<5;
-    // WINDOW IS MOVING — commit to posterior direction
-    const _post=Number(analysis?.rawProbAbove)||50;
-    if(_post===50)return call; // exactly neutral, nothing to commit to
-    const _dir=_post>=50?'UP':'DOWN';
-    const _convict=Math.abs(_post-50);
-    return{
-      ...call,
-      call:_dir,
-      direction:_dir,
-      _v10_6_8_deadWindow:_isDead,   // V13.4.255: telemetry only, no longer gates
-      confidence:_post,
-      conviction:_convict,
-      reason:`Directional lock · ${_dir} ${_convict.toFixed(0)}pt · ${_rangeBps.toFixed(0)}bps window momentum`,
-      _v10_6_8_forced:true,
-      _v10_6_8_originalReason:call.reason,
-      _v10_6_8_rangeBps:_rangeBps,
-    };
-  };
+  // V14.4.6: use directional probability, including a genuine zero P(UP).
+  // Failed quality checks cannot be promoted while NO_SITOUT_MODE is false.
+  const _v10_6_8_postProcess=(call)=>postProcessLegacyCall(call,analysis,{allowQualityOverride:NO_SITOUT_MODE});
   // V10.6.8: apply force-commit post-processor IN PLACE on taraCall object.
   //   Using Object.assign mutates the const-bound object reference (const
   //   prevents rebinding, not mutation). This means ALL downstream consumers
@@ -45628,7 +45585,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   The raw-kalshiAtLock EXTREMES are symmetric and correct: <15 or >=85 means one side
         //   pays a <15c fill-mirage and the other an over-priced >=85c favorite (the only -EV
         //   bucket). Direction-aware refinement can come later; this restores known-good 71.
-        const _extreme=(_kEntry<15||_kEntry>=85);
+        const _extreme=!NO_ENTRY_GATES&&(_kEntry<15||_kEntry>=85);
         // V13.4.78: coin-flip gate now DEFAULT OFF. Correct-pricing backtest (1143 zone locks):
         //   40-60c coin-flip is +3.6c/ct in EVERY regime (RANGE-CHOP +9.6, HIGH-VOL-CHOP +3.6),
         //   max drawdown 7.6 contracts vs +41 profit. The old tape-allow caught only n=4, so the
@@ -45700,9 +45657,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   Object.keys(result).forEach(k=>taraCall[k]=result[k])). See the correction
         //   check right before persistence for why this matters.
         if(_trajAgrees){taraCall._trajBypassDir=taraCall.call;taraCall._trajBypassFired=true;}
-        const _tooExpensive=_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost&&!_trajAgrees;
-        const _tooCheap=_eqOn&&Number.isFinite(_eqCost)&&_eqCost<_eqMinCost&&!_trajAgrees;
-        const _tooEarly=_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac&&!_trajAgrees;
+        const _tooExpensive=!NO_ENTRY_GATES&&_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost&&!_trajAgrees;
+        const _tooCheap=!NO_ENTRY_GATES&&_eqOn&&Number.isFinite(_eqCost)&&_eqCost<_eqMinCost&&!_trajAgrees;
+        const _tooEarly=!NO_ENTRY_GATES&&_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac&&!_trajAgrees;
         if(_extreme||_coinFlipNoTape||_tooExpensive||_tooCheap||_tooEarly){
           taraCall.call='SIT_OUT';
           taraCall.reason=(_tooExpensive||_tooCheap||_tooEarly)
@@ -45732,12 +45689,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   never the other way. Off-switch: localStorage 'taraCostBandGate'='off'.
   //   Override band: 'taraCostBandMin'/'taraCostBandMax' (cents).
   try{
-    const _cbOn=(function(){try{return localStorage.getItem('taraCostBandGate')!=='off';}catch(_){return true;}})();
+    const _cbPolicy=readCallCostBand(localStorage);
+    const _cbOn=_cbPolicy.enabled;
     if(_cbOn&&taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
       const _cbEntry=(analysis&&typeof analysis.kalshiAtLock==='number')?analysis.kalshiAtLock:null;
       if(_cbEntry!=null){
-        const _cbMin=(function(){try{const v=parseFloat(localStorage.getItem('taraCostBandMin'));return(Number.isFinite(v)&&v>=0&&v<100)?v:44;}catch(_){return 44;}})();
-        const _cbMax=(function(){try{const v=parseFloat(localStorage.getItem('taraCostBandMax'));return(Number.isFinite(v)&&v>0&&v<=100)?v:77;}catch(_){return 77;}})();
+        const _cbMin=_cbPolicy.minCost;
+        const _cbMax=_cbPolicy.maxCost;
         // Direction-aware: kalshiAtLock is the raw Kalshi YES price, the
         //   entry cost ONLY for an UP lock -- a DOWN lock's real cost is
         //   100-kalshiAtLock (the exact pricing bug this file already
@@ -48241,6 +48199,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   Replaces the old expensive&&marginal&&time wait condition with a
       //   phase-aware controller. The hard deadline below still forces a lock.
       const _winLenSec112=windowType==='15m'?900:300;
+      // The authoritative deadline above ends automatic 15m Calls at 420s.
+      // The inherited late/final phases below are reachable only for 5m Calls;
+      // they must never be used as a promised late rescue for 15m windows.
       const _elapsed112=_winLenSec112-_secsLeft;
       const _isEarly112=_secsLeft>(_winLenSec112-120);   // first 2 min
       const _isLate112=_secsLeft<=180;                    // last 3 min
@@ -48270,7 +48231,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   contradiction: if this controller says lock, the guard will agree, every
       //   time. Also directly matches the user's own ask (no late-window price
       //   creep, no chasing an already-decided side into a reversal).
-      const _v13422_bandMax=getEntryMaxCost();
+      // V14.4.6: the intentionally separate44-77c Call band also governs
+      // timing. Legacy EV filters may be off without disabling this user rule.
+      const _v13422_bandMax=Math.min(getEntryMaxCost(),readCallCostBand(localStorage).maxCost);
       const _oddsCeil112=_v13422_bandMax;
       const _oddsOk112=_kForDir==null||_kForDir<=_oddsCeil112;
       let _v112Wait=false,_v112Timing='now',_v112Why='';
@@ -48903,7 +48866,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   dont want tara to flip too'. Now: keep the original direction claimed, treat
       //   opposite samples as noise (no count change). If price returns to original
       //   direction, samples resume counting. Otherwise she ends up SIT_OUT this window.
-      // No state change — preserve original ref.dir and count.
+      // V14.4.6: preserve the claim, but never commit it using the opposite
+      // candidate's score/quality/timing approval. Wait for this claim to return.
+      _noteGateHold('direction-stability',`Waiting for ${ref.dir} to regain agreement; current candidate is ${tc.call}.`,
+        {claimedDirection:ref.dir,candidateDirection:tc.call,samples:ref.count,scope:'window'});
+      return;
     } else if(ref.dir===null){
       // First directional sample — claim this direction for the window.
       // V5.6.7: Sample weight is conviction-magnitude-aware. weight = clamp(conv/14, 0.5, 1.5).
@@ -50181,8 +50148,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _persistLock();
         return;
       }
-      // (a) NEGATIVE EDGE — only check if both Tara and Kalshi numbers are valid
-      if(_kPctNow!=null&&_commitConf!=null){
+      // (a) Legacy NEGATIVE EDGE — honor the same entry-filter switch as timing.
+      // The explicit Call cost band and physical/data qualification remain live.
+      if(!NO_ENTRY_GATES&&_kPctNow!=null&&_commitConf!=null){
         const _kalshiForCommit=_commitDir==='UP'?_kPctNow:(100-_kPctNow);
         const _edgeAtCommit=_commitConf-_kalshiForCommit;
         // V10.8.4: FLAT NO-GO-EDGE THRESHOLD — removed session-based adjustments.
@@ -50265,6 +50233,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _noGoTier='no-go-edge';
           } else {
             // Still watching — return without locking, check next tick
+            _noteGateHold('flat-gap-signal',`Waiting for a directional gap: ${_gapScore.toFixed(1)}pt, need 8pt or external signal ≥8pt.`,
+              {gapScore:_gapScore,requiredGap:8,externalSignal:_extSignal,requiredExternalSignal:8,secondsLeft:_secsLeft});
             return;
           }
         } else if(_flatGapWatchRef.current?.windowId===_curWid){
@@ -50940,7 +50910,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // V6.2.7: Kalshi-window check. Only fires when there's an active direction lean (claimed
     //   or current tc.call) — else we're still scanning, no direction to gate on.
     const _activeDir=taraCallSampleRef.current.dir||(tc?.call==='UP'||tc?.call==='DOWN'?tc.call:null);
-    if(_activeDir&&_kPctNow!=null&&taraCallSnapshotRef.current===null){
+    // V14.4.6: a disabled legacy EV gate cannot veto the intentional Call band.
+    if(!NO_ENTRY_GATES&&_activeDir&&_kPctNow!=null&&taraCallSnapshotRef.current===null){
       const _kalshiForDir=_activeDir==='UP'?_kPctNow:(100-_kPctNow);
       const _wasBelow=_activeDir==='UP'?kalshiWasBelowThreshUpRef.current:kalshiWasBelowThreshDownRef.current;
       // V6.5.1: dip-grace check. If Kalshi was below threshold within the last 30s,
@@ -51425,7 +51396,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // V6.2.6: hardForce bypasses this — user explicitly accepted the risk via dialog.
       const _kAtCommit=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
       const _postAtCommit=analysis?.rawProbAbove;
-      if(_kAtCommit!=null&&_postAtCommit!=null&&!_hardForceActive){
+      // V14.4.6: honor the existing legacy entry-filter configuration here too.
+      if(!NO_ENTRY_GATES&&_kAtCommit!=null&&_postAtCommit!=null&&!_hardForceActive){
         const _taraDirConf=_committedCall==='UP'?_postAtCommit:(100-_postAtCommit);
         const _kalshiDirConf=_committedCall==='UP'?_kAtCommit:(100-_kAtCommit);
         const _edgeAtCommit=_taraDirConf-_kalshiDirConf;
@@ -53852,7 +53824,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.5</small>
+              <small>DECISION ENGINE · V14.4.6</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
