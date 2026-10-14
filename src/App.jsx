@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import taraDesignStyles from './tara-design.css?raw';
 import taraV14Styles from './tara-v14.css?raw';
+import taraV145Styles from './tara-v145.css?raw';
+import {EvidenceMetrics,RecordInspector,RecordVersionFilter,TaraEvidenceAnalytics,TaraBrainSummary,HourlyApprovalSummary,TaraSignalsSummary,TaraDetailEnvelope} from './TaraPresentation.jsx';
+import {capturedReason,recordVersion,presentationRows} from './presentationEvidence.js';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import {HOURLY_POLL_MS,readHourlyPolicy,normalizeHourlyMarkets,assessHourlyPick,advanceHourlyConfirmation,
@@ -5868,8 +5871,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.13-v14.4.10-hourly-fresh-approval';
-const TARA_VERSION_DISPLAY='TARA 14.4.10';
+const TARA_BUILD_VERSION='2026.10.14-v14.5.0-approved-interface';
+const TARA_VERSION_DISPLAY='TARA 14.5.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10373,40 +10376,43 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
 //   Tara's committed lock is the record; AutoTrade is the execution layer; the
 //   exchange position/reconciliation state is the money-truth layer.
 const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosition,positionReconciliation,manualKalshiEntry,activeTicker,taraScorecards,taraCallLog,todayData,timeState,windowType,onNavigate})=>{
+  const [inspectedEntry,setInspectedEntry]=React.useState(null);
+  const [cloudStatus,setCloudStatus]=React.useState(()=>_cloudSyncStatus);
+  React.useEffect(()=>subscribeCloudStatus(setCloudStatus),[]);
   const _snap=snapshot||null;
   const _lock=readLockState(_snap);
   const _dir=_lock.tradeable&&(_snap?.call==='UP'||_snap?.call==='DOWN')?_snap.call:null;
-  const _callLabel=_dir?`${_dir} · locked`:_snap?.call==='SIT_OUT'?'SITTING OUT':taraCall?.startupBlocked?'WARMING UP':'SCANNING';
   const _confidence=_lock.tradeable&&Number.isFinite(Number(_lock.confidence))?Math.round(Number(_lock.confidence)):null;
   const _edgeRaw=_lock.tradeable?(_snap?.edgePts??_snap?.edge):null;
   const _edge=_edgeRaw==null?null:Number(_edgeRaw);
   const _edgeLabel=Number.isFinite(_edge)?`${_edge>0?'+':''}${Math.round(_edge)}pt`:'—';
   const _window=windowType||timeState?.windowType||'15m';
   const _record=_taraRecordStats(taraScorecards?.[_window]);
-  const _reason=describeCommittedCallReason(_snap)||taraCall?.blockedDecision?.reason||taraCall?.reason;
+  const _reason=_lock.committed?capturedReason(_snap):taraCall?.blockedDecision?.reason||taraCall?.reason;
   const _lockAt=Number(_snap?.lockedAt)||0;
-  const _lockTime=_lockAt>0?new Date(_lockAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):null;
+  const _lockTime=_lockAt>0?new Date(_lockAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'}):null;
   const _recent=[...(Array.isArray(taraCallLog)?taraCallLog:[])]
     .filter(e=>e&&['WIN','LOSS','SITOUT'].includes(e.result)&&(e.windowType||'15m')===_window)
     .sort((a,b)=>Number(b.time||b.id||0)-Number(a.time||a.id||0)).slice(0,20).reverse();
   const _today=todayData?`${todayData.wins||0}W·${todayData.losses||0}L · ${todayData.sitouts||0}SO`:'No settled Calls today';
   return(
-    <section className="tara-page-brief tara-call-ledger" aria-label="Tara call and execution truth" data-call-tradeable={_lock.tradeable} data-edge-available={Number.isFinite(_edge)}>
+    <div className="tara-v145-call-record-grid">
+    <section className="tara-page-brief tara-call-ledger" aria-label="Tara committed Call" data-call-tradeable={_lock.tradeable} data-edge-available={Number.isFinite(_edge)}>
       <div className="tara-call-ledger__hero">
         <div>
-          <div className="tara-call-ledger__kicker">01 / TARA'S CALL · RECORD-BEARING</div>
-          <h3 className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_callLabel}</h3>
-          <p>{_lock.tradeable?'This locked decision enters the Call record whether AutoTrade places an order or not.':_reason||'Tara is reading this window. No tradeable Call is locked yet.'}</p>
+          <div className="tara-call-ledger__kicker">Tara’s Call · {_window} record</div>
+          <div className="tara-v145-call-heading"><h3 className={_dir==='DOWN'?'is-down':_dir?'is-up':''}>{_dir||(_lock.satOut?'Sitting out':taraCall?.startupBlocked?'Waiting for data':'Scanning')}</h3><span className="tara-v145-badge">{_lock.tradeable?'Locked':_lock.satOut?'Final for this window':'No committed Call'}</span></div>
+          <p>{_reason||'Tara is reading this window. No tradeable Call is locked yet.'}</p>
         </div>
         <div className="tara-call-ledger__truth">
-          <strong>{_lock.tradeable?'CALL LOCKED':_lock.satOut?'SAT OUT':'NOT YET LOCKED'}</strong>
-          <small>{_lockTime?`${_lockTime} · `:''}{_confidence!=null?`${_confidence}% confidence`:_lock.satOut?'sit-out recorded':'waiting for a committed snapshot'}</small>
+          <strong>{_confidence!=null?_confidence:'—'}<span> /100</span></strong>
+          <small>{_confidence!=null?'Captured signal confidence':_lock.satOut?'Sit-out recorded':'Awaiting capture'}</small>
+          {_lockTime&&<small>Locked {_lockTime}</small>}
         </div>
       </div>
       <div className="tara-call-ledger__bottom">
-        <div className="tara-call-ledger__record"><strong>{_record.wins}W · {_record.losses}L</strong><small>{_record.sitouts} sat out · Call record only</small></div>
-        <div className="tara-call-ledger__recent"><div className="tara-call-ledger__recent-summary"><b>TODAY</b><span>{_today}</span><small>RECENT {_recent.length}</small></div><div className="tara-call-ledger__recent-tiles" role="img" aria-label={`Recent ${_window} Call results, oldest to newest`}>{_recent.length?_recent.map((entry,index)=><i key={`${entry.id||entry.time||index}-${index}`} className={entry.result==='WIN'?'is-win':entry.result==='LOSS'?'is-loss':'is-sitout'} title={`${entry.result} · ${entry.time?new Date(Number(entry.time)).toLocaleString():'time unavailable'}`}/>):<span>No recent settled Calls on this device</span>}</div></div>
-        <div className="tara-call-ledger__actions"><button onClick={()=>onNavigate?.('brain')}>WHY?</button><button onClick={()=>onNavigate?.('memory')}>CALL HISTORY</button></div>
+        <div className="tara-v145-save-state"><span>{_lock.committed?'Original decision captured':'Candidate only · no Call captured'}</span><button onClick={()=>onNavigate?.('logs')}>Cloud {cloudStatus.state==='ok'?'available':cloudStatus.state==='error'?'error':cloudStatus.state||'unknown'} ↗</button></div>
+        <div className="tara-call-ledger__actions"><button onClick={()=>onNavigate?.('brain')}>Why this Call ↗</button>{_lock.committed&&<button onClick={()=>setInspectedEntry(_snap)}>Inspect capture ↗</button>}</div>
       </div>
       <details className="tara-call-ledger__more">
         <summary>Call evidence, lifecycle &amp; record breakdown <span>{_lock.tradeable?`${_dir} lock preserved`:_lock.satOut?'Sit-out preserved':'Awaiting lock'}</span></summary>
@@ -10419,6 +10425,9 @@ const TaraPageBrief=({taraCall,snapshot,autoExecSettings,autoOrderState,userPosi
         <div className="tara-call-ledger__deep-actions"><button onClick={()=>onNavigate?.('signals')}>WHAT TARA SAW</button><button onClick={()=>onNavigate?.('execution')}>INSPECT AUTOTRADE</button></div>
       </details>
     </section>
+    <section className="tara-v145-record-panel" aria-label="Call record and recent outcomes"><div className="tara-v145-panel-head"><h3>Call record</h3><span>{_window} · rolling record</span></div><div className="tara-v145-record-totals"><div><strong>{_record.wins+_record.losses?`${(_record.wins/(_record.wins+_record.losses)*100).toFixed(1)}%`:'—'}</strong><small>Settled directional Calls</small></div><div><b className="is-up">{_record.wins}</b><small>Won</small></div><div><b className="is-down">{_record.losses}</b><small>Lost</small></div><div><b>{_record.sitouts}</b><small>Sat out</small></div></div><div className="tara-call-ledger__recent"><div className="tara-call-ledger__recent-summary"><b>RECENT {_recent.length}</b><span>Today {_today}</span><button onClick={()=>onNavigate?.('memory')}>Full record ↗</button></div><div className="tara-call-ledger__recent-tiles" aria-label={`Recent ${_window} Call results, oldest to newest`}>{_recent.length?_recent.map((entry,index)=><button type="button" key={`${entry.id||entry.time||index}-${index}`} className={entry.result==='WIN'?'is-win':entry.result==='LOSS'?'is-loss':'is-sitout'} aria-label={`Inspect ${entry.result} record ${index+1}`} title={`${entry.result} · ${entry.time?new Date(Number(entry.time)).toLocaleString():'time unavailable'}`} onClick={()=>setInspectedEntry(entry)}/>):<span>No recent settled Calls on this device</span>}</div></div></section>
+    <RecordInspector entry={inspectedEntry} onClose={()=>setInspectedEntry(null)}/>
+    </div>
   );
 };
 
@@ -10464,7 +10473,8 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
     :'POSITION CHECKING';
   const stateTone=confirmedOpen?'is-live':truth.state==='flat'&&fresh?'is-flat':'is-warn';
   if(compact)return <section className={'tara-exec-glance '+stateTone} aria-label="AutoTrade execution and exchange position">
-    <div className="tara-exec-glance__head"><span className="tara-rail-kicker">02 / AUTOTRADE · EXCHANGE TRUTH</span><h2>{stateLabel}</h2><p>{truth.summary}</p></div>
+    <div className="tara-exec-glance__head"><span className="tara-rail-kicker">AutoTrade</span><h2>{stateLabel}</h2><p>{order.status?String(order.status).replaceAll('_',' '):'No order placed'}</p></div>
+    <details className="tara-v145-exec-detail" open={['reconcile','unknown','stale-open'].includes(truth.state)}><summary>Exchange evidence · {checkLabel}</summary><p>{truth.summary}</p>
     <div className="tara-exec-glance__facts">
       <div><label>Local order</label><strong>{order.status?String(order.status).replaceAll('_',' ').replaceAll('-',' '):'No order'}</strong></div>
       <div><label>Last exchange check</label><strong>{checkLabel}</strong></div>
@@ -10472,19 +10482,25 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
     {otherPositions.length>0&&<p className="tara-exec-glance__warning">{otherPositions.length} other Kalshi position{otherPositions.length===1?'':'s'} in the last snapshot · verify before another order.</p>}
     {autoExecSettings?.enabled&&autoExecSettings?.dryRun===false&&<p className="tara-exec-glance__warning">New live entries paused pending verified account-wide risk limits. Existing position checks and exits remain available.</p>}
     {['reconcile','unknown','stale-open'].includes(truth.state)&&<p className="tara-exec-glance__warning">Unknown is not a no-fill. Verify Kalshi before retrying or exiting.</p>}
-    <div className="tara-exec-glance__actions"><button onClick={onDetails}>INSPECT AUTOTRADE</button><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'↻ VERIFY POSITION':'CONNECT KALSHI'}</button></div>
+    </details><div className="tara-exec-glance__actions"><button onClick={onDetails}>Inspect execution ↗</button><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'Verify position':'Execution settings'}</button></div>
   </section>;
   return <section className={'tara-exec-overview '+stateTone} aria-label="AutoTrade execution and exchange position">
-    <div className="tara-exec-overview__head"><div><span className="tara-rail-kicker">AUTOTRADE EXECUTION · FOLLOWS A LOCKED TARA CALL</span><h2>{stateLabel}</h2><p>Order, fill, position, and exit have their own audit. None changes the Tara Call record.</p></div><div className="tara-exec-overview__badge"><b>{confirmedOpen?'KALSHI CONFIRMED':lastSeenOpen?'CONFIRMATION STALE':truth.label}</b><small>{successAt>0?`Last successful exchange check ${checkLabel}`:'Awaiting first successful exchange check'}</small></div></div>
-    {autoExecSettings?.enabled&&autoExecSettings?.dryRun===false&&<p className="tara-exec-glance__warning">NEW LIVE ENTRIES PAUSED · Daily loss, exposure, and attribution are not yet verified against complete Kalshi history. Existing position reconciliation and exit controls still work.</p>}
-    <div className="tara-exec-overview__metrics"><div><label>Exchange position</label><strong>{positionText}</strong><small>{confirmedOpen?'open in latest Kalshi snapshot':lastSeenOpen?'requires a fresh check':order.dryRun?'local order is simulated only':truth.summary}</small></div><div><label>Reported auto fill</label><strong>{filledAt}</strong><small>{order.placed?`${order.count} contract${order.count===1?'':'s'} in local order state`:'no confirmed local fill'}</small></div><div><label>Local exit estimate</label><strong>{realized||'—'}</strong><small>{realized?'local gross estimate · excludes fees; verify on Kalshi':'not realized or not verified'}</small></div><div><label>Execution certainty</label><strong>{confirmedOpen?'CONFIRMED':truth.state==='flat'&&fresh?'FLAT':truth.state==='stale-flat'||lastSeenOpen?'STALE':'UNVERIFIED'}</strong><small>{confirmedOpen?'exchange position verified; local order mode may differ':order.dryRun?'dry run does not create a real position':truth.state==='flat'&&fresh?'exchange-checked flat state':'local state is not exchange proof'}</small></div></div>
-    <details className="tara-exec-overview__more" open={!compact||['reconcile','unknown','stale-open'].includes(truth.state)}>
-      <summary>Order lifecycle &amp; exchange evidence <span>{lifecycle.toUpperCase()} · check {checkLabel}</span></summary>
+    <p className="tara-v145-reason"><b>New live entries remain paused.</b> Existing position reconciliation and exit controls remain available. Execution never revises Tara’s captured Call.</p>
+    <EvidenceMetrics items={[
+      ['Input Call',lock.tradeable?`${lock.dir} · locked`:lock.satOut?'Sit out':'No lock','Original Call record',lock.dir==='UP'?'is-up':lock.dir==='DOWN'?'is-down':''],
+      ['Order state',order.status?order.status.replaceAll('_',' ').replaceAll('-',' '):'No order',order.dryRun?'Simulated order only':'Local order state; fill evidence below'],
+      ['Position',confirmedOpen?positionText:truth.state==='flat'&&fresh?'Flat':lastSeenOpen?'Stale':truth.state==='reconcile'?'Drift':'Unverified',stateLabel],
+      ['Execution',autoExecSettings?.enabled?(autoExecSettings?.dryRun?'Dry run':'Paused'):'Calling only','Live-money entry pause retained','is-gold'],
+    ]}/>
+    <div className="tara-v145-execution-grid"><section className="tara-v145-execution-panel"><div className="tara-v145-panel-head"><h3>Execution lifecycle</h3><span>{lifecycle.toUpperCase()}</span></div>
       <div className="tara-exec-overview__flow"><div className="tara-rail-kicker">ORDER LIFECYCLE · LIVE STATE</div><div className="tara-exec-overview__steps">{steps.map((s,i)=><span key={s} className={i===stepIndex?'is-current':i<stepIndex&&stepIndex!==7?'is-past':''}>{s}</span>)}</div></div>
-      <div className="tara-exec-overview__evidence"><div><h3>AutoTrade reconciliation</h3><p><b>Input call</b> {lock.tradeable?`${lock.dir} · locked`:'No tradeable lock yet'}</p><p><b>Order state</b> {order.status?order.status.replaceAll('_',' ').replaceAll('-',' '):'No order attempted'}</p><p><b>Exchange truth</b> {truth.summary}</p></div><div><h3>Evidence &amp; timing</h3><p><b>Last exchange check</b> {checkLabel}</p><p><b>Local marker</b> {userPosition?`${userPosition} · advisory only`:'none'}</p><p><b>Retry safety</b> Unknown is not a no-fill; verify Kalshi before retrying.</p></div></div>
+      <div className="tara-v145-execution-rows"><p><span>Recorded Call</span><b>{lock.tradeable?`${lock.dir} · ${lock.confidence}/100`:lock.satOut?'SIT OUT':'Not committed'}</b></p><p><span>Active ticker</span><b>{activeTicker||'Unavailable'}</b></p><p><span>Entry attempt</span><b>{order.status?order.status.replaceAll('_',' ').replaceAll('-',' '):'No order attempted'}</b></p><p><span>Last exchange check</span><b>{checkLabel}</b></p><p><span>Exchange truth</span><b>{truth.summary}</b></p></div>
+      <div className="tara-exec-overview__actions"><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'↻ RECONCILE NOW':'CONNECT KALSHI TO VERIFY'}</button></div>
+    </section><section className="tara-v145-execution-panel"><div className="tara-v145-panel-head"><h3>Account &amp; controls</h3><span>{confirmedOpen?'KALSHI CONFIRMED':truth.label}</span></div><div className="tara-v145-execution-rows"><p><span>Trading mode</span><b>{autoExecSettings?.enabled?(autoExecSettings?.dryRun?'Dry run':'Live entries paused'):'Calling only'}</b></p><p><span>Local position marker</span><b>{userPosition?`${userPosition} · advisory only`:'None'}</b></p><p><span>Reported auto fill</span><b>{filledAt} · {order.placed?`${order.count} contract${order.count===1?'':'s'}`:'No confirmed local fill'}</b></p><p><span>Local exit estimate</span><b>{realized||'Not realized / verified'}</b></p><p><span>Retry safety</span><b>Unknown is not a no-fill</b></p><small>Local markers and estimates are not exchange proof. Size, cooldowns, exits, reconciliation and the kill switch stay available in Execution settings.</small></div><div className="tara-exec-overview__actions"><button onClick={onOpenSettings}>EXECUTION SETTINGS</button></div>
+    <details className="tara-v145-disclosure"><summary>Fill &amp; estimate evidence</summary><div>{order.dryRun&&<p>Local order is simulated only.</p>}<p>{realized?'Local gross exit estimate excludes fees; verify on Kalshi.':'No realized, verified exit profit.'}</p><p>{confirmedOpen?'Exchange position verified; local order mode may differ.':truth.state==='flat'&&fresh?'Exchange-checked flat state.':'Local state is not exchange proof.'}</p></div>
     </details>
+    </section></div>
     {otherPositions.length>0&&<div className="tara-exec-overview__other"><strong>{otherPositions.length} OTHER OPEN KALSHI POSITION{otherPositions.length===1?'':'S'} IN LAST SNAPSHOT</strong><p>These may belong to earlier windows. They are not this window's AutoTrade fill. Verify on Kalshi before placing or exiting another order.</p><div>{otherPositions.slice(0,8).map((p,i)=><span key={`${p.ticker}-${i}`}>{p.ticker} · {p.count} {p.side==='yes'?'YES':'NO'}</span>)}</div>{otherPositions.length>8&&<small>+{otherPositions.length-8} more in account; inspect Kalshi directly</small>}</div>}
-    <div className="tara-exec-overview__actions"><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'↻ RECONCILE NOW':'CONNECT KALSHI TO VERIFY'}</button>{compact&&<button onClick={onDetails}>VIEW EXECUTION DETAILS</button>}<button onClick={onOpenSettings}>EXECUTION SETTINGS</button></div>
   </section>;
 };
 
@@ -10513,7 +10529,19 @@ const TaraExchangeAuditPanel=({state,onRefresh,connected})=>{
 // V14.1: the approved first read, driven entirely by the existing live feeds.
 // The chart remains the original TradingView widget; no example price, strike,
 // market direction, or exchange state is copied from the review prototype.
-const TaraOverviewMarket=({asset,priceSource,resolution,setResolution,currentPrice,targetMargin,strikeSource,activeTicker,timeState,pastWindows,windowType,timeFormat,orderBook,tapeWindows,smartMoneySignals,qualityGate,onNavigate})=>{
+const TaraLiveMarketMetrics=({asset,priceSource,currentPrice,targetMargin,strikeSource,activeTicker,timeState,windowType,quote,windowId})=>{
+  const verified=strikeSource==='kalshi'&&!!activeTicker&&Number(targetMargin)>0;
+  const clock=Number.isFinite(timeState?.minsRemaining)&&Number.isFinite(timeState?.secsRemaining)?`${String(timeState.minsRemaining).padStart(2,'0')}:${String(timeState.secsRemaining).padStart(2,'0')}`:'—:—';
+  const q=inspectDecisionQuote(quote,{asset:asset||'BTC',windowId,ticker:activeTicker,now:Date.now()});
+  const money=v=>Number(v)>0?`$${Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:'Unavailable';
+  return <EvidenceMetrics items={[
+    [`${asset||'BTC'} / USD · ${PRICE_SOURCES[priceSource]?.name||'Reference feed'}`,money(currentPrice),'Live reference price'],
+    ['Kalshi strike',verified?money(targetMargin):'Unavailable',verified?activeTicker:targetMargin>0?`Local ${strikeSource||'reference'} ${money(targetMargin)} · ticker unverified`:'Active ticker / strike not verified'],
+    ['Window closes in',clock,`${windowType||'15m'} live window`,'is-gold'],
+    ['Market price',q.ok?`YES ${q.ask}¢`:'Unavailable',q.ok?`NO ${(100-q.bid).toFixed(1)}¢ · executable quote`:`Quote ${q.reason||'not verified'}`],
+  ]}/>;
+};
+const TaraOverviewMarket=({asset,priceSource,resolution,setResolution,currentPrice,targetMargin,strikeSource,activeTicker,timeState,pastWindows,windowType,timeFormat,orderBook,tapeWindows,smartMoneySignals,qualityGate,onNavigate,compactRead=false})=>{
   const _source=PRICE_SOURCES[priceSource]?.name||'Reference feed';
   const _clock=(Number.isFinite(timeState?.minsRemaining)&&Number.isFinite(timeState?.secsRemaining))?`${String(timeState.minsRemaining).padStart(2,'0')}:${String(timeState.secsRemaining).padStart(2,'0')}`:'—:—';
   const _kalshiStrike=strikeSource==='kalshi'&&!!activeTicker&&Number(targetMargin)>0;
@@ -10530,8 +10558,9 @@ const TaraOverviewMarket=({asset,priceSource,resolution,setResolution,currentPri
       <TradingViewChart resolution={resolution} onResolutionChange={setResolution} asset={asset} priceSource={priceSource}/>
     </section>
     <section className="tara-v14-readout" aria-label="Live market read">
-      <div className="tara-v14-readout__price"><span>MARKET READ / LIVE FEED</span><strong>{Number(currentPrice)>0?`$${Number(currentPrice).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:'Price unavailable'}</strong><small>{asset||'BTC'} reference price · {_source}</small></div>
-      <div className="tara-v14-readout__pair"><div><span>Kalshi strike</span><strong className={!_kalshiStrike?'is-caution':''}>{_kalshiStrike?`$${Number(targetMargin).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:'Unavailable'}</strong><small>{_kalshiStrike?activeTicker:targetMargin>0?`Local ${strikeSource||'reference'} strike $${Number(targetMargin).toLocaleString(undefined,{maximumFractionDigits:0})}; Kalshi ticker unverified`:'Active market ticker or strike not verified'}</small></div><div><span>Window closes in</span><strong>{_clock}</strong><small>{windowType||'15m'} live window</small></div></div>
+      {!compactRead&&<><div className="tara-v14-readout__price"><span>MARKET READ / LIVE FEED</span><strong>{Number(currentPrice)>0?`$${Number(currentPrice).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:'Price unavailable'}</strong><small>{asset||'BTC'} reference price · {_source}</small></div>
+      <div className="tara-v14-readout__pair"><div><span>Kalshi strike</span><strong className={!_kalshiStrike?'is-caution':''}>{_kalshiStrike?`$${Number(targetMargin).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`:'Unavailable'}</strong><small>{_kalshiStrike?activeTicker:targetMargin>0?`Local ${strikeSource||'reference'} strike $${Number(targetMargin).toLocaleString(undefined,{maximumFractionDigits:0})}; Kalshi ticker unverified`:'Active market ticker or strike not verified'}</small></div><div><span>Window closes in</span><strong>{_clock}</strong><small>{windowType||'15m'} live window</small></div></div></>}
+      {compactRead&&<div className="tara-v145-panel-head"><h3>Market read</h3><span>{asset||'BTC'}</span></div>}
       <div className="tara-v14-readout__past"><PastWindowsPill pastWindows={pastWindows} windowType={windowType} timeFormat={timeFormat}/><small>Settled market direction · not Call wins or trade P&amp;L</small></div>
       <div className="tara-v14-readout__row"><span>Depth of market</span><b>{_bidPct!=null?`${_bidPct}% bid / ${100-_bidPct}% ask`:'Waiting for depth'}</b></div>
       <div className="tara-v14-readout__row"><span>Tape · 30s</span><b>{_tapeTotal>0?`${Math.round(Number(_tape.buyPct)||0)}% buy · ${_tape.side||'mixed'}`:'Waiting for tape'}</b></div>
@@ -10581,18 +10610,18 @@ const TaraWorkspaceHeading=({view,analysis,qualityGate,newsSentiment,pendingKals
   const brainLock=readLockState(snapshot);
   const copy={
     overview:['OPERATE / LIVE CONTROL ROOM','Tara Call + execution truth','One window. Four truths kept separate.'],
-    execution:['TRADE / AUTOTRADE','Execution & position truth','The locked Call is an input. Order, fill, position, and exit have their own audit.'],
+    execution:['TRADE / AUTOTRADE','AutoTrade','Order, fill, position and exit in one execution view.'],
     signals:['TRADE / SIGNALS','The evidence behind the Call','Price, strike, flow, depth, and timing together—without making live signals look like locked results.'],
     market:['TRADE / MARKET','TradingView','The original chart and its range tools stay intact. Tara’s indicators stay around it, not on top of it.'],
-    analytics:['ANALYTICS / CALL RECORD','What actually works','Call outcomes, model evidence, and execution are never combined into one misleading number.'],
+    analytics:['ANALYTICS / CALL RECORD','What the record tells us','Compare versions, timing and confidence using captured decisions.'],
     news:['TRADE / NEWS & MACRO','External context','Headlines, macro risk, and market flows inform the read; they do not rewrite a locked Call.'],
-    memory:['TRADE / MEMORY','Two clocks. Two ledgers.','15-minute Calls and hourly locks have separate results. Neither ledger is an AutoTrade fill log.'],
-    schedule:['TRADE / HOURLY & SCHEDULE','A separate clock, a separate record','The hourly ladder never gets mixed with the 15-minute Tara Call record.'],
+    memory:['TRADE / MEMORY','Tara’s memory','Original decisions, captured reasons and verified outcomes.'],
+    schedule:['TRADE / HOURLY & SCHEDULE','Hourly picks','Fresh confirmation, exact contracts and a complete record.'],
     logs:['TRADE / TOOLS & SYNC','Operate Tara','Existing controls, diagnostics, integrations, logs, and reference help in one place.'],
-    brain:['TARA / BRAIN',brainLock.tradeable?'Why she locked this call':brainLock.satOut?'Why she sat this window out':'How she is reading this window','The Brain explains the live evidence and any committed Call; it is not an exchange-position screen.'],
+    brain:['TARA / BRAIN','Tara’s Brain','An explanation of the evidence and the committed decision.'],
   }[view];
   if(!copy)return null;
-  const post=Number(analysis?.confidence)||50;
+  const post=analysis?.confidence!=null&&Number.isFinite(Number(analysis.confidence))?Number(analysis.confidence):null;
   const dir=analysis?.prediction?.includes('UP')?'UP':analysis?.prediction?.includes('DOWN')?'DOWN':'';
   const quality=qualityGate?.score;
   const fgtRaw=Number(analysis?.mtfAlignment)||0;
@@ -10600,13 +10629,13 @@ const TaraWorkspaceHeading=({view,analysis,qualityGate,newsSentiment,pendingKals
   const geoRisk=Number(newsSentiment?.geoRisk)||0;
   return <div className="tara-workspace-heading">
     <div className="tara-workspace-heading__copy"><span>{copy[0]}</span><h2>{copy[1]}</h2><p>{copy[2]}</p></div>
-    <div className="tara-workspace-heading__pulse" aria-label="Live signal status">
-      <span title="Live posterior; not a locked call">POST <b>{post.toFixed(0)}%{dir?` ${dir}`:''}</b></span>
+    <details className="tara-workspace-heading__pulse" aria-label="Live signal status"><summary>Live signal context</summary><div>
+      <span title="Live signal score; not a committed Call">SIGNAL <b>{post==null?'—':post.toFixed(0)} /100{dir?` ${dir}`:''}</b></span>
       <span title="Current signal quality">QUALITY <b>{quality!=null?Math.round(quality):'—'}/100</b></span>
       <span title="Multi-timeframe FGT alignment">FGT <b>{fgt}</b></span>
       {geoRisk>=.3&&<span title="Current geographic news risk">GEO <b>{geoRisk>=.7?'HIGH':geoRisk>=.5?'ELEVATED':'WATCH'}</b></span>}
       {pendingKalshiCount>0&&<span title="Trades awaiting Kalshi resolution">PENDING <b>{pendingKalshiCount}</b></span>}
-    </div>
+    </div></details>
   </div>;
 };
 
@@ -17565,7 +17594,9 @@ function HourlyLadderPanel({spot,spotAt,source,asset='BTC',readiness,taraCall,on
   const L={ticks:confirmationRef.current?.samples?.length||0};
   if(!on)return null; // V13.4.120 FIX: moved from above the useEffect (see note above) -- panel still hides the same way, hook now always runs
   return(
-    <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+    <div className="tara-v145-hourly-panel mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+      <HourlyApprovalSummary locks={LOCKS} candidate={assessment.ok?assessment.pick:null} status={_hourlyStatus} samples={confirmationRef.current?.samples||[]} required={assessment.pick?.needTicks||CONFIRM_TICKS}/>
+      <details className="tara-v145-disclosure" open><summary>Strike ladder, all open picks, record &amp; export</summary><div className="tara-v145-hourly-details">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] uppercase tracking-wider text-zinc-400">Hourly ladder <span className="text-zinc-600">KXBTCD</span></div>
         <div className="flex items-center gap-2">
@@ -17807,6 +17838,7 @@ function HourlyLadderPanel({spot,spotAt,source,asset='BTC',readiness,taraCall,on
           </div>
         </div>
       )}
+      </div></details>
     </div>);
 }
 function TaraAdvisorPanel({advisor,executeAction}){
@@ -24024,7 +24056,10 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
   const[learnOpen,setLearnOpen]=React.useState(false);
   const[viewFilter,setViewFilter]=React.useState('all');
   const[memoryPeriod,setMemoryPeriod]=React.useState('calls');
-  const windowEntries=React.useMemo(()=>[...taraCallLog].filter(e=>e&&e.windowType===windowType),[taraCallLog,windowType]);
+  const[versionFilter,setVersionFilter]=React.useState('all');
+  const[inspectedEntry,setInspectedEntry]=React.useState(null);
+  const allWindowEntries=React.useMemo(()=>presentationRows(taraCallLog,{windowType}),[taraCallLog,windowType]);
+  const windowEntries=React.useMemo(()=>fullPage?presentationRows(allWindowEntries,{version:versionFilter}):allWindowEntries,[allWindowEntries,fullPage,versionFilter]);
   const record=React.useMemo(()=>({
     wins:windowEntries.filter(e=>_isRealTrade(e)&&e.result==='WIN').length,
     losses:windowEntries.filter(e=>_isRealTrade(e)&&e.result==='LOSS').length,
@@ -24046,8 +24081,9 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
   const _fmtDate=(ms)=>_fmtDateTz(ms,timeFormat,{month:'short',day:'numeric'});
   return React.createElement(React.Fragment,null,
     fullPage&&React.createElement('div',{className:'tara-memory-periods','aria-label':'Memory ledger'},
-      [['calls','15-minute Calls'],['hourly','Hourly locks']].map(([key,label])=>
-        React.createElement('button',{key,type:'button',onClick:()=>setMemoryPeriod(key),'aria-pressed':memoryPeriod===key},label))),
+      [['calls',`${windowType==='5m'?'5':'15'}-minute Calls`],['hourly','Hourly picks']].map(([key,label])=>
+        React.createElement('button',{key,type:'button',onClick:()=>setMemoryPeriod(key),'aria-pressed':memoryPeriod===key},label)),
+      memoryPeriod==='calls'&&React.createElement(RecordVersionFilter,{entries:allWindowEntries,value:versionFilter,onChange:setVersionFilter})),
     (!fullPage||memoryPeriod==='calls')&&React.createElement('div',{className:fullPage?'tara-memory-page':'border-t border-[#24242E] pt-2.5 mt-2.5'},
       React.createElement('div',{className:'flex justify-between items-baseline mb-1.5 gap-2'},
         React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold'},'Tara\'s Memory'),
@@ -24090,6 +24126,8 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
             recent.map((e)=>{
               const r=e.result||'pending';
               const c=_resultColors[r]||_resultColors.pending;
+              const capturedBlocker=e.originalDecision?.blockedDecision||e.blockedDecision;
+              const capturedScore=e.originalDecision?.signalScore??e.confidence;
               // V13.3.6: coherent pill direction. The glyph and color come
               //   from result; the arrow must agree with them. A real trade
               //   (WIN/LOSS) shows its position direction, recovered from
@@ -24108,6 +24146,9 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
               return React.createElement('div',{
                 key:e.id,
                 className:fullPage?'tara-memory-page__row':'flex items-center gap-2.5 px-1 py-[5px]',
+                role:fullPage?'button':undefined,tabIndex:fullPage?0:undefined,
+                onClick:fullPage?()=>setInspectedEntry(e):undefined,
+                onKeyDown:fullPage?ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();setInspectedEntry(e);}}:undefined,
                 title:`${_fmtTime(e.time||e.id)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir||'?'} ${e.confidence||0}% · ${r}${e.gapBps!=null?` · ${formatSignedInt(e.gapBps)} bps`:''}`,
               },
                 React.createElement('span',{className:'text-[10px] leading-none w-2.5 shrink-0',style:{color:c.fg}},_dirArrow(_ddir)),
@@ -24116,15 +24157,17 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
                   :React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:'rgba(237,237,237,0.42)'}},_fmtTime(e.time||e.id)),
                 React.createElement('span',{className:fullPage?'tara-memory-page__decision':'text-[11px] truncate',style:{color:'rgba(237,237,237,0.66)'}},
                   (_ddir||(r==='SITOUT'?'SIT OUT':'—'))+' · '+_outcomeWord),
-                fullPage&&React.createElement('span',{className:'tara-memory-page__evidence'},`${e.confidence!=null?Math.round(Number(e.confidence))+'% confidence · ':''}${e.regime||'regime pending'}${e.qScore!=null?' · q'+e.qScore:''}`),
-                fullPage&&e.blockedDecision?.reason&&React.createElement('span',{
+                fullPage&&React.createElement('span',{className:'tara-memory-page__evidence'},`${capturedScore!=null&&Number.isFinite(Number(capturedScore))?Math.round(Number(capturedScore))+'/100 signal · ':''}${e.regime||'regime pending'}${e.qScore!=null?' · q'+e.qScore:''}`),
+                fullPage&&capturedBlocker?.reason&&React.createElement('span',{
                   className:'tara-memory-page__blocker',style:{gridColumn:'2 / -1',fontSize:'11px',lineHeight:1.5,color:'#b9aa87',overflowWrap:'anywhere'},
-                },`Blocked: ${e.blockedDecision.reason}`),
+                },`Blocked: ${capturedBlocker.reason}`),
+                fullPage&&React.createElement('span',{className:'tara-v145-memory-version'},`${recordVersion(e)==='Unknown'?'Version unavailable':'v'+recordVersion(e)} · inspect ↗`),
               );
             })
           ),
     ),
     fullPage&&memoryPeriod==='hourly'&&React.createElement(HourlyMemoryModal,{embedded:true}),
+    fullPage&&React.createElement(RecordInspector,{entry:inspectedEntry,onClose:()=>setInspectedEntry(null)}),
     open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
@@ -26129,7 +26172,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 //
 //   Designed to read like a trader's thought process, not a dump of internals.
 function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeSource,strikeMode,taraCall,taraScorecards,windowType,onClose,embedded=false,snapshot=null}){
-  if(!analysis)return embedded?<section className="tara-brain-loading"><span className="tara-rail-kicker">TARA / BRAIN</span><h3>Waiting for market evidence</h3><p>The live analysis has not produced a trustworthy read yet. Tara's recorded Call remains available on Overview and Memory.</p></section>:null;
+  if(!analysis)return embedded?<TaraBrainSummary snapshot={snapshot} candidate={taraCall} analysis={null} lock={readLockState(snapshot)}/>:null;
   const post=analysis.rawProbAbove||50;
   // V3.2.1: Acknowledge balanced posterior. When |post-50|<3, signals are genuinely mixed.
   //   Don't force a UP/DOWN tiebreaker that creates false 'UP bias' framing.
@@ -26281,7 +26324,9 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
           {!embedded&&<button onClick={onClose} className="text-[#EDEDED]/60 hover:text-white text-xl px-3 py-1">×</button>}
         </div>}
 
-        <div className="p-5 space-y-6">
+        {embedded&&<TaraBrainSummary snapshot={_snap} candidate={taraCall} analysis={analysis} lock={readLockState(_snap)}/>}
+        <details className="p-5 space-y-6 tara-v145-deep-brain" open={!embedded}>
+          <summary>Full signals, for / against ledger &amp; model diagnostics</summary>
           {/* V4.2: TARA'S CALL — leading panel. Her actual decision, framed first. */}
           {taraCall&&(()=>{
             const tc=taraCall;
@@ -26498,7 +26543,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
             )}
           </section>
 
-        </div>
+        </details>
       </div>
     </div>
   );
@@ -28053,7 +28098,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
 //   Accessible via header button. Shows: WR heatmap by hour×day, P&L curve by asset,
 //   ML model status + feature importance, loss pattern distribution, regime×direction
 //   performance matrix, signal attribution chart.
-function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=false,lockResearch}){
+function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=false,lockResearch,asset='BTC',windowType='15m'}){
   React.useEffect(()=>{
     if(embedded)return;
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
@@ -28237,7 +28282,9 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=
         ),
         React.createElement('button',{onClick:onClose,className:'w-8 h-8 rounded-lg flex items-center justify-center text-[#EDEDED]/50 hover:text-white hover:bg-[#EDEDED]/5 text-xl'},'✕')
       ),
-      React.createElement('div',{className:'p-5 space-y-6'},
+      embedded&&React.createElement(TaraEvidenceAnalytics,{entries:taraCallLog,asset,windowType}),
+      React.createElement(embedded?'details':'div',{className:embedded?'tara-v145-advanced-analytics':'p-5 space-y-6'},
+        embedded&&React.createElement('summary',null,'Full analysis, learning model, heatmaps & research'),
         embedded&&React.createElement('div',{className:'tara-analytics-summary'},
           [['TARA CALL RECORD',`${_wins}–${_losses}`,`${resolved.length} settled directional calls`],
            ['CALL WIN RATE',`${_wrPct}%`,'sit-outs are not scored wins'],
@@ -29829,7 +29876,7 @@ function WeatherView({onClose,weatherPicks}){
         <section className="tara-specialist-brief tara-specialist-brief--weather" aria-label="Weather picks flow">
           <div>
             <div className="tara-specialist-brief__eyebrow">SPECIALIST LANE · WEATHER</div>
-            <h2>Weather intelligence</h2>
+            <h2>Weather</h2>
             <p>Live picks are the buckets that can actually be traded now. Paper picks stay visible for learning; settled picks are the record.</p>
           </div>
           <div className="tara-specialist-brief__legend">
@@ -29879,7 +29926,7 @@ function WeatherView({onClose,weatherPicks}){
             evidence table. The full evidence and settled history remain below;
             this strip simply makes live, paper, and record discoverable. */}
         <div className="weather-lane-tabs" role="tablist" aria-label="Weather pick state">
-          {[['live','LIVE',P.openLive.length],['paper','PAPER',P.openPaper.length],['settled','SETTLED',P.recent.length]].map(([id,label,count])=>(
+          {[['live','Live opportunities',P.openLive.length],['paper','Paper picks',P.openPaper.length],['settled','Settled record',P.recent.length]].map(([id,label,count])=>(
             <button key={id} role="tab" aria-selected={weatherLane===id} onClick={()=>setWeatherLane(id)} className={weatherLane===id?'is-active':''}>
               <span>{label}</span><b>{count}</b>
             </button>
@@ -29962,7 +30009,7 @@ function WeatherView({onClose,weatherPicks}){
           </section>
         )}
 
-        <details key={weatherLane} className="tara-research" open={weatherLane==='live'}>
+        <details key={weatherLane} className="tara-research">
         <summary>City forecast · bucket ladder · methodology & complete history</summary>
         {S.err?(
           <div className="bg-[#0A0A0E] border border-[#1B1B22] rounded-[10px] p-4 text-[12px]" style={{color:'#E8455E'}}>{S.err}</div>
@@ -30367,7 +30414,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
         <section className="tara-specialist-brief tara-specialist-brief--sports" aria-label="Sports picks flow">
           <div>
             <div className="tara-specialist-brief__eyebrow">SPECIALIST LANE · SPORTS</div>
-            <h2>Sports picks</h2>
+            <h2>Sports</h2>
             <p>Board shows every fixture Tara priced. A tracked badge means it counts toward the record; Record shows settled picks only.</p>
           </div>
           <div className="tara-specialist-brief__legend">
@@ -30397,13 +30444,19 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
         {!data&&!err&&<div className="text-[#EDEDED]/40 text-sm">Loading…</div>}
 
         {data&&(<div className="sports-data-stack">
+          <EvidenceMetrics items={[
+            ['Tracked picks',(data.board||data.upcoming||[]).filter(r=>r.tracked&&r.result==null).length,'Committed picks awaiting a result'],
+            ['Upcoming fixtures',(data.board||data.upcoming||[]).filter(r=>sportsIsFuture(r.start,nowMs)).length,'Known future start times'],
+            ['Settled record',rec?`${rec.wins}W · ${rec.losses}L`:'Unavailable','Tracked picks only'],
+            ['Snapshot',data.generated?new Date(data.generated).toLocaleTimeString():'Unavailable','Quoted prices are snapshots'],
+          ]}/>
           <div className="text-[11px] leading-relaxed mb-3" style={{color:settlementStatus.overdue?SPORTS_RED:'#a4a4ae'}}>
             {settlementStatus.pending} tracked pick{settlementStatus.pending===1?'':'s'} awaiting settlement
             {settlementStatus.overdue>0&&<span> · {settlementStatus.overdue} over 48 hours old — settlement needs attention</span>}
             {settlementStatus.lastSettled&&<span> · Last result added {new Date(settlementStatus.lastSettled).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/New_York'})} ET</span>}
             {settlementStatus.nonBinary.map(r=><div key={r.id}>{r.event}: {r.reason}</div>)}
           </div>
-          {rec&&(
+          {rec&&(<details className="tara-v145-disclosure sports-model-comparison"><summary>Record quality · model vs market log loss</summary>
             <div className={`grid grid-cols-2 sm:grid-cols-4 gap-px mb-4 overflow-hidden ${UI2_PANEL} ${UI2_GRID_BG}`}>
               <div className={card}>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Record</div>
@@ -30426,7 +30479,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
                 <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{rec.vs_market==null?'not yet comparable':Math.abs(rec.vs_market)<.0005?'tied at shown precision':rec.vs_market<0?'beating market':'behind market'}</div>
               </div>
             </div>
-          )}
+          </details>)}
 
           {/* Freshness. This board is a snapshot written by export_tara.py, not
               a live feed — the prices below are whatever Kalshi showed when the
@@ -30759,6 +30812,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
             </div>
           )}
 
+          <details className="tara-v145-disclosure sports-fixture-details" open={tab!=='upcoming'}><summary>{tab==='upcoming'?'All upcoming fixtures & detailed evidence':tab==='record'?'Settled picks & captured prices':'All picks & detailed evidence'} · {rows.length}</summary><div>
           {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='board'&&sportFilter!=='all'?'Nothing matches this sport filter.':''}</div>}
 
           {grouped.map((day,di)=>{
@@ -30804,6 +30858,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
           <div className="rounded-xl border border-[#24242E] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
             Every chip is one number: how far the model sits from the market on that pick. <span className="font-bold" style={{color:'#7CA6E8'}}>Matches market</span> means within 3 points — that is where the model has tracked the closing line, and it is the <b className="text-white/70">absence of an edge</b>, not the presence of one. After Kalshi's ~1.7c fee near 50c, a matching position is negative EV. <span className="font-bold" style={{color:T2_GOLD}}>Off by 3–7</span> is shown but never tallied. <span className="text-white/70 font-bold">Off by 8+</span> backtested at 1.0373 log loss against the market's 0.9641 — that is the model being wrong, not an edge worth taking.</div>
 
+          </div></details>
           {data.disclosures&&data.disclosures.length>0&&(
             <div className="mt-4">
               <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">Excluded, corrected and backfilled</div>
@@ -53479,7 +53534,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.10</small>
+              <small>DECISION ENGINE · V14.5.0</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -54014,7 +54069,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           activeView={workspaceFocus}
           setActiveView={setWorkspaceFocus}
         />
-        {workspaceFocus==='overview'&&<div className="tara-v14-page-lead"><div><span>TRADE / CURRENT 15-MINUTE WINDOW</span><h2>One window. Separate truths.</h2><p>The Call is the record. AutoTrade may act on it. Kalshi alone confirms the position.</p></div><small>{String(windowType||'15m').toUpperCase()} WINDOW<br/>Live state</small></div>}
+        {workspaceFocus==='overview'&&<><div className="tara-v14-page-lead"><div><h2>Your current window</h2><p>The locked Call, its record and the market in one place.</p></div><button className="tara-v145-settings-button" onClick={()=>setShowTradingSettings(true)}>Window settings</button></div><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/></>}
         {workspaceFocus!=='overview'&&<TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length} snapshot={taraCallSnapshotRef.current||null}/>}
         {workspaceFocus==='overview'&&<TaraPageBrief
           taraCall={taraCall}
@@ -54054,7 +54109,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           {!taraCallSnapshotRef.current&&callCommitHoldRef.current?.windowId===computeWindowId(windowType)&&<> {callCommitHoldRef.current.reason}</>}
         </p>}
         {workspaceFocus==='overview'&&!expandedOverview&&<><TaraOverviewMarket
-          asset={currentAsset} priceSource={priceSource} resolution={resolution} setResolution={setResolution}
+          compactRead asset={currentAsset} priceSource={priceSource} resolution={resolution} setResolution={setResolution}
           currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource}
           activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} pastWindows={pastWindows}
           windowType={windowType} timeFormat={timeFormat} orderBook={orderBook} tapeWindows={tapeWindows}
@@ -54079,9 +54134,10 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           onOpenFlow={()=>setShowWhaleLog(true)}
           onOpenTheory={()=>setShowTheoryLab(true)}
         />}
-        {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded taraCallLog={taraCallLog} taraMLModel={taraMLModel} lockResearch={lockResearch} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
+        {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded asset={currentAsset} windowType={windowType} taraCallLog={taraCallLog} taraMLModel={taraMLModel} lockResearch={lockResearch} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
         {workspaceFocus==='brain'&&showBrain&&<BrainView embedded snapshot={taraCallSnapshotRef.current||null} analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
         {workspaceFocus==='schedule'&&<TaraHourlyRecordSummary/>}
+        {workspaceFocus==='signals'&&<><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/><TaraSignalsSummary analysis={analysis} candidate={taraCall} lock={readLockState(taraCallSnapshotRef.current)} orderBook={orderBook} tapeWindows={tapeWindows} smartMoneySignals={_smartMoneySignals} qualityGate={qualityGate} deadline={callLockDeadline(windowType)}/></>}
         {/* V13.4.298: lg:auto-rows-fr + the grid default (stretch) forced every
             column to the height of the tallest one, showing as 400-600px of
             blank space under the shorter columns' last card once all 3 columns
@@ -54089,7 +54145,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             blank, right column ~22%, on a 2011px-tall left column). lg:items-start
             lets each column size to its own content instead -- the tradeoff is
             the columns' bottom edges no longer line up. */}
-<div className="tara-live-grid" id="tara-execution-surface">
+<TaraDetailEnvelope enabled={workspaceFocus==='signals'}><div className="tara-live-grid" id="tara-execution-surface">
           
           {/* V13.4.271: THIS TRADE leads the page. The mockup puts it top-left as
               the first and largest thing on screen, because it is the only card that
@@ -54136,7 +54192,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               numbered stages, always present. Replaces the scattered TARA'S CALL
               headline + TRADE COACH + auto-exec status that all described the same
               round from three different columns. */}
-          <details className="tara-trade-details" open={workspaceFocus==='execution'}>
+          <details className="tara-trade-details">
           <summary>TRADE COACH · ORDER DETAILS · SCALPER CONTROLS</summary>
           <ThisTradeCard
             taraCall={taraCall}
@@ -54962,6 +55018,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           </div>
         </div>
 
+        </TaraDetailEnvelope>
         {/* V13.4.295: HOURLY + SCHEDULE row -- matches the mockup's row below
             the main 3-column grid. HourlyLadderPanel moved here from inside
             RightPanel (column 3); ScheduleBySessionCard is new. lg:grid-cols-2
@@ -54969,11 +55026,13 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             same convention as the main grid above. */}
         <div className="tara-hourly-row grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0" id="tara-schedule-surface">
           <HourlyLadderPanel {..._hourlyObservation} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
+          <TaraDetailEnvelope enabled={workspaceFocus==='schedule'} label="Hourly schedule & session performance">
           <ScheduleBySessionCard taraCallLog={taraCallLog}/>
           <div className="tara-trade-schedule min-w-0">
             <DayAwareScheduleHeader dayContext={dayContext}/>
             <TradeScheduleStrip taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} onOpenFullSchedule={()=>setScheduleModalMain(true)}/>
           </div>
+          </TaraDetailEnvelope>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
@@ -56077,7 +56136,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
 
 
       <style>{taraDesignStyles}</style>
-      <style>{taraV14Styles}</style>
+      <style>{taraV14Styles+taraV145Styles}</style>
       {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
               displaying context that doesn't change minute-to-minute. Wraps gracefully on mobile. */}
       <div className="bg-[#0A0B0A] border-t border-[#24242E] px-3 sm:px-4 py-1.5 mt-2 -mx-2 sm:-mx-3 lg:-mx-4 -mb-2 sm:-mb-3 shrink-0">

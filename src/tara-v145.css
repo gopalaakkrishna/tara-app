@@ -1,0 +1,207 @@
+/* Approved v14.5 presentation. Existing components remain the data authorities. */
+@font-face{font-family:'Space Grotesk';src:url('/fonts/tara-v145/space.woff2');font-weight:400 700;font-display:swap}
+@font-face{font-family:'Instrument Sans';src:url('/fonts/tara-v145/instrument.woff2');font-weight:400 700;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url('/fonts/tara-v145/mono.woff2');font-weight:400;font-display:swap}
+.tara-live-shell[data-tara-version="14"]{--bg:#0b0c0e;--panel:#121417;--line:#2b2d31;--muted:#a4a5a1;background:#0b0c0e!important;color:#eeece6}
+.tara-live-shell[data-tara-version="14"] .tara-main{max-width:1440px!important;padding:0 32px 64px!important}
+.tara-live-shell[data-tara-version="14"] .tara-header{min-height:76px;background:#0e0f11!important;padding:0 32px!important}
+.tara-live-shell[data-tara-version="14"] .tara-header>div{max-width:1376px!important;min-height:76px}
+.tara-live-shell[data-tara-version="14"] .tara-header .tara-modebar>button[aria-current="page"]{border-bottom-color:var(--v14-gold)!important}
+.tara-live-shell[data-tara-version="14"] .tara-header .tara-modebar>button{font-weight:400!important;font-size:12px!important}
+.tara-live-shell[data-tara-version="14"] .tara-context-strip>div:first-child{min-height:50px}
+.tara-live-shell[data-tara-version="14"] .tara-main .tara-workspace-switch .tara-workspace-nav{min-height:55px;gap:13px}
+.tara-live-shell[data-tara-version="14"] .tara-main .tara-workspace-switch .tara-workspace-nav button{min-height:55px;padding:0 5px;font-size:11px}
+.tara-live-shell[data-tara-version="14"] .tara-approved-primary[data-workspace="overview"][data-overview-expanded="false"]{display:block!important}
+.tara-live-shell[data-tara-version="14"] .tara-v14-page-lead,.tara-live-shell[data-tara-version="14"] .tara-workspace-heading{padding:26px 0 23px;display:flex;gap:20px;align-items:center}
+.tara-live-shell[data-tara-version="14"] .tara-v14-page-lead h2,.tara-live-shell[data-tara-version="14"] .tara-workspace-heading h2,.tara-live-shell[data-tara-version="14"] .tara-specialist-brief h2{font:500 29px/1.15 'Space Grotesk',sans-serif;letter-spacing:-.045em;margin:0 0 7px}
+.tara-live-shell[data-tara-version="14"] .tara-workspace-heading__copy>span,.tara-live-shell[data-tara-version="14"] .tara-specialist-brief__eyebrow{display:none}
+.tara-live-shell[data-tara-version="14"] .tara-v14-page-lead p,.tara-live-shell[data-tara-version="14"] .tara-workspace-heading p{font:13px/1.5 'Instrument Sans',sans-serif;margin:0;color:var(--muted)}
+.tara-v145-settings-button,.tara-v145-inspector button,.tara-v145-hourly-summary button{padding:8px 12px;min-height:35px;border:1px solid #4b4433;border-radius:2px;background:none;color:var(--v14-gold);font:10px 'IBM Plex Mono',monospace}
+.tara-v145-settings-button{margin-left:auto;white-space:nowrap}
+.tara-v145-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:var(--panel);border:1px solid var(--line);border-radius:3px;margin:0 0 20px}
+.tara-v145-metrics>div{padding:18px 22px;min-width:0;border-right:1px solid var(--line)}
+.tara-v145-metrics>div:last-child{border:0}
+.tara-v145-metrics label{display:block;color:var(--muted);font:10px 'IBM Plex Mono',monospace;margin-bottom:8px}
+.tara-v145-metrics strong{font:500 29px/1.2 'Space Grotesk',sans-serif;letter-spacing:-.045em;display:block;overflow-wrap:anywhere}
+.tara-v145-metrics small{display:block;font:10px/1.5 'IBM Plex Mono',monospace;margin-top:6px;color:var(--muted);overflow-wrap:anywhere}
+.tara-v145-call-record-grid{display:grid;grid-template-columns:1.38fr 1fr;gap:17px;margin-bottom:17px;align-items:start}
+.tara-live-shell[data-tara-version="14"] .tara-page-brief.tara-call-ledger{min-height:0;border-radius:3px;background:linear-gradient(120deg,#191916,#121417 65%)}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero{padding:22px 25px 21px;display:grid;grid-template-columns:minmax(0,1fr) 105px;gap:23px;min-height:178px}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero>div{min-width:0}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__kicker{font-size:10px;text-transform:none;letter-spacing:.04em}
+.tara-v145-call-heading{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin:14px 0 9px}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero .tara-v145-call-heading h3{font:500 46px/1 'Space Grotesk',sans-serif;letter-spacing:-.055em;margin:0;overflow-wrap:anywhere}
+.tara-v145-badge{font:9px 'IBM Plex Mono',monospace;color:var(--muted);border:1px solid #3e443c;border-radius:3px;padding:4px 7px;white-space:nowrap}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero p{font:13px/1.5 'Instrument Sans',sans-serif!important;overflow-wrap:anywhere}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__truth{display:block!important;min-width:0!important;text-align:right}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__truth strong{font:400 29px 'Space Grotesk',sans-serif;color:var(--text);letter-spacing:-.04em}
+.tara-call-ledger__truth strong span{font-size:12px;color:var(--muted)}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__truth small{display:block;margin-top:5px;font-size:9px}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__bottom{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:13px 24px}
+.tara-v145-save-state{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font:9px 'IBM Plex Mono',monospace;color:var(--muted)}
+.tara-v145-save-state button{font:9px 'IBM Plex Mono',monospace;color:var(--muted);border:0;background:none;padding:0}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__actions{display:flex!important;gap:10px}
+.tara-live-shell[data-tara-version="14"] .tara-call-ledger__actions button{padding:0;border:0;font:10px 'IBM Plex Mono',monospace;color:var(--v14-gold)}
+.tara-call-ledger__more{margin:0}
+.tara-v145-record-panel{border:1px solid var(--line);border-radius:3px;background:var(--panel);overflow:hidden}
+.tara-v145-panel-head{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:17px 21px;border-bottom:1px solid #222428}
+.tara-v145-panel-head h3{font:500 15px 'Space Grotesk',sans-serif;margin:0;color:var(--text)}
+.tara-v145-panel-head>span{font:9px 'IBM Plex Mono',monospace;color:var(--muted)}
+.tara-v145-record-totals{display:grid;grid-template-columns:1.6fr repeat(3,1fr);align-items:center;gap:15px;padding:20px 22px 17px}
+.tara-v145-record-totals strong{font:500 39px/1 'Space Grotesk',sans-serif;letter-spacing:-.05em}
+.tara-v145-record-totals b{font:500 20px 'Space Grotesk',sans-serif;display:block}
+.tara-v145-record-totals small{display:block;font:9px 'IBM Plex Mono',monospace;color:var(--muted);margin-top:6px}
+.tara-v145-record-panel .tara-call-ledger__recent{padding:14px 22px;border:0;border-top:1px solid #222428}
+.tara-v145-record-panel .tara-call-ledger__recent-summary{font-size:9px;gap:8px}
+.tara-v145-record-panel .tara-call-ledger__recent-summary button{margin-left:auto;border:0;padding:0;background:none;color:var(--v14-gold);font:10px 'IBM Plex Mono',monospace}
+.tara-v145-record-panel .tara-call-ledger__recent-tiles{display:flex;gap:5px;width:100%;margin-top:10px;flex-wrap:wrap}
+.tara-v145-record-panel .tara-call-ledger__recent-tiles button{width:12px;height:13px;border:0;border-radius:2px;padding:0;background:#4b4d4f}
+.tara-v145-record-panel .tara-call-ledger__recent-tiles button.is-win{background:#427357}
+.tara-v145-record-panel .tara-call-ledger__recent-tiles button.is-loss{background:#825050}
+.tara-v145-record-panel .tara-call-ledger__recent-tiles button:hover{outline:1px solid var(--text)}
+.is-up{color:var(--green)}.is-down{color:var(--red)}.is-gold{color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance{min-height:0;border:1px solid var(--line);border-radius:3px;background:#101215;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;padding:13px 20px;flex-wrap:wrap;margin:0 0 20px}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance__head{display:flex;align-items:center;gap:14px;padding:0;flex:0 1 auto;flex-wrap:wrap}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance__head .tara-rail-kicker{color:var(--muted);font-size:9px}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance__head h2{font:500 12px 'Instrument Sans',sans-serif;letter-spacing:0;margin:0;color:var(--amber)}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance__head p{font:11px 'Instrument Sans',sans-serif;margin:0}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance__actions{padding:0;gap:12px;margin-left:auto}
+.tara-live-shell[data-tara-version="14"] .tara-exec-glance__actions button{border:0;padding:0;font:10px 'IBM Plex Mono',monospace;background:none;color:var(--v14-gold)}
+.tara-v145-exec-detail{font:9px 'IBM Plex Mono',monospace;color:var(--muted)}
+.tara-v145-exec-detail[open]{order:3;flex-basis:100%;font-size:11px}
+.tara-v145-exec-detail summary{cursor:pointer}
+.tara-live-shell[data-tara-version="14"] .tara-v14-market-grid{grid-template-columns:minmax(0,1fr) 300px;gap:17px;margin:0 0 20px}
+.tara-live-shell[data-tara-version="14"] :is(.tara-v14-chart,.tara-v14-readout){border-radius:3px;overflow:hidden;background:var(--panel)}
+.tara-live-shell[data-tara-version="14"] .tara-v14-chart .tv-chart-container{height:360px!important}
+.tara-live-shell[data-tara-version="14"] .tara-v14-chart__head{min-height:54px;padding:14px 20px}
+.tara-live-shell[data-tara-version="14"] .tara-v14-chart__head strong{font:500 15px 'Space Grotesk',sans-serif}
+.tara-live-shell[data-tara-version="14"] .tara-v14-chart__head small{font-size:9px}
+.tara-live-shell[data-tara-version="14"] .tara-v14-readout__row{font-size:12px;padding:12px 20px}
+.tara-live-shell[data-tara-version="14"] .tara-v14-readout__row b{font-size:10px}
+.tara-live-shell[data-tara-version="14"] .tara-v14-readout__past{padding:11px 20px;font-size:9px}
+.tara-live-shell[data-tara-version="14"] .tara-v14-hourly-quick{background:none;padding:13px 0;margin:0 0 18px;font-size:10px}
+.tara-live-shell[data-tara-version="14"] .tara-v14-hourly-quick button{margin-left:auto;padding:0;border:0}
+.tara-live-shell[data-tara-version="14"] .tara-overview-toggle{padding:13px 18px;border-radius:3px;background:none}
+.tara-v145-disclosure,.tara-v145-advanced-analytics,.tara-v145-deep-brain{border:1px solid var(--line);border-radius:3px;margin-top:20px;padding:0!important;background:transparent}
+.tara-v145-disclosure>summary,.tara-v145-advanced-analytics>summary,.tara-v145-deep-brain>summary{padding:13px 18px;color:var(--muted);font:10px 'IBM Plex Mono',monospace;cursor:pointer;list-style:none}
+.tara-v145-disclosure>summary:after,.tara-v145-advanced-analytics>summary:after,.tara-v145-deep-brain>summary:after{content:'+';float:right;color:var(--v14-gold)}
+.tara-v145-disclosure[open]>summary:after,.tara-v145-advanced-analytics[open]>summary:after,.tara-v145-deep-brain[open]>summary:after{content:'−'}
+.tara-v145-disclosure>div{padding:18px}
+.tara-v145-unwrapped{display:contents}
+.tara-live-shell[data-tara-version="14"] .tara-v145-hourly-details>button{border-color:#514831!important;color:var(--v14-gold)!important;background:#191913!important;border-radius:3px}
+.tara-v145-advanced-analytics>*:not(summary){margin:15px 20px 20px;padding:15px;background:var(--panel);border:1px solid var(--line)}
+.tara-live-shell[data-tara-version="14"] .tara-analytics-page.tara-inline-page>div>:last-child{display:block!important}
+.tara-live-shell[data-tara-version="14"] .tara-brain-page.tara-inline-page>div>.p-5{display:block}
+.tara-v145-deep-brain>section,.tara-v145-deep-brain>div{margin:15px 20px 20px!important;padding:15px!important}
+.tara-v145-filter-row{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:20px;font:10px 'IBM Plex Mono',monospace;color:var(--muted)}
+.tara-v145-version-filter{display:flex;align-items:center;gap:10px;font:10px 'IBM Plex Mono',monospace;color:var(--muted);margin-left:auto}
+.tara-v145-version-filter select{padding:7px 10px;border:1px solid var(--line);background:#181a1d;color:var(--text);border-radius:3px;font:11px 'IBM Plex Mono',monospace;min-width:140px}
+.tara-v145-reason{padding:17px 21px;background:#171711;border:1px solid #423b29;border-radius:3px;font:13px/1.55 'Instrument Sans',sans-serif;color:#c5bc9f;margin:0 0 21px;overflow-wrap:anywhere}
+.tara-v145-analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.tara-v145-analysis-grid>section{padding:21px;border:1px solid var(--line);border-radius:3px;background:var(--panel);min-width:0}
+.tara-v145-analysis-grid h3{font:500 16px 'Space Grotesk',sans-serif;margin:0 0 20px}
+.tara-v145-analysis-grid p,.tara-v145-evidence-rows p{display:flex;justify-content:space-between;align-items:start;gap:20px;padding:11px 0;border-bottom:1px solid #222428;font:12px/1.5 'Instrument Sans',sans-serif;margin:0}
+.tara-v145-analysis-grid p b,.tara-v145-evidence-rows p b{font:11px/1.5 'IBM Plex Mono',monospace;text-align:right;overflow-wrap:anywhere;max-width:65%}
+.tara-v145-analysis-grid small{display:block;font:11px/1.55 'Instrument Sans',sans-serif;color:var(--muted);margin-top:17px}
+.tara-v145-analysis-grid details>summary{padding:11px 0;font-size:12px;cursor:pointer;border-bottom:1px solid var(--line)}
+.tara-v145-analysis-grid details>summary b{float:right;color:var(--v14-gold)}
+.tara-v145-confidence-bars>div{display:grid;grid-template-columns:100px 1fr 40px;gap:14px;align-items:center;margin:15px 0;font:10px 'IBM Plex Mono',monospace}
+.tara-v145-confidence-bars small{display:inline;margin:0 0 0 5px;font-size:9px}
+.tara-v145-confidence-bars>div>div{height:8px;background:#272a28}
+.tara-v145-confidence-bars i{height:100%;background:#75a78b;display:block}
+.tara-v145-brain-hero{border:1px solid var(--line);border-top:2px solid var(--v14-gold);border-radius:3px;background:var(--panel);padding:30px;margin-bottom:23px}
+.tara-v145-brain-hero>small{font:10px 'IBM Plex Mono',monospace;color:var(--v14-gold)}
+.tara-v145-brain-hero h3{font:500 31px/1.25 'Space Grotesk',sans-serif;letter-spacing:-.04em;margin:17px 0;max-width:850px;overflow-wrap:anywhere}
+.tara-v145-brain-hero p{font:13px/1.6 'Instrument Sans',sans-serif;color:var(--muted);max-width:650px;margin:0}
+.tara-v145-hourly-panel{padding:0!important;border:0!important;background:none!important;margin-top:0!important}
+.tara-v145-hourly-summary{border:1px solid var(--line);border-top:2px solid var(--v14-gold);border-radius:3px;background:var(--panel)}
+.tara-v145-hourly-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:35px;padding:27px}
+.tara-v145-hourly-hero small{font:10px 'IBM Plex Mono',monospace;color:var(--v14-gold);overflow-wrap:anywhere}
+.tara-v145-hourly-hero h3{font:500 37px/1.2 'Space Grotesk',sans-serif;letter-spacing:-.04em;margin:12px 0}
+.tara-v145-hourly-hero h4{font:500 17px 'Space Grotesk',sans-serif;margin:0 0 15px}
+.tara-v145-hourly-hero p{font:12px/1.5 'Instrument Sans',sans-serif;color:var(--muted);margin:7px 0 15px}
+.tara-v145-pick-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:20px}
+.tara-v145-pick-metrics label{font:9px 'IBM Plex Mono',monospace;color:var(--muted);display:block;margin-bottom:8px}
+.tara-v145-pick-metrics b{font:500 24px 'Space Grotesk',sans-serif;letter-spacing:-.04em;overflow-wrap:anywhere}
+.tara-v145-confirmations{display:flex;gap:8px;flex-wrap:wrap}
+.tara-v145-confirmations>div{flex:1 1 95px;border-top:3px solid var(--green);padding-top:10px}
+.tara-v145-confirmations b{font:10px 'IBM Plex Mono',monospace}
+.tara-v145-confirmations small,.tara-v145-confirmations span{display:block;font:9px/1.6 'IBM Plex Mono',monospace;color:var(--muted);margin-top:4px}
+.tara-v145-other-hourly{display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding:14px 27px}
+.tara-live-shell[data-tara-version="14"] .tara-approved-primary[data-workspace="schedule"] .tara-hourly-row{grid-template-columns:minmax(0,1fr)!important;gap:20px}
+.tara-live-shell[data-tara-version="14"] .tara-hourly-record-summary{border-radius:3px;margin-bottom:20px}
+.tara-live-shell[data-tara-version="14"] .tara-memory-periods{gap:8px;align-items:center;border:0;flex-wrap:wrap}
+.tara-live-shell[data-tara-version="14"] .tara-memory-periods>button,.tara-live-shell[data-tara-version="14"] .tara-memory-page__filters button{min-height:35px;border:1px solid transparent;border-radius:3px;font:10px 'IBM Plex Mono',monospace;padding:8px 12px}
+.tara-live-shell[data-tara-version="14"] .tara-memory-periods>button[aria-pressed="true"],.tara-live-shell[data-tara-version="14"] .tara-memory-page__filters button[aria-pressed="true"]{background:#252217;border-color:#514831;color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .tara-memory-page{border-radius:3px}
+.tara-live-shell[data-tara-version="14"] .tara-memory-page__row{cursor:pointer;padding:15px 20px;border-bottom:1px solid #222428}
+.tara-live-shell[data-tara-version="14"] .tara-memory-page__row:hover{background:#1c1d1c}
+.tara-v145-memory-version{font:9px 'IBM Plex Mono',monospace;color:var(--v14-gold);grid-column:2/-1}
+.tara-live-shell[data-tara-version="14"] .tara-workspace-heading__pulse{font-size:10px;position:relative;color:var(--muted)}
+.tara-live-shell[data-tara-version="14"] .tara-workspace-heading__pulse>summary{font:10px 'IBM Plex Mono',monospace;cursor:pointer;color:var(--muted)}
+.tara-v145-inspector{color:var(--text,#eeece6);background:#141619;border:1px solid #49463b;border-radius:5px;padding:0;width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 50px);box-shadow:0 25px 100px #0008}
+.tara-v145-inspector::backdrop{background:#050609bb;backdrop-filter:blur(3px)}
+.tara-v145-inspector__head{display:flex;justify-content:space-between;align-items:center;padding:17px 24px;border-bottom:1px solid var(--line);font:10px 'IBM Plex Mono',monospace;color:var(--v14-gold)}
+.tara-v145-inspector__head button{border:0;font-size:26px;min-height:0;padding:0 5px;line-height:1}
+.tara-v145-inspector__body{padding:24px}
+.tara-v145-inspector h2{font:500 28px 'Space Grotesk',sans-serif;letter-spacing:-.04em;margin:0 0 14px}
+.tara-v145-inspector h3{font:500 17px 'Space Grotesk',sans-serif;margin:18px 0 13px}
+.tara-v145-inspector p{font:13px/1.5 'Instrument Sans',sans-serif;color:var(--muted)}
+.tara-v145-inspector .tara-v145-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tara-v145-inspector .tara-v145-metrics>div{padding:15px}
+.tara-v145-inspector .tara-v145-metrics strong{font-size:20px;white-space:normal}
+.tara-v145-note{font-size:11px!important;margin-top:19px}
+.tara-live-shell[data-tara-version="14"] :is(.tara-sports-body,.tara-weather-body){max-width:1376px!important}
+.tara-live-shell[data-tara-version="14"] .tara-specialist-brief{padding:26px 0 23px;border:0;background:none}
+.tara-live-shell[data-tara-version="14"] .tara-specialist-brief--sports,.tara-live-shell[data-tara-version="14"] .tara-specialist-brief--weather{--workspace-accent:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .sports-data-stack>.tara-v145-metrics{order:-7}
+.tara-live-shell[data-tara-version="14"] .sports-data-stack>.grid:first-of-type{order:-1}
+.tara-live-shell[data-tara-version="14"] .sports-next-glance{background:var(--panel);border-top:1px solid var(--line);border-radius:3px}
+.tara-live-shell[data-tara-version="14"] .sports-next-glance__eyebrow{color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .sports-next-glance__head{padding:17px 22px}
+.tara-live-shell[data-tara-version="14"] .sports-next-glance__row{padding:19px 22px;min-height:75px}
+.tara-live-shell[data-tara-version="14"] .sports-state-tabs>div{background:none;border:0;padding:0}
+.tara-live-shell[data-tara-version="14"] .sports-state-tabs button{border-radius:3px;font:10px 'IBM Plex Mono',monospace;text-transform:none;padding:8px 12px}
+.tara-live-shell[data-tara-version="14"] .tara-weather-body{display:flex;flex-direction:column}
+.tara-live-shell[data-tara-version="14"] .tara-weather-body>.tara-specialist-brief{order:-9}
+.tara-live-shell[data-tara-version="14"] .tara-weather-body>.flex.items-center.justify-between{order:-8}
+.tara-live-shell[data-tara-version="14"] .weather-live-overview{display:contents!important}
+.tara-live-shell[data-tara-version="14"] .weather-record-strip{order:-5;grid-template-columns:repeat(4,minmax(0,1fr))!important;border-radius:3px;margin:0 0 20px!important}
+.tara-live-shell[data-tara-version="14"] .weather-city-select{order:-4;padding:10px 15px;border-radius:3px;min-height:46px;color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .weather-lane-tabs{order:-3;gap:8px;border:0;margin-bottom:20px;flex-wrap:wrap}
+.tara-live-shell[data-tara-version="14"] .weather-lane-tabs button{border:1px solid transparent;border-radius:3px;min-height:35px;padding:8px 12px;font:10px 'IBM Plex Mono',monospace;color:var(--muted)}
+.tara-live-shell[data-tara-version="14"] .weather-lane-tabs button.is-active{background:#252217;border-color:#514831;color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .weather-lane-tabs button b,.tara-live-shell[data-tara-version="14"] .weather-record-strip span{color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .weather-live-overview>.rounded-xl{background:var(--panel)!important;border-top-color:var(--v14-gold)!important;border-radius:3px!important;margin-bottom:20px!important;min-height:0!important;padding:24px!important}
+.tara-live-shell[data-tara-version="14"] .tara-weather-body .weather-live-overview.is-live>div:first-child{background:var(--panel)!important;border-top-color:var(--v14-gold)!important;min-height:0!important}
+.tara-live-shell[data-tara-version="14"] .weather-record-strip>div{padding:18px 22px}
+.tara-live-shell[data-tara-version="14"] .weather-record-strip strong{font:500 29px 'Space Grotesk',sans-serif;letter-spacing:-.045em}
+.tara-live-shell[data-tara-version="14"] .sports-data-stack>.sports-model-comparison{order:1}
+.tara-live-shell[data-tara-version="14"] .sports-data-stack>.tara-research{order:2}
+.tara-live-shell[data-tara-version="14"] .sports-data-stack>.sports-fixture-details{order:0}
+.tara-live-shell[data-tara-version="14"] .weather-lane-preview{border-radius:3px;border-top-color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .tara-tools-groups{gap:18px;background:none}
+.tara-live-shell[data-tara-version="14"] .tara-tools-groups>section{border:1px solid var(--line);border-radius:3px;padding:20px}
+.tara-live-shell[data-tara-version="14"] .tara-approved-primary[data-workspace="execution"] .tara-exec-overview__head h2{font-size:29px}
+.tara-live-shell[data-tara-version="14"] .tara-approved-primary[data-workspace="execution"] .tara-exec-overview{border-radius:3px;background:var(--panel);border-top-color:var(--v14-gold)}
+.tara-live-shell[data-tara-version="14"] .tara-approved-primary[data-workspace="execution"] .tara-exec-overview{background:none;border:0;padding:0}
+.tara-v145-execution-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.tara-v145-execution-panel{background:var(--panel);border:1px solid var(--line);border-radius:3px;min-width:0;overflow:hidden}
+.tara-v145-execution-rows{padding:15px 22px}
+.tara-v145-execution-rows p{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #25272a;margin:0;font:12px/1.5 'Instrument Sans',sans-serif}
+.tara-v145-execution-rows b{font:10px/1.5 'IBM Plex Mono',monospace;text-align:right;overflow-wrap:anywhere;max-width:62%}
+.tara-v145-execution-rows small{display:block;margin-top:17px;font:11px/1.55 'Instrument Sans',sans-serif;color:var(--muted)}
+.tara-live-shell[data-tara-version="14"] .tara-v145-execution-panel .tara-exec-overview__actions{padding:0 22px 20px}
+.tara-v145-execution-panel>.tara-v145-disclosure{margin:0 22px 20px}
+.tara-live-shell[data-tara-version="14"] .tara-v145-execution-panel .tara-exec-overview__flow{padding:20px 22px 10px}
+.tara-live-shell[data-tara-version="14"] .tara-v145-execution-panel .tara-exec-overview__steps{gap:8px;flex-wrap:wrap;display:flex;margin-top:14px}
+.tara-live-shell[data-tara-version="14"] .tara-v145-execution-panel .tara-exec-overview__steps span{border:1px solid #373a3c;border-radius:3px;padding:4px 6px;font:8px 'IBM Plex Mono',monospace}
+.tara-live-shell[data-tara-version="14"] .tara-v145-execution-panel .tara-exec-overview__steps span:before{display:none}
+@media(max-width:800px){.tara-v145-execution-grid{grid-template-columns:minmax(0,1fr)}}
+.tara-live-shell[data-tara-version="14"] .tara-exec-overview__metrics strong{font-size:27px;overflow-wrap:anywhere}
+.tara-live-shell[data-tara-version="14"] .tara-rail-card{border-radius:3px!important}
+.tara-live-shell[data-tara-version="14"] button:focus-visible,.tara-live-shell[data-tara-version="14"] summary:focus-visible,.tara-v145-inspector button:focus-visible{outline:2px solid var(--v14-gold);outline-offset:3px}
+@media(max-width:1100px){.tara-v145-metrics>div{padding:17px}.tara-v145-metrics strong{font-size:25px}.tara-v145-call-record-grid{grid-template-columns:1.3fr 1fr}.tara-v145-record-totals{gap:10px;padding:18px}.tara-v145-record-totals strong{font-size:33px}.tara-live-shell[data-tara-version="14"] .tara-v14-market-grid{grid-template-columns:minmax(0,1fr) 270px}}
+@media(max-width:800px){.tara-live-shell[data-tara-version="14"] .tara-main{padding:0 20px 65px!important}.tara-v145-call-record-grid,.tara-v145-analysis-grid,.tara-v145-hourly-hero{grid-template-columns:minmax(0,1fr)}.tara-v145-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.tara-v145-metrics>div:nth-child(2){border-right:0}.tara-v145-metrics>div:nth-child(n+3){border-top:1px solid var(--line)}.tara-live-shell[data-tara-version="14"] .tara-v14-market-grid{grid-template-columns:minmax(0,1fr)}.tara-live-shell[data-tara-version="14"] .tara-page-brief.tara-call-ledger{min-height:0}.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero{grid-template-columns:minmax(0,1fr) 88px;gap:12px;padding:20px}.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero .tara-v145-call-heading h3{font-size:38px}.tara-live-shell[data-tara-version="14"] .tara-call-ledger__truth{text-align:right;padding:0}.tara-live-shell[data-tara-version="14"] .tara-workspace-heading,.tara-live-shell[data-tara-version="14"] .tara-v14-page-lead{align-items:flex-start;flex-wrap:wrap;padding:21px 0 19px}.tara-v145-hourly-hero{gap:24px;padding:23px}.tara-v145-filter-row{flex-wrap:wrap}.tara-v145-version-filter{margin-left:0}.tara-live-shell[data-tara-version="14"] .weather-record-strip{grid-template-columns:repeat(2,minmax(0,1fr))!important}.tara-v145-inspector .tara-v145-metrics{grid-template-columns:1fr}.tara-v145-inspector .tara-v145-metrics>div{border-right:0;border-bottom:1px solid var(--line)}.tara-v145-brain-hero{padding:24px}.tara-v145-brain-hero h3{font-size:26px}.tara-live-shell[data-tara-version="14"] .tara-header{padding:10px 20px 0!important}.tara-live-shell[data-tara-version="14"] .tara-header>div{min-height:0}.tara-live-shell[data-tara-version="14"] .tara-exec-glance__head p{display:none}.tara-v145-save-state{gap:8px;font-size:8px}.tara-live-shell[data-tara-version="14"] .tara-memory-periods .tara-v145-version-filter{width:100%;margin:10px 0}.tara-v145-analysis-grid p b{max-width:60%}.tara-live-shell[data-tara-version="14"] .tara-v14-chart .tv-chart-container{height:310px!important}}
+@media(max-width:420px){.tara-live-shell[data-tara-version="14"] .tara-main{padding:0 14px 65px!important}.tara-live-shell[data-tara-version="14"] .tara-header{padding-inline:14px!important}.tara-v145-metrics>div{padding:15px}.tara-v145-metrics strong{font-size:24px}.tara-v145-metrics label,.tara-v145-metrics small{font-size:9px}.tara-live-shell[data-tara-version="14"] .tara-call-ledger__truth strong{font-size:26px}.tara-live-shell[data-tara-version="14"] .tara-call-ledger__hero .tara-v145-call-heading h3{font-size:36px}.tara-v145-record-totals strong{font-size:34px}.tara-v145-record-panel .tara-call-ledger__recent-summary button{font-size:9px}.tara-v145-record-totals{gap:12px;padding:18px}.tara-v145-analysis-grid>section{padding:18px}.tara-v145-confidence-bars>div{grid-template-columns:85px 1fr 35px;gap:8px}.tara-v145-pick-metrics b{font-size:21px}}
+@media(prefers-reduced-motion:reduce){.tara-live-shell[data-tara-version="14"] *{scroll-behavior:auto!important}}
