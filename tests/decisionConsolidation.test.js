@@ -39,6 +39,15 @@ test('the same market data cannot turn clock ticks into confirmation',()=>{
   assert.equal(h.scope.currentCallBlockerRef.current.code,'sample-freshness');
 });
 
+test('real millisecond evaluation time does not reject a fresh qualified formation',()=>{
+  const h=makeHarness(hOptions),now=h.clock;
+  const state={schema:2,count:6,firstAt:now-3000,lastAt:now,observations:4};
+  assert.equal(callFormationReady(state,6,now+5),true);
+  assert.equal(callFormationReady(state,6,now+999),true);
+  assert.equal(callFormationReady(state,6,now-1),false);
+  assert.equal(callFormationReady(state,6,now+1001),false);
+});
+
 test('new observations faster than one second, regressing quotes and future/stale spot do not confirm',()=>{
   const h=makeHarness(hOptions),q=h.scope._kalshiQuote,now=q.at;
   const input={direction:'UP',windowId:h.windowId,asset:'BTC',source:'coinbase',spotAt:now,quote:q,probabilityUp:77,now};

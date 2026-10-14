@@ -80,7 +80,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     getMarketSessions:()=>({dominant:'OFF-HOURS'}),getPhaseKey:()=>null,buildCalibrationTable:()=>({}),lookupCalibration:()=>({found:false}),
     brtiApprox:null,dayContext:null,whaleLog:[],adaptiveWeightsByAssetRef:ref({}),_otherAssetRef:ref({}),
     tradingSettings:{tier1OnlyMode:tier1Only},sessionTierMode:'off',_resolveSessionTierMultiplier:()=>1,
-    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.14-v14.7.0-single-decision-authority',
+    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.14-v14.7.1-single-decision-authority',
     _lossCooldownRef:ref(null),taraCallLog:logs,_ana:null,computeReversalRisk:()=>({flag:'NONE',score:0}),
     playAlert(){},brtiApproxRef:ref(null),lastKalshiSuccessRef:ref(clock),_windowCushionHistoryRef:ref([]),
     kalshiStrikeRef:ref(83200),_mountTimeRef:ref(clock-180000),_deriveSitoutCategory:()=>null,

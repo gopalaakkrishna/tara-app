@@ -46,7 +46,10 @@ export function advanceCallFormation(previous,input) {
 
 export function callFormationReady(state,required,now=Date.now()) {
   const n=num(required);
-  if(state?.schema!==2||n===null||n<1||state.count<n||state.lastAt!==now)return false;
+  // The same synchronous decision can cross a millisecond boundary. The
+  // caller separately requires a fresh observation, so a bounded receipt age
+  // permits normal evaluation time without admitting another clock-only tick.
+  if(state?.schema!==2||n===null||n<1||state.count<n||state.lastAt>now||now-state.lastAt>1000)return false;
   const minimumMs=Math.max(0,Math.ceil(n/1.5)-1)*1000;
   return state.lastAt-state.firstAt>=minimumMs;
 }

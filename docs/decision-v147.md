@@ -1,4 +1,4 @@
-# Tara 14.7.0 — single decision authority
+# Tara 14.7.1 — single decision authority
 
 ## Changes
 
@@ -23,6 +23,9 @@ and non-regressing. At most one observation per second advances the original
 with a minimum elapsed span corresponding to the existing count. A clock render,
 old restored counter, stale feed or opposite direction cannot provide evidence.
 Manual force overrides remain explicitly manual.
+The point release allows up to1 second of synchronous evaluation time after a
+fresh receipt. It does not require the clock to remain in the exact same
+millisecond; duplicate observations still return before the lock readiness check.
 
 Quiet classification uses elapsed rather than remaining time, retaining the
 180-second and 0.4-ratio checks. All downstream trend/chop flags agree with the
