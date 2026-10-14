@@ -20,7 +20,7 @@ import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, 
 import { useLockStudy } from './useLockStudy.js';
 import {useLearningRegistry} from './useLearningRegistry.js';
 import {LearningStatus} from './LearningStatus.jsx';
-import {LEARNING_PROTOCOL,directionFeatures,learningSource,preferLearningSummary} from './learningCore.js';
+import {LEARNING_PROTOCOL,directionFeatures,learningSummarySource,preferLearningSummary,verifiedSummaryCall} from './learningCore.js';
 import {learningPredictions,capturePickLearning,capturePickSettlement} from './learningCapture.js';
 import LockStudyPanel from './LockStudyPanel.jsx';
 import './lockStudy.css';
@@ -5875,8 +5875,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.14-v14.6.0-verified-shadow-learning';
-const TARA_VERSION_DISPLAY='TARA 14.6.0';
+const TARA_BUILD_VERSION='2026.10.14-v14.6.1-verified-shadow-learning';
+const TARA_VERSION_DISPLAY='TARA 14.6.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37496,7 +37496,7 @@ function TaraApp(){
   useEffect(()=>{
     const unsub=cloudWatch('memory/taraCallLog',(d)=>{
       _callLogHydratedRef.current=true;
-      if(Array.isArray(d?.entries))_learningCloudSourceRef.current=learningSource(d.entries);
+      if(Array.isArray(d?.entries))_learningCloudSourceRef.current=learningSummarySource(d.entries);
       if(!d||!Array.isArray(d.entries)||!d.entries.length)return;
       try{
         const _now=Date.now();
@@ -37954,7 +37954,7 @@ function TaraApp(){
     const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{},byEdge:{},byLossPattern:{}};
     let total=0;
     (log||[]).forEach(e=>{
-      if(!isScoredCall(e)||(e.asset||'BTC')!=='BTC'||(e.windowType||'15m')!=='15m'||e.manualEditedAt||e.recordRevisions?.length)return;
+      if(!verifiedSummaryCall(e)||(e.asset||'BTC')!=='BTC'||(e.windowType||'15m')!=='15m')return;
       if(e.dir!=='UP'&&e.dir!=='DOWN')return;
       const won=e.result==='WIN';
       total++;
@@ -37991,7 +37991,7 @@ function TaraApp(){
       }
     });
     const multipliers=_deriveMultipliers(stats);
-    const source=learningSource(log);
+    const source=learningSummarySource(log);
     setTaraLearnings(prev=>prev.learningProtocol===LEARNING_PROTOCOL&&prev.source?.signature===source.signature?prev:
       {...stats,multipliers,lastUpdated:Date.now(),totalResolved:total,learningProtocol:LEARNING_PROTOCOL,source,scope:'BTC_15m'});
   },[_deriveMultipliers]);
@@ -53277,7 +53277,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.6.0</small>
+              <small>DECISION ENGINE · V14.6.1</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

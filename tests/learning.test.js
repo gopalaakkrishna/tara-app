@@ -97,11 +97,14 @@ test('authoritative deletion can lower summary count; a stale device cannot win 
   assert.equal(L.preferLearningSummary(local,cloud),false);assert.equal(L.preferLearningSummary(local,cloud,{canonicalSource:local.source}),true);
 });
 test('the production summary recomputes the right horizon and does not count corrupt or amended results',()=>{
-  let summary={};const scope={React:{useCallback:f=>f},isScoredCall:e=>['WIN','LOSS'].includes(e?.result),learningSource:L.learningSource,LEARNING_PROTOCOL:L.LEARNING_PROTOCOL,Date,
+  let summary={};const scope={React:{useCallback:f=>f},verifiedSummaryCall:L.verifiedSummaryCall,learningSummarySource:L.learningSummarySource,LEARNING_PROTOCOL:L.LEARNING_PROTOCOL,Date,
     setTaraLearnings:f=>summary=f(summary)};
   scope._deriveMultipliers=actual('_deriveMultipliers',scope);const recompute=actual('_recomputeLearningsFromLog',scope);
   recompute([call(1),{...call(2),windowType:'1h'},{...call(3),result:'NO_TRADE'},{...call(4),manualEditedAt:now}]);
   assert.equal(summary.totalResolved,1);assert.equal(summary.scope,'BTC_15m');const prior=summary;recompute([call(1),{...call(2),windowType:'1h'},{...call(3),result:'NO_TRADE'},{...call(4),manualEditedAt:now}]);assert.equal(summary,prior);
+  const sameRows=[call(1),{...call(2),windowType:'1h'},{...call(3),result:'NO_TRADE'},{...call(4),manualEditedAt:now}];
+  summary={...summary,source:L.learningSource(sameRows),totalResolved:999};
+  recompute(sameRows);assert.equal(summary.totalResolved,1);assert.equal(summary.source.policy,'official-early-v1');
 });
 test('hourly and weather freeze their directional probability and verify the exact market',()=>{
   const pick={ticker:'KXBTCD-TEST',side:'NO'},capture=capturePickLearning(pick,{profile:'BTC_hourly',at:start,close:start+3600000,version:'14.6',probability:.8,confidence:70,price:60,quoteAt:start,event:'hour'});
@@ -188,4 +191,11 @@ test('the real weight restoration loads one saved baseline and ignores subsequen
   assert.equal(weights.BTC.gap,12);assert.equal(regime.BTC.TREND.gap,8);
   receive({adaptive:{BTC:{gap:99}},regime:{BTC:{TREND:{gap:99}}},updatedAtBTC:{adaptive:999,regime:999}});
   assert.equal(weights.BTC.gap,12);assert.equal(regime.BTC.TREND.gap,8);
+});
+test('legacy feedback summaries require a matching official early-window outcome, not a convenient WIN label',()=>{
+  const e=call(1);assert.equal(L.verifiedSummaryCall(e,now),true);
+  for(const patch of [{officialSettlement:null},{manualEdit:true},{officialSettlement:{...e.officialSettlement,outcomeDir:'DOWN'}},
+    {officialSettlement:{...e.officialSettlement,ticker:'wrong'}},{originalDecision:{...e.originalDecision,lockedAt:Date.parse(e.marketCloseTime)-419000}}]){
+    assert.equal(L.verifiedSummaryCall({...e,...patch},now),false);
+  }
 });

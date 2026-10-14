@@ -13,11 +13,11 @@ const snapshot={asset:'BTC',windowType:'15m',windowId,locked:true,call:'UP',dir:
     secondsLeft:495,signalScore:72,strike:84521.2,marketTicker:ticker,marketCloseTime:closeTime,yesBid:62,yesAsk:64,
     modelVersion:'2026.10.13-v14.4.10-hourly-fresh-approval',reason:'Buy-side tape held and the trend agreed before the cutoff.'}};
 const records=Array.from({length:24},(_,i)=>{const at=start-(24-i)*900000,dir=i%3?'UP':'DOWN',result=i%5===0?'SITOUT':i%4===0?'LOSS':'WIN';const wid=`15m-${new NativeDate(at).toISOString()}`,market=`KXBTC15M-FIXTURE${i}`;return{id:at+405000,time:at+405000,asset:'BTC',windowType:'15m',windowId:wid,dir:result==='SITOUT'?'SIT_OUT':dir,result,confidence:72,strike:84521.2,closingPrice:84600,regime:'TREND',reason:'Captured fixture reason',tier:'tier1',
-    originalDecision:{...snapshot.originalDecision,windowId:wid,lockedAt:at+405000,direction:result==='SITOUT'?'SIT_OUT':dir,marketTicker:market,
+    originalDecision:{...snapshot.originalDecision,windowId:wid,lockedAt:at+405000,direction:result==='SITOUT'?'SIT_OUT':dir,marketTicker:market,marketCloseTime:new NativeDate(at+900000).toISOString(),
       modelVersion:i<12?'2026.10.13-v14.4.9-shared-decision-restoration':snapshot.taraVersion,
       reason:result==='SITOUT'?'Patient: letting tape/momentum decide (61% conviction). Required 65%.':'Tape and direction agreed at capture.',
       blockedDecision:result==='SITOUT'?{code:'timing-confidence',reason:'Patient: letting tape/momentum decide (61% conviction). Required 65%.',gate:{observedConfidence:61,requiredConfidence:65}}:null},
-    officialSettlement:result==='SITOUT'?null:{source:'kalshi-public-api',ticker:market,result:(dir==='UP')===(result==='WIN')?'yes':'no'},};});
+    officialSettlement:result==='SITOUT'?null:{source:'kalshi-public-api',ticker:market,outcomeDir:(dir==='UP')===(result==='WIN')?'UP':'DOWN',closeTime:new NativeDate(at+900000).toISOString(),verifiedAt:at+901000},};});
 records.push({...snapshot,id:lockedAt,time:lockedAt,result:null});
 const doc={windowId,asset:'BTC',windowType:'15m',taraSnapshot:snapshot,lockedCall:{dir:'UP',lockedAt,windowId,asset:'BTC',windowType:'15m'},updatedAt:NOW};
 const hourlyClose=new NativeDate(NOW);hourlyClose.setMinutes(60,0,0);const hClose=hourlyClose.getTime();

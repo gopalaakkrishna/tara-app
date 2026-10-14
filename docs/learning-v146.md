@@ -15,7 +15,7 @@
 
 Live promotion is disabled. A probability improvement in a shadow classifier is not proof that the full Call policy or AutoTrade will earn more. The registry reports `ready-for-policy-review`, never silently activates it. At least 100 independent forward groups, chronological and forward probability improvement, and estimated fee-aware evidence are required even for review readiness. Pick-calibration profiles keep the same picks: they cannot claim improved trading profit simply from recalibrating probabilities.
 
-The old random/in-sample ML activation and event-by-event live gradient updates are retired. Existing saved weights are retained, not reset. Existing statistical summary/multiplier formulas remain, but refresh on canonical evidence contents instead of the stale maximum lifetime count. Personal/manual outcomes do not update model weights.
+The old random/in-sample ML activation and event-by-event live gradient updates are retired. Existing saved weights are retained, not reset. Existing statistical summary/multiplier formulas remain, but refresh on canonical evidence contents instead of the stale maximum lifetime count. In 14.6.1 these summaries also require matching official early-window outcomes; legacy unverified WIN/LOSS labels and manual results cannot adjust them. The Analytics adapter now understands the real writer's `outcomeDir` schema and rejects known wrong-window or conflicting settlement evidence. Personal/manual outcomes do not update model weights.
 
 The 15-minute cutoff stays at 420 seconds. Call/hourly lock thresholds, confirmation policy, cost bands, cooldown rules and all AutoTrade settings remain unchanged. Live execution remains paused. Original Calls, records, controls and TradingView remain in place.
 

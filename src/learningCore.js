@@ -26,6 +26,18 @@ export function validFeatures(f) {
   const n=f?.schema==='btc-direction-v1'?DIRECTION_FEATURES.length:f?.schema==='pick-calibration-v1'?3:0;
   return f?.protocol===LEARNING_PROTOCOL&&n>0&&Array.isArray(f.values)&&f.values.length===n&&f.values.every(x=>typeof x==='number'&&Number.isFinite(x)&&Math.abs(x)<1e6)&&num(f.baseProbability)!==null&&f.baseProbability>=0&&f.baseProbability<=1;
 }
+// Statistical feedback is learning too: a legacy WIN label or a manually
+// edited row is not an official, comparable early-window outcome.
+export function verifiedSummaryCall(e,asOf=Date.now()){
+  const o=e?.originalDecision,s=e?.officialSettlement,close=windowCloseMs(e?.windowId),at=num(o?.lockedAt),verified=num(s?.verifiedAt);
+  if(!isScoredCall(e)||e.manualEdit||e.manualEditedAt||e.recordRevisions?.length||e.isUserForced||e.tier==='user-forced'||o?.commitPolicy?.action==='manual')return false;
+  const cutoff=(e.windowType||'15m')==='15m'?420:30;
+  return !!o&&o.windowId===e.windowId&&o.direction===e.dir&&o.asset===(e.asset||'BTC')&&o.windowType===(e.windowType||'15m')&&
+    Number.isFinite(close)&&at!==null&&at>=Date.parse(e.windowId.slice(o.windowType.length+1))&&at<close-cutoff*1000&&
+    verified!==null&&verified>=close&&verified<=asOf&&s?.source==='kalshi-public-api'&&!!o.marketTicker&&s.ticker===o.marketTicker&&
+    Number.isFinite(Date.parse(s.closeTime))&&Math.abs(Date.parse(s.closeTime)-close)<=1000&&['UP','DOWN'].includes(s.outcomeDir)&&
+    (e.result==='WIN')===(e.dir===s.outcomeDir);
+}
 export function callLearningRow(e,{asOf=Date.now()}={}) {
   const o=e?.originalDecision,s=e?.officialSettlement,f=o?.learningFeatures;
   if(!isScoredCall(e)||e.manualEdit||e.manualEditedAt||e.recordRevisions?.length)return {ok:false,reason:'unverified-or-amended-outcome'};
@@ -189,6 +201,12 @@ export function learningSource(entries) {
   const rows=(Array.isArray(entries)?entries:[]).filter(e=>e&&['WIN','LOSS','SITOUT','NO_TRADE'].includes(e.result));
   return {signature:learningDigest(rows.map(e=>[callKey(e),e.result,e.dir,e.regime,e.tier,e.session,e.isStructuralLed,e.isSuperConfluent,e.isConfluent,e.isTapeLed,e.isRisingConfluence,e.lossPattern,e.posterior,e.kalshiAtLock,e.originalDecision,e.officialSettlement,e.manualEditedAt,e.recordRevisions]).sort((a,b)=>a[0].localeCompare(b[0]))),
     maxId:Math.max(0,...rows.map(e=>Number(e.id)||0)),evidenceAt:Math.max(0,...rows.flatMap(e=>[e.officialSettlement?.verifiedAt,e.resolvedAt,e.manualEditedAt].map(x=>Number(x)||0))),count:rows.length};
+}
+export function learningSummarySource(entries){
+  const source=learningSource(entries),policy='official-early-v1';
+  // Changing eligibility must invalidate an old summary even when its ledger
+  // contents/count have not changed since the previous application release.
+  return {...source,policy,signature:learningDigest([policy,source.signature])};
 }
 export function preferLearningSummary(local,cloud,{canonicalSource}={}) {
   if(local?.learningProtocol!==LEARNING_PROTOCOL)return false;
