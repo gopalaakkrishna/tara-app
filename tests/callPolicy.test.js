@@ -82,7 +82,7 @@ test('existing captured locks and explicit manual overrides retain their identit
 // a guard which computes the right answer but fails to clear/preserve live state.
 const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
 test('the actual reversal helper returns directionally correct confidence without reversing a zero input',()=>{
-  const body=app.slice(app.indexOf('  const _v10_7_6_reversalCheck='),app.indexOf('  const _v10_7_11_universalOverride='));
+  const body=app.slice(app.indexOf('  const _v10_7_6_reversalCheck='),app.indexOf('  // Three coordinated effects'));
   const check=new Function('tapeWindows','directionalConfidence',body+'; return _v10_7_6_reversalCheck;')(null,directionalConfidence);
   assert.equal(check(35,{}).conf,65);
   assert.equal(check(35,{}).dir,'DOWN');

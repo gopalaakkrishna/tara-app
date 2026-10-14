@@ -42,7 +42,7 @@ test('unchanged early and mid65 timing threshold holds64.99, permits65 after qua
     assert.equal(h.scope.currentCallBlockerRef.current.code,'timing-confidence');
     assert.equal(h.scope.currentCallBlockerRef.current.gate.requiredConfidence,65);
     assert.equal(h.logs.length,0);assert.equal(h.cloud.length,0);
-    const pass=makeHarness({secondsLeft,confidence:65});assert.equal(pass.run()?.call,'UP');
+    const pass=makeHarness({secondsLeft,confidence:65,quality:85,mtf:4,tapeBuy:90});assert.equal(pass.run()?.call,'UP');
     assert.deepEqual(pass.errors,[]);
   }
 });
@@ -83,7 +83,7 @@ test('missing, stale, future, crossed and wrong-window/asset quotes cannot creat
 
 test('legacy price and final edge guards cannot veto a qualified candidate when Call entry filters are off',()=>{
   for(const cost of [44,74,77]){
-    const h=makeHarness({yesPrice:cost});assert.equal(h.run()?.call,'UP',`cost${cost}`);
+    const h=makeHarness({yesPrice:cost,quality:85,mtf:2});assert.equal(h.run()?.call,'UP',`cost${cost}`);
     assert.equal(h.logs.length,1);assert.deepEqual(h.errors,[]);
   }
   for(const cost of [14,90,98]){
@@ -118,7 +118,7 @@ test('flat-gap waiting reports the actual unchanged signal threshold rather than
 test('existing sample formation, Tier1 preference and adverse cooldowns remain enforced',()=>{
   const sample=makeHarness({samples:0,claimedDirection:null});assert.equal(sample.run(),null);
   assert.ok(sample.scope.taraCallSampleRef.current.count>0);assert.equal(sample.logs.length,0);
-  for(let i=0;i<150 && !sample.scope.taraCallSnapshotRef.current;i++)sample.run();
+  for(let i=0;i<150 && !sample.scope.taraCallSnapshotRef.current;i++){sample.advance(630-i);sample.run();}
   assert.equal(sample.scope.taraCallSnapshotRef.current?.call,'UP');assert.equal(sample.logs.length,1);
   const tier=makeHarness({tier1Only:true,quality:70,mtf:2.5,tapeBuy:50});tier.scope.analysis.windowAmplitude.label='NORMAL';assert.equal(tier.run(),null);
   assert.match(tier.scope.callCommitHoldRef.current.reason,/Tier-1 only/);

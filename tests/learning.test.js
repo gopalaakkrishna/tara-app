@@ -18,7 +18,7 @@ const features=(s=1,secondsLeft=720)=>L.directionFeatures({signals:{gap:s*15,mom
 function call(i=0){const at=start+i*3600000+180000,close=start+i*3600000+900000,windowId=`15m-${new Date(start+i*3600000).toISOString()}`;
   const e={id:at,asset:'BTC',windowType:'15m',windowId,dir:'UP',time:at,lockedAt:at,atSecondsLeft:720,confidence:70,
     taraVersion:'14.6.0',strike:84000,marketTicker:`KXBTC15M-TEST${i}`,marketCloseTime:new Date(close).toISOString(),
-    kalshiBidAtLock:54,kalshiAskAtLock:56,quoteObservedAt:at,learningFeatures:features(i%2?1:-1),learningDataReady:true,callPolicy:{action:'allow',cutoff:420}};
+    rawPosteriorAtLock:55,kalshiBidAtLock:54,kalshiAskAtLock:56,quoteObservedAt:at,learningFeatures:features(i%2?1:-1),learningDataReady:true,callPolicy:{action:'allow',cutoff:420}};
   e.originalDecision=captureOriginalDecision(e,{now:at});Object.assign(e,settlementPatch(e,{ticker:e.marketTicker,status:'settled',result:i%2?'yes':'no',close_time:e.marketCloseTime,floor_strike:84000},close+1000).patch);return e;}
 function rows(n=160){return Array.from({length:n},(_,i)=>L.callLearningRow(call(i),{asOf:now}).row);}
 test('features distinguish a missing feed from an inactive conditional signal',()=>{
@@ -104,7 +104,7 @@ test('the production summary recomputes the right horizon and does not count cor
   assert.equal(summary.totalResolved,1);assert.equal(summary.scope,'BTC_15m');const prior=summary;recompute([call(1),{...call(2),windowType:'1h'},{...call(3),result:'NO_TRADE'},{...call(4),manualEditedAt:now}]);assert.equal(summary,prior);
   const sameRows=[call(1),{...call(2),windowType:'1h'},{...call(3),result:'NO_TRADE'},{...call(4),manualEditedAt:now}];
   summary={...summary,source:L.learningSource(sameRows),totalResolved:999};
-  recompute(sameRows);assert.equal(summary.totalResolved,1);assert.equal(summary.source.policy,'official-early-v1');
+  recompute(sameRows);assert.equal(summary.totalResolved,1);assert.equal(summary.source.policy,'official-early-v2');
 });
 test('hourly and weather freeze their directional probability and verify the exact market',()=>{
   const pick={ticker:'KXBTCD-TEST',side:'NO'},capture=capturePickLearning(pick,{profile:'BTC_hourly',at:start,close:start+3600000,version:'14.6',probability:.8,confidence:70,price:60,quoteAt:start,event:'hour'});

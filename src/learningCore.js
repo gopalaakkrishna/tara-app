@@ -1,5 +1,5 @@
 // Deterministic, side-effect-free learning protocol. No orders/settings here.
-import {finiteNumber as num,callKey,windowCloseMs,isScoredCall} from './callIntegrity.js';
+import {finiteNumber as num,callKey,windowCloseMs,isScoredCall,hasDecisionAmendment} from './callIntegrity.js';
 export const LEARNING_PROTOCOL='tara-learning-v2';
 export const LEARNING_POLICY=Object.freeze({minTrain:80,minTest:30,minForward:100,minPriced:60,gapMs:3600000,
   minBrierGain:.005,maxAgeMs:48*3600000,maxScoreImpact:10,epochs:120,rate:.025,l2:.02});
@@ -30,7 +30,7 @@ export function validFeatures(f) {
 // edited row is not an official, comparable early-window outcome.
 export function verifiedSummaryCall(e,asOf=Date.now()){
   const o=e?.originalDecision,s=e?.officialSettlement,close=windowCloseMs(e?.windowId),at=num(o?.lockedAt),verified=num(s?.verifiedAt);
-  if(!isScoredCall(e)||e.manualEdit||e.manualEditedAt||e.recordRevisions?.length||e.isUserForced||e.tier==='user-forced'||o?.commitPolicy?.action==='manual')return false;
+  if(!isScoredCall(e)||hasDecisionAmendment(e)||e.isUserForced||e.tier==='user-forced'||o?.commitPolicy?.action==='manual')return false;
   const cutoff=(e.windowType||'15m')==='15m'?420:30;
   return !!o&&o.windowId===e.windowId&&o.direction===e.dir&&o.asset===(e.asset||'BTC')&&o.windowType===(e.windowType||'15m')&&
     Number.isFinite(close)&&at!==null&&at>=Date.parse(e.windowId.slice(o.windowType.length+1))&&at<close-cutoff*1000&&
@@ -40,8 +40,10 @@ export function verifiedSummaryCall(e,asOf=Date.now()){
 }
 export function callLearningRow(e,{asOf=Date.now()}={}) {
   const o=e?.originalDecision,s=e?.officialSettlement,f=o?.learningFeatures;
-  if(!isScoredCall(e)||e.manualEdit||e.manualEditedAt||e.recordRevisions?.length)return {ok:false,reason:'unverified-or-amended-outcome'};
+  if(!isScoredCall(e)||hasDecisionAmendment(e))return {ok:false,reason:'unverified-or-amended-outcome'};
   if(o?.provenance!=='captured-at-lock'||!validFeatures(f)||f.schema!=='btc-direction-v1')return {ok:false,reason:'original-features-unavailable'};
+  if(num(o.probabilityUpRaw)===null||Math.abs(f.baseProbability*100-o.probabilityUpRaw)>1e-7)
+    return {ok:false,reason:'original-forecast-baseline-mismatch'};
   if(o.learningDataReady!==true||o.commitPolicy?.action!=='allow'||e.isUserForced||e.tier==='user-forced')return {ok:false,reason:'not-data-ready-automatic-call'};
   const at=num(o.lockedAt),close=windowCloseMs(o.windowId),verified=num(s?.verifiedAt);
   if(o.windowId!==e.windowId||o.asset!==(e.asset||'BTC')||o.windowType!==(e.windowType||'15m')||o.direction!==e.dir||
@@ -203,7 +205,7 @@ export function learningSource(entries) {
     maxId:Math.max(0,...rows.map(e=>Number(e.id)||0)),evidenceAt:Math.max(0,...rows.flatMap(e=>[e.officialSettlement?.verifiedAt,e.resolvedAt,e.manualEditedAt].map(x=>Number(x)||0))),count:rows.length};
 }
 export function learningSummarySource(entries){
-  const source=learningSource(entries),policy='official-early-v1';
+  const source=learningSource(entries),policy='official-early-v2';
   // Changing eligibility must invalidate an old summary even when its ledger
   // contents/count have not changed since the previous application release.
   return {...source,policy,signature:learningDigest([policy,source.signature])};

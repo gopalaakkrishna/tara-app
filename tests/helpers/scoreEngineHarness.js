@@ -8,6 +8,7 @@ import * as forecasts from '../../src/forecastTiming.js';
 import {observedFundingPair} from '../../src/marketDataQuality.js';
 import {dampenScore} from '../../src/economicCalendar.js';
 import {directionFeatures} from '../../src/learningCore.js';
+import {canonicalRegimeFlags} from '../../src/decisionAuthority.js';
 const traverse=traverseModule.default||traverseModule;
 const ast=parse(app,{sourceType:'module',plugins:['jsx']});
 const declarations=new Map();
@@ -17,7 +18,7 @@ for(const statement of ast.program.body){
   }
   if(statement.type==='FunctionDeclaration')declarations.set(statement.id.name,app.slice(statement.start,statement.end));
 }
-const external={...forecasts,observedFundingPair,dampenScore,directionFeatures};
+const external={...forecasts,observedFundingPair,dampenScore,directionFeatures,canonicalRegimeFlags};
 const builtins=new Set(['Array','Object','Number','String','Math','Set','Map','JSON','Boolean','Date','console','Intl',
   'parseFloat','parseInt','isNaN','Infinity','NaN','undefined','window','localStorage']);
 const ordered=[],selected=new Set();

@@ -4,6 +4,18 @@ export function forecastSecondsRemaining(clockSeconds, is15m) {
   return Number.isFinite(n)?Math.max(0,Math.min(is15m?900:300,n)):0;
 }
 
+export function windowSecondsElapsed(clockSeconds,is15m) {
+  const n=clockSeconds==null||clockSeconds===''?NaN:Number(clockSeconds);
+  return Number.isFinite(n)?(is15m?900:300)-forecastSecondsRemaining(n,is15m):null;
+}
+
+export function quietWindowEvidence({clockSeconds,is15m,atrBps,windowOpenPrice,currentPrice}) {
+  const elapsed=windowSecondsElapsed(clockSeconds,is15m),length=is15m?900:300;
+  if(elapsed===null||elapsed<180||!(atrBps>0)||!(windowOpenPrice>0)||!(currentPrice>0))return null;
+  const expected=atrBps*elapsed/length,realized=Math.abs((currentPrice-windowOpenPrice)/windowOpenPrice)*10000;
+  return {elapsed,expected,realized,ratio:expected>0?realized/expected:null};
+}
+
 // Fractional bars express a projection ending at settlement. Historical slope
 // estimation may use more bars, but the projected horizon must not do so.
 export function cappedForecastBars(secondsRemaining, timeframeMinutes, baseForecast) {

@@ -1,5 +1,5 @@
 // Read-only presentation adapters. Never mutate records or decide a Call.
-import {finiteNumber,isDirection,isScoredCall,windowCloseMs} from './callIntegrity.js';
+import {finiteNumber,isDirection,isScoredCall,windowCloseMs,hasDecisionAmendment} from './callIntegrity.js';
 export function recordVersion(row) {
   const raw=row?.originalDecision?.modelVersion||row?.taraVersion||row?.modelVersion||row?.approval?.modelVersion;
   const text=String(raw||'');
@@ -31,7 +31,7 @@ export function evidenceCohort(entries,scope={}) {
     add(timing,left===null?'Capture time unavailable':left>600?'>10m remaining':left>480?'8–10m remaining':left>=420?'7–8m remaining':'<7m / historical');
     add(confidence,score===null?'Score unavailable':score<65?'Below 65':score<70?'65–69':score<75?'70–74':score<80?'75–79':'80+');
     // A current edited result is not substituted for an original verified result.
-    if(!o||o.provenance!=='captured-at-lock'||!isDirection(o.direction)||o.direction!==e.dir||e.manualEdit||e.manualEditedAt||e.recordRevisions?.length||
+    if(!o||o.provenance!=='captured-at-lock'||!isDirection(o.direction)||o.direction!==e.dir||hasDecisionAmendment(e)||
       e.officialSettlement?.source!=='kalshi-public-api'||e.officialSettlement?.ticker!==o.marketTicker)continue;
     const bid=finiteNumber(o.yesBid),ask=finiteNumber(o.yesAsk);
     if(bid===null||ask===null||bid<=0||ask>=100||ask<bid)continue;

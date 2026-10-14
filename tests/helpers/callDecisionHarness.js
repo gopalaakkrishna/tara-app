@@ -10,6 +10,7 @@ import {describeCallBlocker} from '../../src/callBlocker.js';
 import {postProcessLegacyCall,readCallCostBand} from '../../src/callCandidateRules.js';
 import * as forecasts from '../../src/forecastTiming.js';
 import * as tracing from '../../src/callDecisionTrace.js';
+import * as authority from '../../src/decisionAuthority.js';
 const traverse=traverseModule.default||traverseModule;
 export const app=readFileSync(new URL('../../src/App.jsx',import.meta.url),'utf8');
 export function compile(body, result='') {
@@ -45,7 +46,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
   const logs=[],errors=[],audit=[],cloud=[],timers=[],storage=new Map();
   const ref=current=>({current});
   const FakeDate=class extends Date {constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-  const scope={...integrity,...policy,...forecasts,...tracing,learningPredictions,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
+  const scope={...integrity,...policy,...forecasts,...tracing,...authority,learningPredictions,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
     captureOriginalDecision:(entry,options={})=>integrity.captureOriginalDecision(entry,{now:clock,...options}),
     console:{info(){},warn(){},error(...args){errors.push(args.map(String).join(' '));}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
@@ -79,7 +80,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     getMarketSessions:()=>({dominant:'OFF-HOURS'}),getPhaseKey:()=>null,buildCalibrationTable:()=>({}),lookupCalibration:()=>({found:false}),
     brtiApprox:null,dayContext:null,whaleLog:[],adaptiveWeightsByAssetRef:ref({}),_otherAssetRef:ref({}),
     tradingSettings:{tier1OnlyMode:tier1Only},sessionTierMode:'off',_resolveSessionTierMultiplier:()=>1,
-    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.14-v14.6.1-verified-shadow-learning',
+    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.14-v14.7.0-single-decision-authority',
     _lossCooldownRef:ref(null),taraCallLog:logs,_ana:null,computeReversalRisk:()=>({flag:'NONE',score:0}),
     playAlert(){},brtiApproxRef:ref(null),lastKalshiSuccessRef:ref(clock),_windowCushionHistoryRef:ref([]),
     kalshiStrikeRef:ref(83200),_mountTimeRef:ref(clock-180000),_deriveSitoutCategory:()=>null,
@@ -92,6 +93,14 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     setTaraCallLog:fn=>{const next=fn(logs);logs.splice(0,logs.length,...next);scope.taraCallLogRef.current=[...logs];},
   };
   const bindings=boundary(scope);Object.assign(scope,bindings);
+  // Pre-seeded fixtures model genuinely observed in-window history. A bare
+  // legacy count is deliberately not accepted by production formation.
+  if(samples>0){
+    const dir=claimedDirection||(probabilityUp>=50?'UP':'DOWN');
+    scope.taraCallSampleRef.current={schema:2,key:`BTC|${windowId}|coinbase|${dir}`,dir,count:samples,
+      firstAt:Math.max(start,clock-Math.ceil(samples/1.5)*1000),lastAt:clock-1000,
+      lastSpotAt:clock-1000,lastQuoteAt:clock-1000,observations:Math.ceil(samples/1.5)};
+  }
   // Use the real seal before the fake transport, so persistence sees only
   // validated, quote-hydrated, captured decisions. No network client exists.
   scope._persistLock=()=>{if(!scope.taraCallSnapshotRef.current)return;

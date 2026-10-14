@@ -16,7 +16,7 @@ import {postProcessLegacyCall,readCallCostBand} from './callCandidateRules.js';
 import {readCapturedCallSettlement} from './callSettlement.js';
 import {coinbaseCandleRange} from './candleRequests.js';
 import { useCallLedger } from './useCallLedger.js';
-import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isDirection, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
+import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isDirection, isScoredCall, normalizeCallLedger, settlementPatch,applyAutomaticCallSettlement,windowCloseMs } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
 import {useLearningRegistry} from './useLearningRegistry.js';
 import {LearningStatus} from './LearningStatus.jsx';
@@ -30,7 +30,8 @@ import MarketIntelligencePanel from './MarketIntelligencePanel.jsx';
 import {assessSpotResponse, freshOkxResults, freshFeedStatus, observedFundingPair} from './marketDataQuality.js';
 import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executionIntegrity.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
-import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability} from './forecastTiming.js';
+import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
+import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
 import {appendDecisionTrace,captureDecisionTrace} from './callDecisionTrace.js';
 import {sharedWindowId,matchesSharedWindow,restoredSnapshot,ledgerDecision,chooseSharedSnapshot,sharedSnapshotIdentity,restoredEngineLock,
   readDecisionCache,cacheSharedDecision,publishSharedDecision} from './sharedDecision.js';
@@ -5875,8 +5876,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.14-v14.6.1-verified-shadow-learning';
-const TARA_VERSION_DISPLAY='TARA 14.6.1';
+const TARA_BUILD_VERSION='2026.10.14-v14.7.0-single-decision-authority';
+const TARA_VERSION_DISPLAY='TARA 14.7.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6961,13 +6962,15 @@ const DEFAULT_CALIBRATION={
 const buildCalibration=(tradeLog)=>{
   const buckets={};
   for(let b=0;b<=90;b+=10)buckets[b]={wins:0,total:0};
-  tradeLog.filter(t=>t.result).forEach(t=>{
+  tradeLog.filter(t=>verifiedSummaryCall(t)).forEach(t=>{
     // V144: Removed dead variable `upBias` (never read). Kept the bucket math.
-    const b2=Math.floor(t.posterior/10)*10;
+    const p=t.originalDecision?.probabilityUpRaw;
+    if(p==null||!Number.isFinite(p)||p<0||p>100)return;
+    const b2=Math.floor(p/10)*10;
     const key=Math.max(0,Math.min(90,b2));
     if(!buckets[key])buckets[key]={wins:0,total:0};
     buckets[key].total++;
-    if(t.result==='WIN')buckets[key].wins++;
+    if(t.officialSettlement.outcomeDir==='UP')buckets[key].wins++;
   });
   // Compute calibrated win rates per bucket
   const cal={};
@@ -12810,10 +12813,10 @@ const computeV99Posterior=(params)=>{
   let _quietRealizedBps=null;
   let _quietExpectedBps=null;
   if(!_rangeOverrideFired){ // skip if V10.2.36 already forced chop
-    if(windowOpenPrice>0&&atrBps>0&&clockSeconds>=180){
-      const _elapsedFrac=Math.min(1,clockSeconds/900);
-      _quietExpectedBps=atrBps*_elapsedFrac;
-      _quietRealizedBps=Math.abs((currentPrice-windowOpenPrice)/windowOpenPrice)*10000;
+    const _quiet=quietWindowEvidence({clockSeconds,is15m,atrBps,windowOpenPrice,currentPrice});
+    if(_quiet){
+      _quietExpectedBps=_quiet.expected;
+      _quietRealizedBps=_quiet.realized;
       if(_quietExpectedBps>0){
         _quietOverrideRatio=_quietRealizedBps/_quietExpectedBps;
         if(_quietOverrideRatio<0.4){
@@ -13889,7 +13892,7 @@ const computeV99Posterior=(params)=>{
   }catch(_eSpd){}
   // Freeze a pre-ML feature vector for shadow learning. A training-set fit
   // cannot prove an improvement, and no shadow candidate affects live scores.
-  const learningFeatures=directionFeatures({signals:rawSignalScores,baseUp:Math.max(0,Math.min(100,50+totalScore*.95)),atrBps,secondsLeft:clockSeconds});
+  // Learning features are frozen below after the forecast is finalized.
   const _mlModel=null; // legacy in-sample activation retired
   // V9.2.3: TIME-OF-DAY BOOST — data-driven hourly WR feeds back into posterior.
   //   Computed from historical call log (per-asset). Hours with ≥8 trades and WR ≥60%
@@ -14385,122 +14388,9 @@ const computeV99Posterior=(params)=>{
   //       previously layered here have been removed in favor of bucket-based calibration.
   let dirCalibrated=calibratedPosterior;
 
-  // ── V9.5.0: PER-REGIME × DIRECTION POSTERIOR CALIBRATION ─────────────────
-  // Pulls the directional confidence toward the empirically observed WR for
-  // (current regime, current lean direction) when we have ≥10 trades to
-  // anchor against. Blend weight grows linearly with sample size, capped at
-  // 0.45 — the engine's live signal still has the majority say.
-  // Different from `regimeDirConfBoost` (which only adjusts the displayed
-  // confidence number ±5pt at the end). This adjusts the posterior, which
-  // propagates into lock decisions, gate logic, and the call confidence.
-  const _regCal=params.regimeDirCalibration;
-  if(_regCal&&_regime){
-    const _engineDir=dirCalibrated>=50?'UP':'DOWN';
-    const _key=_regime+'|'+_engineDir;
-    const _entry=_regCal[_key];
-    if(_entry&&_entry.n>=10&&_entry.weight>0){
-      const _engineConf=_engineDir==='UP'?dirCalibrated:(100-dirCalibrated);
-      const _observedConf=_entry.wr*100;
-      const _blended=_engineConf*(1-_entry.weight)+_observedConf*_entry.weight;
-      // V9.9.1: Cap the calibration pull at ±5pt. Symmetric cap protects against
-      //   regimeCal becoming the dominant signal — historical WR is one input among
-      //   many, not the truth. Per data review on 2026-05-11: this cap is correct.
-      //   V9.10.1 attempted an asymmetric cap (-15/+5) thinking it would have prevented
-      //   May 10's bad day, but simulation against actual data showed 0 of the 26 losses
-      //   would have been blocked — historical WR for those regime×dir combos is around
-      //   67-70%, only 5-8pt below the at-lock conviction, well within the existing cap.
-      //   The May 10 losses were variance + market regime shape, not miscalibrated weights.
-      const _rawDelta=_blended-_engineConf;
-      let _cappedConfDelta=Math.max(-5,Math.min(5,_rawDelta));
-      // V10.7.14 — RANGE-CHOP DIRECTION BIAS NEUTRALIZER (legacy regime-CAL)
-      //   Same fix as V10.4.0 cell pull below — dampen DOWN-favoring pull 60%
-      //   in RANGE-CHOP regime only.
-      if(_regime==='RANGE-CHOP'){
-        const _pullsTowardDown=
-          (_engineDir==='UP'&&_rawDelta<0)||
-          (_engineDir==='DOWN'&&_rawDelta>0);
-        if(_pullsTowardDown){
-          _cappedConfDelta=_cappedConfDelta*0.40;
-        }
-      }
-      const _cappedConf=_engineConf+_cappedConfDelta;
-      const _newCal=_engineDir==='UP'?_cappedConf:(100-_cappedConf);
-      const _delta=_newCal-dirCalibrated;
-      // Only apply if the shift is meaningful (≥1pt) — avoids log noise on tiny adjustments
-      if(Math.abs(_delta)>=1){
-        reasoning.push(`[REGIME-CAL] ${_regime}×${_engineDir} historical WR ${_entry.wrPct}% (n=${_entry.n}, w=${_entry.weight.toFixed(2)}) → posterior ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
-        // V9.7.9 telemetry
-        _diagRegimeCal={applied:true,key:_key,wr:_entry.wrPct,weight:_entry.weight,shift:_delta,n:_entry.n};
-        dirCalibrated=_newCal;
-      }
-    }
-  }
-
-  // ── V10.4.0: BAND-SPECIFIC CALIBRATION ──────────────────────────────────
-  // The existing regime×dir cal above operates at regime granularity. V10.4.0
-  // adds a finer regime×dir×conviction-band layer pulled from the rolling
-  // 200-trade window per cell. Only applies when the cell has at least
-  // V104_CALIBRATION_TRUST_FLOOR (20) samples — thin cells fall through to
-  // legacy logic. Pull is capped at ±6pt to prevent table from becoming the
-  // sole signal. Stamps _v10_4_0_calibration on the call log for audit.
+  // V14.7: a single verified P(UP) calibrator owns statistical feedback.
+  // Regime/band tables remain available for analysis, not repeated posterior pulls.
   let _diagV104Cal=null;
-  if(USE_V104_CALIBRATION_TABLES&&_regime){
-    const _v104Table=params._v104Table; // built upstream; passed in via params
-    if(_v104Table){
-      const _engineDir=dirCalibrated>=50?'UP':'DOWN';
-      const _engineConf=_engineDir==='UP'?dirCalibrated:(100-dirCalibrated);
-      const _cell=lookupV104Cell(_v104Table,_regime,_engineDir,_engineConf);
-      if(_cell&&_cell.source==='live'){
-        const _observedConf=_cell.wr*100;
-        // Sample-size weighted blend: more samples = more pull. Caps at 0.40.
-        const _w=Math.min(0.40,_cell.n/200);
-        const _blended=_engineConf*(1-_w)+_observedConf*_w;
-        const _rawDelta=_blended-_engineConf;
-        // V10.7.14 — RANGE-CHOP DIRECTION BIAS NEUTRALIZER
-        //   Audit (2026-05-19): RANGE-CHOP regime shows 66% DOWN vs 34% UP calls
-        //   over last 200 trades. This is mechanical bias, not market reality.
-        //   Both directions show ~61% WR in RANGE-CHOP — so DOWN-favoring isn't
-        //   data-driven, it's a self-reinforcing loop where the model learned
-        //   DOWN works → calls DOWN more → cell has more DOWN samples → bigger
-        //   pull toward DOWN.
-        //
-        //   Fix: in RANGE-CHOP only, when the cell pull would shift posterior
-        //   TOWARD DOWN (lower confidence on UP call, OR raise confidence on
-        //   DOWN call), reduce pull magnitude by 60%. Pulls TOWARD UP are
-        //   unaffected. This breaks the feedback loop without distorting other
-        //   regimes (TRENDING DOWN, SHORT SQUEEZE, etc).
-        let _cappedDelta=Math.max(-6,Math.min(6,_rawDelta));
-        if(_regime==='RANGE-CHOP'){
-          // Direction of pull: positive _rawDelta = increases _engineConf
-          //   = strengthens the engine's existing direction
-          // For UP engine: positive delta = more UP confident (FAIR, no cap)
-          // For UP engine: negative delta = pulls toward DOWN (THIS is the bias)
-          // For DOWN engine: positive delta = more DOWN confident (THIS is bias too)
-          // For DOWN engine: negative delta = pulls toward UP (FAIR, no cap)
-          const _pullsTowardDown=
-            (_engineDir==='UP'&&_rawDelta<0)||
-            (_engineDir==='DOWN'&&_rawDelta>0);
-          if(_pullsTowardDown){
-            // Reduce DOWN-favoring pull by 60% in RANGE-CHOP
-            _cappedDelta=_cappedDelta*0.40;
-            reasoning.push(`[V10.7.14] RANGE-CHOP bias neutralizer — DOWN-favoring pull dampened 60% (${(_rawDelta).toFixed(1)} → ${_cappedDelta.toFixed(1)})`);
-          }
-        }
-        const _newConf=_engineConf+_cappedDelta;
-        const _newCal=_engineDir==='UP'?_newConf:(100-_newConf);
-        if(Math.abs(_newCal-dirCalibrated)>=1){
-          reasoning.push(`[V10.4.0-CAL] ${_regime}×${_engineDir}×${_cell.band} WR ${(_cell.wr*100).toFixed(1)}% EV ${_cell.ev>=0?'+':''}${_cell.ev.toFixed(1)}¢ (n=${_cell.n},w=${_w.toFixed(2)}) → ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
-          _diagV104Cal={applied:true,regime:_regime,dir:_engineDir,band:_cell.band,wr:_cell.wr,ev:_cell.ev,n:_cell.n,weight:_w,shift:_newCal-dirCalibrated,source:_cell.source};
-          dirCalibrated=_newCal;
-        }else{
-          _diagV104Cal={applied:false,regime:_regime,dir:_engineDir,band:_cell.band,wr:_cell.wr,ev:_cell.ev,n:_cell.n,weight:_w,shift:0,source:_cell.source,reason:'below-1pt-threshold'};
-        }
-      }else if(_cell){
-        _diagV104Cal={applied:false,regime:_regime,dir:_engineDir,band:_cell.band,n:_cell.n,source:_cell.source,reason:'below-trust-floor'};
-      }
-    }
-  }
-  // ─────────────────────────────────────────────────────────────────────────
 
   // V10.6.2 — DOW × HOUR CALIBRATION
   //   Apply small posterior shift (±4pt max) based on (UTC day-of-week, UTC hour)
@@ -14510,34 +14400,9 @@ const computeV99Posterior=(params)=>{
   //   This is intentionally directional-agnostic — favorable cells boost confidence
   //   in whichever direction the rest of the engine already leans.
   let _v106_2_dowHourShift=null;
-  if(params._dowHourTable){
-    const _dwh=computeDowHourShift(params._dowHourTable,Date.now());
-    if(_dwh){
-      // Apply shift in direction of current lean: if dirCalibrated>=50, add UP-bias;
-      //   if <50, add DOWN-bias. Magnitude scales with |dirCalibrated-50| so a 50/50
-      //   call doesn't get shifted in either direction arbitrarily.
-      const _leanSign=dirCalibrated>=50?1:-1;
-      const _leanStrength=Math.min(1,Math.abs(dirCalibrated-50)/30); // 0 at 50, 1 at 80+
-      const _appliedShift=_dwh.shift*_leanSign*_leanStrength;
-      const _capped=Math.max(-V106_2_DOWHOUR_MAX_SHIFT,Math.min(V106_2_DOWHOUR_MAX_SHIFT,_appliedShift));
-      if(Math.abs(_capped)>=0.5){
-        const _newConf=Math.max(15,Math.min(85,dirCalibrated+_capped));
-        reasoning.push(`[V10.6.2-DOW×HR] ${_dwh.dowHour} WR ${(_dwh.cellWR*100).toFixed(0)}% (n=${_dwh.cellN}) → ${_capped>=0?'+':''}${_capped.toFixed(1)}pt → ${dirCalibrated.toFixed(1)}%→${_newConf.toFixed(1)}%`);
-        _v106_2_dowHourShift={
-          dowHour:_dwh.dowHour,
-          cellWR:_dwh.cellWR,
-          cellN:_dwh.cellN,
-          cellEV:_dwh.cellEV,
-          rawShift:_dwh.shift,
-          appliedShift:_capped,
-          posteriorBefore:dirCalibrated,
-          posteriorAfter:_newConf,
-        };
-        dirCalibrated=_newConf;
-      }else{
-        _v106_2_dowHourShift={dowHour:_dwh.dowHour,cellWR:_dwh.cellWR,cellN:_dwh.cellN,cellEV:_dwh.cellEV,rawShift:_dwh.shift,appliedShift:_capped,reason:'below-0.5pt-threshold'};
-      }
-    }
+if(params._dowHourTable){
+    const d=computeDowHourShift(params._dowHourTable,Date.now());
+    if(d)_v106_2_dowHourShift={...d,appliedShift:0,reason:'diagnostic-only-single-calibrator'};
   }
 
   // ── V9.7.8: FGT-COUNTER GATE ─────────────────────────────────────────────
@@ -14934,6 +14799,16 @@ const computeV99Posterior=(params)=>{
     reasoning.push(`[WIN-TYPE] ${windowAmplitude.label} · ${windowAmplitude.context}`);
   }
 
+  // Preserve classifier diagnostics while all downstream policy reads agree
+  // with the final regime (including an intentional range/quiet override).
+  rawSignalScores._sourceRegime=rawSignalScores._v10736regime;
+  rawSignalScores._sourceIsTrend=rawSignalScores._isTrend;
+  rawSignalScores._sourceIsChop=rawSignalScores._isChop;
+  const _decisionRegimeFlags=canonicalRegimeFlags(regime);
+  rawSignalScores._isTrend=_decisionRegimeFlags.trend;
+  rawSignalScores._isChop=_decisionRegimeFlags.chop;
+  rawSignalScores._v10736regime=regime;
+  const learningFeatures=directionFeatures({signals:rawSignalScores,baseUp:posterior,atrBps,secondsLeft:clockSeconds});
   return{learningFeatures,posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
   // V10.2.36 — Range-chop override flag + computed avg bps. Stamped on engine
   //   result for call-log capture and UI surfacing.
@@ -36443,7 +36318,7 @@ function TaraApp(){
       console.log('[cleanPredictorReads] cleared '+_applied+' entries. Tally now reflects committed call locks only.');
       return _applied;
     };
-    window._taraApplyReconcile=async(updateMap)=>{
+    window._taraApplyReconcile=async(updateMap,{automatic=false}={})=>{
       // updateMap: Map of entryId → {result, strike, closingPrice, ...}
       if(!updateMap||!updateMap.size)return 0;
       // V10.9.1 FIX: Read from IndexedDB (full history, potentially 1000s of entries),
@@ -36478,8 +36353,10 @@ function TaraApp(){
         if(!e||!e.id)return e;
         const upd=updateMap.get(e.id);
         if(!upd)return e;
-        applied++;
-        return amendCallRecord(e,{...upd,manualEdit:true,manualEditedAt:Date.now()},{source:upd.officialSettlement?'official-settlement':'reconcile'});
+        const next=automatic?applyAutomaticCallSettlement(e,upd):
+          amendCallRecord(e,{...upd,manualEdit:true,manualEditedAt:Date.now()},{source:upd.officialSettlement?'official-settlement':'reconcile'});
+        if(next!==e)applied++;
+        return next;
       });
       // Write FULL patched history back to IndexedDB (no slicing to 500).
       //   localStorage cache still gets the last-1000 slice for fast first paint,
@@ -37445,14 +37322,17 @@ function TaraApp(){
     try{
       const _now=Date.now();
       const _stale=(taraCallLogRef.current||[]).filter(e=>{
-        if(!e||e.result)return false;
+        if(!e)return false;
+        const needsOfficial=e.originalDecision?.learningFeatures&&isDirection(e.dir)&&!e.officialSettlement&&!e.manualEdit&&!e.manualEditedAt;
+        if(e.result&&!needsOfficial)return false;
+        if(needsOfficial&&_now-windowCloseMs(e.windowId)>86400000)return false;
         if(e.dir==='NO_TRADE')return false; // explicit no-go, never had a result expected
         const _winMs=e.windowType==='15m'?900000:300000;
         if(!e.windowId)return false;
         const _winStart=e.windowId.match(/-(.+)$/)?.[1];
         if(!_winStart)return false;
         const _closeTime=new Date(_winStart).getTime()+_winMs;
-        return _now-_closeTime>_maxAge;
+        return _now-_closeTime>(needsOfficial?30000:_maxAge);
       });
       if(_stale.length>0&&pendingResolutionRef.current){
         // Add to settlement queue if not already there
@@ -38092,6 +37972,10 @@ function TaraApp(){
     }
     snapshot.decisionTrace ||= captureDecisionTrace(callDecisionTraceRef.current,_wid);
     snapshot.forecastAvailability ||= forecastAvailability(analysis?.fgtResults);
+    if(!snapshot.originalDecision){
+      snapshot.decisionEvidence=callDecisionEvidence(snapshot,analysis,tapeWindows);
+      snapshot.formationAtLock=JSON.parse(JSON.stringify(taraCallSampleRef.current));
+    }
     if(!snapshot.originalDecision&&analysis?.learningFeatures){
       snapshot.learningFeatures=JSON.parse(JSON.stringify(analysis.learningFeatures));
       snapshot.learningDataReady=startupReadiness.ready===true;
@@ -38852,7 +38736,7 @@ function TaraApp(){
   //   Fix: source from `taraCallLog` (which has been accumulating Tara's resolved
   //   calls all along). Filter by asset for cross-asset isolation.
   const _tradeLogForCurrentAsset=useMemo(()=>{
-    return(taraCallLog||[]).filter(t=>!!t&&(t.asset||'BTC')==='BTC');
+    return(taraCallLog||[]).filter(t=>!!t&&(t.asset||'BTC')==='BTC'&&verifiedSummaryCall(t));
   },[taraCallLog,currentAsset]);
   const calibration=useMemo(()=>buildCalibration(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const regimeDirWR=useMemo(()=>buildRegimeDirWR(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
@@ -41505,7 +41389,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   already running and able to resolve it immediately once queued.
       //   90s floor is a safety buffer past _trySettle's own window (8s+12x5s
       //   ≈68s) so the two mechanisms never race the same entry.
-      try{_scanStalePending(90000);}catch(_){}
+      try{_scanStalePending(30000);}catch(_){}
       if(!pendingResolutionRef.current||pendingResolutionRef.current.length===0)return;
       const now=Date.now();
       // Process each pending resolution
@@ -41524,7 +41408,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _stalledEntry=(taraCallLogRef.current||[]).find(t=>t.id===pending.tradeId);
           if(_stalledEntry&&_stalledEntry.dir==='SIT_OUT'){
             if(typeof window._taraApplyReconcile==='function'){
-              try{await window._taraApplyReconcile(new Map([[pending.tradeId,{result:'SITOUT',resolution:'backfill-sitout-immediate'}]]));}catch(_){}
+              try{await window._taraApplyReconcile(new Map([[pending.tradeId,{result:'SITOUT',resolution:'backfill-sitout-immediate'}]]),{automatic:true});}catch(_){}
             }
             pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
             continue;
@@ -41532,7 +41416,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(_stalledEntry?.originalDecision?.marketTicker||_stalledEntry?.marketTicker){
             const _captured=await readCapturedCallSettlement(_stalledEntry);
             if(_captured.ok&&typeof window._taraApplyReconcile==='function'){
-              await window._taraApplyReconcile(new Map([[pending.tradeId,_captured.patch]]));
+              await window._taraApplyReconcile(new Map([[pending.tradeId,_captured.patch]]),{automatic:true});
               pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
             }
             // An identity-bearing Call must never substitute another contract
@@ -42024,7 +41908,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 const next=[...prev];
                 const _mergedEntry={
                   ...idx.e,
-                  result:_resolvedResult,
+                  // New-protocol directional Calls remain pending until the
+                  // exact captured market supplies its official outcome.
+                  result:idx.e.originalDecision?.learningFeatures&&isDirection(idx.e.dir)?null:_resolvedResult,
+                  provisionalResult:idx.e.originalDecision?.learningFeatures&&isDirection(idx.e.dir)?_resolvedResult:null,
                   outcomeDir:_outcomeDir,
                   netCents:taraNetCents({...idx.e,result:_resolvedResult,dir:idx.e.dir}),/*V13.4.79 realized money*/
                   strike:_scoringStrike,
@@ -42270,7 +42157,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 //   the resolved entry: signals come from signalScoresAtLock (V6.3.5),
                 //   posterior from rawPosteriorAtLock or posterior, dir from the entry,
                 //   asset from the entry's tag.
-                if(_resolvedResult==='WIN'||_resolvedResult==='LOSS'){
+                if(next[idx.i]?.result===_resolvedResult&&(_resolvedResult==='WIN'||_resolvedResult==='LOSS')){
                   const _entry=next[idx.i];
                   // V7.10.5: bump regimeMemory from Tara's resolved call too. Was previously
                   //   only incrementing on user-position resolutions (line 9664), so the
@@ -44908,13 +44795,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _rawLearnBoost=_learn?.multipliers?.regimeDirConfBoost?.[_regDirKey]||0;
     const _isSqueezeRegime=analysis.regime==='SHORT SQUEEZE'||analysis.regime==='LONG SQUEEZE';
     const _learnCap=_isSqueezeRegime?2:8;
-    const _learnConfBoost=Math.max(-_learnCap,Math.min(_learnCap,_rawLearnBoost));
+    const _learnConfBoost=0; // V14.7: verified probability calibration already supplies this feedback
     // V5.7.8: Learned confluence-bucket boost. Bucket determined by current confluence state.
     //   Historical WR for this bucket informs the boost/haircut.
     // V6.0.1: rising-confluence is its own bucket — separate WR tracking from full confluence.
     // V6.0.7: tape-led is its own bucket too — separate WR tracking from full confluence.
     const _conflBucket=isStructuralLed?'structural-led':isSuperConfluent?'super-confluence':isConfluent?'confluence':isTapeLed?'tape-led':isRisingConfluence?'rising-confluence':'single-signal';
-    const _learnConflBoost=Math.max(-8,Math.min(8,_learn?.multipliers?.confluenceConfBoost?.[_conflBucket]||0));
+    const _learnConflBoost=0; // do not reward the same historical outcome twice
     // V6.5.3 BUGFIX: cap final confidence at 99. Without this cap, base (95) + tape boost
     //   (+10) + kalshi boost (+10) + confluence boost (+12) + learning boosts could
     //   exceed 100 — screenshot showed "123% confidence" which is mathematically impossible.
@@ -45202,736 +45089,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   }catch(_){}
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // V10.7.4 — SIDE-FLIP LAYER
-  // ═══════════════════════════════════════════════════════════════════════════
-  // TODO (V13.4.127, explicit user decision 2026-07-29): currently UNCAPPED -- this
-  //   layer re-evaluates every tick with no counter and no lock-state check, so it can
-  //   flip back and forth repeatedly within one window right up until lock. Considered
-  //   capping at 1 flip per window (first flip is final) for the same decisiveness
-  //   reason as the Trade Coach stability fix, but there was no data to justify it --
-  //   flipAtLock/flipVotesAtLock/flipOriginalDirAtLock are now stamped on every locked
-  //   entry (previously reserved in _STICKY_TELEMETRY but never wired up). Revisit this
-  //   cap ONLY if a real export shows flipped locks losing more than non-flipped ones --
-  //   explicit user instruction: keep uncapped until there's evidence, not on a hunch.
-  //   V13.4.130 correction: use the _v10_7_4_flipped field on logged entries for this
-  //   comparison, not flipAtLock -- that one turned out to be dead (see _logSnapshotEntry
-  //   top-of-function comment). First real sample (Aug 2): n=3 resolved, 2W/1L -- nowhere
-  //   near enough yet.
-  // User rule: never skip, never gate. ONLY way to convert losses → wins is to
-  //   pick the BETTER SIDE more often. This layer runs after engine commits a
-  //   direction (UP or DOWN) and checks 4 contradicting-evidence signals. If
-  //   the evidence overwhelmingly disagrees with the committed side, flip it.
-  //
-  // Evidence checks (each contributes 1 flip vote):
-  //   1. TAPE: 2+ of 3 tape windows show 65%+ opposite direction
-  //   2. MULTI-TF: all 3 timeframes (1m/5m/15m) trend channel disagree
-  //   3. LAST-60s DRIFT: if available, strong opposite drift in late window
-  //   4. GRAND TREND + TC SLOPE: both 5m/15m structure pointing opposite
-  //
-  // Flip triggers when 2+ votes agree the side is wrong. Single contradicting
-  //   signal doesn't flip (could be noise). Two or more = real conflict.
-  // Telemetry: _v10_7_4_flipped, _v10_7_4_votes, _v10_7_4_originalDir
-  const _v10_7_4_sideFlip=(call)=>{
-    if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call; // only flip directional calls
-    const _currentDir=call.call;
-    const _opposite=_currentDir==='UP'?'DOWN':'UP';
-    let _flipVotes=0;
-    const _voteReasons=[];
-    // CHECK 1 — Tape windows
-    const _tw=tapeWindows;
-    if(_tw&&_tw.w15&&_tw.w30){
-      const _tapeReadings=[_tw.w5?.buyPct,_tw.w15?.buyPct,_tw.w30?.buyPct].filter(p=>p!=null);
-      if(_tapeReadings.length>=2){
-        // Counting tape windows showing 65%+ AGAINST our direction
-        const _againstThreshold=_currentDir==='UP'?(p=>p<=35):(p=>p>=65);
-        const _againstCount=_tapeReadings.filter(_againstThreshold).length;
-        if(_againstCount>=2){
-          _flipVotes++;
-          _voteReasons.push(`tape ${_againstCount}/${_tapeReadings.length} windows opposite`);
-        }
-      }
-    }
-    // CHECK 2 — Multi-TF Trend Channel alignment AGAINST direction
-    //   Already-computed in analysis: trendChannel (5m). Use slope sign as 5m vote.
-    //   Also check grandTrend (longer TF synthesis).
-    const _tc=analysis?.trendChannel;
-    const _gt=analysis?.grandTrend;
-    let _tfAgainst=0;
-    let _tfTotal=0;
-    if(_tc?.valid){
-      const _tcSlope=Number(_tc.slopeBpsPerBar)||0;
-      _tfTotal++;
-      if((_currentDir==='UP'&&_tcSlope<=-0.5)||(_currentDir==='DOWN'&&_tcSlope>=0.5))_tfAgainst++;
-    }
-    if(_gt?.valid){
-      _tfTotal++;
-      if((_currentDir==='UP'&&_gt.dir==='DOWN'&&_gt.strengthBps>=20)||
-         (_currentDir==='DOWN'&&_gt.dir==='UP'&&_gt.strengthBps>=20))_tfAgainst++;
-    }
-    if(_tfTotal>=2&&_tfAgainst===_tfTotal){
-      _flipVotes++;
-      _voteReasons.push(`${_tfAgainst}/${_tfTotal} TF structure opposite`);
-    }
-    // CHECK 3 — Last-60s drift (if window has elapsed enough)
-    //   Pull from analysis if available, otherwise compute from priceMemoryRef
-    const _last60Drift=Number(analysis?.last60sDriftBps)||0;
-    if(Math.abs(_last60Drift)>=5){
-      const _driftDir=_last60Drift>0?'UP':'DOWN';
-      if(_driftDir===_opposite){
-        _flipVotes++;
-        _voteReasons.push(`last 60s ${_last60Drift>0?'+':''}${_last60Drift.toFixed(0)}bps opposite`);
-      }
-    }
-    // CHECK 4 — Tape velocity / 5s acceleration
-    //   tapeAccel divergence often signals reversal
-    const _tw5=tapeWindows?.w5;
-    if(_tw5&&_tw5.buyPct!=null){
-      // If 5s tape shows >70% opposite direction in a sharp move, that's real-time pressure
-      const _t5Against=_currentDir==='UP'?_tw5.buyPct<=30:_tw5.buyPct>=70;
-      if(_t5Against){
-        _flipVotes++;
-        _voteReasons.push(`5s tape ${_tw5.buyPct?.toFixed(0)}% opposite (real-time)`);
-      }
-    }
-    // FLIP DECISION — 2+ votes agree the side is wrong
-    if(_flipVotes>=2){
-      return{
-        ...call,
-        call:_opposite,
-        direction:_opposite,
-        // Keep posterior magnitude but flip sign relative to 50
-        confidence:100-call.confidence,
-        conviction:Math.abs(call.confidence-50),
-        reason:`[V10.7.4 SIDE-FLIP] flipped ${_currentDir}→${_opposite} (${_flipVotes} votes: ${_voteReasons.join(', ')}) — was: ${call.reason}`,
-        _v10_7_4_flipped:true,
-        _v10_7_4_votes:_flipVotes,
-        _v10_7_4_voteReasons:_voteReasons,
-        _v10_7_4_originalDir:_currentDir,
-      };
-    }
-    return call;
-  };
-  const _v10_7_4_result=_v10_7_4_sideFlip(taraCall);
-  if(_v10_7_4_result&&_v10_7_4_result!==taraCall){
-    Object.keys(_v10_7_4_result).forEach(k=>{taraCall[k]=_v10_7_4_result[k];});
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // V10.7.19 — DIRECTION BALANCE FLOOR
-  // ═══════════════════════════════════════════════════════════════════════════
-  // User audit (May 20): V10.7.14 RANGE-CHOP calibration neutralizer ISN'T
-  //   enough. Looking at last 30 trades: 21 DOWN calls (70%) vs 9 UP (30%),
-  //   posteriors landing 29-48 range (mostly DOWN territory). V10.7.14 dampens
-  //   the LAST calibration step but the bias is upstream — base posterior is
-  //   already DOWN before calibration runs.
-  //
-  // V10.7.19 = final post-processor that operates on the AFTER-everything
-  //   call. Reads rolling 20-call direction history from taraCallLog. If
-  //   we've been calling DOWN ≥65% AND current call is borderline (40-55%
-  //   posterior) AND in RANGE-CHOP regime, apply +8pt UP boost to flip the
-  //   borderline.
-  //
-  // Why this works where V10.7.14 didn't:
-  //   - Operates on FINAL posterior, not intermediate calibration step
-  //   - Doesn't need to fix self-learned weights (which would require retrain)
-  //   - Only fires on borderline cases (not strong-conviction calls)
-  //   - Self-correcting: as more UP calls fire, downPct drops below 65%, stops firing
-  //
-  // Preserves:
-  //   - Strong-conviction calls (post < 40 or > 55) — engine has real signal
-  //   - Structural/confluence/super tiers — high-quality setups
-  //   - Non-RANGE-CHOP regimes — bias doesn't apply there
-  //   - V10.7.11 still runs AFTER — can re-flip if reversal evidence is strong
-  const _v10_7_19_balanceFloor=(call)=>{
-    if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call;
-    // Only in RANGE-CHOP (where bias was diagnosed)
-    if(analysis?.regime!=='RANGE-CHOP')return call;
-    // V10.7.21 BUGFIX: `confidence` is conviction in CALL's direction (50-100),
-    //   NOT raw posterior. Correct check: only act on borderline conviction
-    //   (51-62, weak calls). Strong calls (≥63) have real signal.
-    const _conf=Number(call.confidence)||50;
-    if(_conf<51||_conf>62)return call; // weak calls only
-    // Don't touch structural/confluence/super tiers — these are quality setups
-    const _tier=String(call.tier||'').toLowerCase();
-    if(_tier.includes('super')||_tier.includes('confluence')||_tier.includes('structural'))return call;
-    // V10.7.34 — SYMMETRIC BALANCE FLOOR
-    //   User request: no UP/DOWN bias preference. Make the balance floor
-    //   work both directions:
-    //   - 65%+ DOWN over last 20 → flip borderline DOWN→UP (counter DOWN-bias)
-    //   - 65%+ UP over last 20 → flip borderline UP→DOWN (counter UP-bias)
-    //   Self-correcting in either direction. True neutrality.
-    const _log=Array.isArray(taraCallLog)?taraCallLog:[];
-    const _recent20=_log
-      .filter(e=>e&&(e.dir==='UP'||e.dir==='DOWN'))
-      .sort((a,b)=>(b.time||0)-(a.time||0))
-      .slice(0,20);
-    if(_recent20.length<10)return call; // need enough history
-    const _downCount=_recent20.filter(e=>e.dir==='DOWN').length;
-    const _upCount=_recent20.length-_downCount;
-    const _downPct=_downCount/_recent20.length;
-    const _upPct=_upCount/_recent20.length;
-    const _currentDir=call.call;
-    // DOWN bias detected: 65%+ DOWN AND current call is borderline DOWN → flip to UP
-    if(_downPct>=0.65&&_currentDir==='DOWN'){
-      const _newConfUp=Math.min(60,55+(_conf-51));
-      return{
-        ...call,
-        call:'UP',
-        direction:'UP',
-        confidence:_newConfUp,
-        conviction:_newConfUp-50,
-        reason:`Balance lock · UP · ${(_downPct*100).toFixed(0)}% DOWN over last ${_recent20.length} — counter-bias flipped borderline DOWN(${_conf.toFixed(0)})`,
-        _v10_7_19_balanced:true,
-        _v10_7_19_downPct:_downPct,
-        _v10_7_19_originalDir:'DOWN',
-        _v10_7_19_originalConf:_conf,
-      };
-    }
-    // V10.7.34: UP bias detected: 65%+ UP AND current call is borderline UP → flip to DOWN
-    if(_upPct>=0.65&&_currentDir==='UP'){
-      const _newConfDown=Math.min(60,55+(_conf-51));
-      return{
-        ...call,
-        call:'DOWN',
-        direction:'DOWN',
-        confidence:_newConfDown,
-        conviction:_newConfDown-50,
-        reason:`Balance lock · DOWN · ${(_upPct*100).toFixed(0)}% UP over last ${_recent20.length} — counter-bias flipped borderline UP(${_conf.toFixed(0)})`,
-        _v10_7_19_balanced:true,
-        _v10_7_19_upPct:_upPct,
-        _v10_7_19_originalDir:'UP',
-        _v10_7_19_originalConf:_conf,
-      };
-    }
-    return call;
-  };
-  const _v10_7_19_result=_v10_7_19_balanceFloor(taraCall);
-  if(_v10_7_19_result&&_v10_7_19_result!==taraCall){
-    Object.keys(_v10_7_19_result).forEach(k=>{taraCall[k]=_v10_7_19_result[k];});
-  }
-  // ═══════════════════════════════════════════════════════════════════════════
-  // V10.7.6 — REVERSAL-AWARE OVERRIDE HELPER
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Used by V10.7.5 force-commit sites. When forcing a commit on weak posterior
-  //   (the chop guards V10.7.5 bypassed), check if reversal signals are SCREAMING.
-  //   If yes, flip the direction to the reversal side instead of trusting the
-  //   weak posterior.
-  //
-  // Reversal evidence checks (each contributes 1 vote):
-  //   1. Channel exhaustion — _tc.channelPos at extreme contrary to posterior direction
-  //   2. VPOC blocking — VPOC resistance level in posterior direction
-  //   3. Tape divergence — tape running opposite to posterior
-  //   4. HTF reversal pattern — doubleTop/doubleBottom against posterior
-  //   5. Recent reversal — last 60s drift opposite to posterior
-  //
-  // Returns {dir, conf, reversalVotes, reasons} — caller uses these instead of
-  //   raw posterior direction when reversalVotes >= 2.
-  //
-  // Why threshold=2: single signal could be noise. Two independent reversal
-  //   signals = real consensus. Three+ = essentially certainty.
-  const _v10_7_6_reversalCheck=(postValue,analysisObj)=>{
+  // V14.7: one forecast owns automatic direction. Reversal/trajectory
+  // features already participate upstream; their diagnostics cannot mutate a
+  // qualified candidate, reuse its tier flags or synthesize a new probability.
+  taraCall.decisionEvidence=callDecisionEvidence(taraCall,analysis,tapeWindows);
+  const _v10_7_6_reversalCheck=(postValue)=>{
     const _p=Number(postValue);
-    if(postValue==null||postValue===''||!Number.isFinite(_p)||_p<0||_p>100)return{flipped:false,dir:null,reasons:[]};
-    if(_p===50)return{flipped:false,dir:null,reasons:[]};
-    const _proposedDir=_p>=50?'UP':'DOWN';
-    const _oppositeDir=_proposedDir==='UP'?'DOWN':'UP';
-    const _ana=analysisObj||{};
-    let _revVotes=0;
-    const _revReasons=[];
-    // 1. Channel exhaustion in the proposed direction
-    const _tc=_ana.trendChannel;
-    if(_tc?.valid){
-      const _pos=_tc.channelPos;
-      const _atExtremeContra=(_proposedDir==='UP'&&_pos>=0.85)||(_proposedDir==='DOWN'&&_pos<=0.15);
-      if(_atExtremeContra){
-        _revVotes++;
-        _revReasons.push(`channel exhausted (pos ${(_pos*100).toFixed(0)}%)`);
-      }
-    }
-    // 2. VPOC blocking the proposed direction
-    //   analysis.vpocResistance / vpocSupport fields indicate volume-profile barriers
-    const _vpocBlocking=_ana.vpocBlockingDir;
-    if(_vpocBlocking&&_vpocBlocking===_proposedDir){
-      _revVotes++;
-      _revReasons.push(`VPOC blocking ${_proposedDir}`);
-    }
-    // 3. Tape divergence — tape running opposite
-    const _tw=tapeWindows;
-    if(_tw?.w15&&_tw?.w30){
-      const _t15=_tw.w15.buyPct;
-      const _t30=_tw.w30.buyPct;
-      if(_t15!=null&&_t30!=null){
-        // Both 15s and 30s tape >65% AGAINST our proposed direction
-        const _bothOpposite=_proposedDir==='UP'?(_t15<=35&&_t30<=35):(_t15>=65&&_t30>=65);
-        if(_bothOpposite){
-          _revVotes++;
-          _revReasons.push(`tape 15s+30s opposite (${_t15.toFixed(0)}%/${_t30.toFixed(0)}%)`);
-        }
-      }
-    }
-    // 4. HTF reversal pattern against proposed direction
-    const _htf=_ana.patternsV9_11_0;
-    if(_htf){
-      const _patterns=[_htf.pattern1m,_htf.pattern5m,_htf.pattern15m].filter(Boolean);
-      // doubleTop is bearish, doubleBottom is bullish
-      const _bearPatterns=_patterns.filter(p=>String(p||'').toLowerCase().includes('top')).length;
-      const _bullPatterns=_patterns.filter(p=>String(p||'').toLowerCase().includes('bottom')).length;
-      if(_proposedDir==='UP'&&_bearPatterns>=2){
-        _revVotes++;
-        _revReasons.push(`${_bearPatterns} HTF bearish patterns`);
-      }else if(_proposedDir==='DOWN'&&_bullPatterns>=2){
-        _revVotes++;
-        _revReasons.push(`${_bullPatterns} HTF bullish patterns`);
-      }
-    }
-    // 5. Last 60s drift opposite to proposed direction
-    const _drift=Number(_ana.last60sDriftBps)||0;
-    if(Math.abs(_drift)>=8){
-      const _driftDir=_drift>0?'UP':'DOWN';
-      if(_driftDir===_oppositeDir){
-        _revVotes++;
-        _revReasons.push(`last 60s ${_drift>0?'+':''}${_drift.toFixed(0)}bps opposite`);
-      }
-    }
-    // FLIP DECISION — 2+ reversal votes
-    if(_revVotes>=2){
-      // Flip: use opposite direction with mirrored conviction
-      return{
-        flipped:true,
-        dir:_oppositeDir,
-        conf:Math.round(50+Math.abs(_p-50)), // same magnitude on flipped side
-        originalDir:_proposedDir,
-        revVotes:_revVotes,
-        reasons:_revReasons,
-      };
-    }
-    // No flip — return original direction
-    return{
-      flipped:false,
-      dir:_proposedDir,
-      conf:Math.round(directionalConfidence(_p,_proposedDir)),
-      revVotes:_revVotes,
-      reasons:_revReasons,
-    };
+    if(postValue==null||postValue===''||!Number.isFinite(_p)||_p<0||_p>100||_p===50)return{flipped:false,dir:null,reasons:[]};
+    const _proposedDir=_p>50?'UP':'DOWN';
+    return{flipped:false,dir:_proposedDir,conf:Math.round(directionalConfidence(_p,_proposedDir)),reasons:[]};
   };
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // V10.7.11 — UNIVERSAL REVERSAL + STRIKE-DISTANCE OVERRIDE
-  // ═══════════════════════════════════════════════════════════════════════════
-  // User report (May 19, 6:35pm): Tara locked DOWN at $76,614 (just $19 above
-  //   strike $76,595) right as price was bottoming and about to reverse UP.
-  //   Other bots (Jerome, Wok) locked 1-2min LATER with clearer reversal data
-  //   and correctly bet UP. Tara was on the wrong side of an obvious reversal.
-  //
-  // Root cause: V10.7.6 (reversal-aware override) ONLY ran inside V10.7.5
-  //   force-commit paths. Natural early-locks bypassed it. So engine could
-  //   commit early without any reversal check, and bottom-pick wrong.
-  //
-  // V10.7.11 = Run the reversal check on EVERY taraCall, regardless of how
-  //   it formed (natural lock, force-commit, side-flip). Plus add hard
-  //   strike-distance rule to catch obvious gap+time scenarios.
-  //
-  // Strike-distance veto (separate hard rule):
-  //   IF |current_price - strike| > 30bps  (price is materially far from strike)
-  //   AND time_remaining < 8 minutes (close to settlement)
-  //   AND posterior direction != gap direction
-  //   THEN flip direction to match the gap.
-  //
-  // The market spent real money to be 80%+ on one side. That's information.
-  const _v10_7_11_universalOverride=(call)=>{
-    if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call;
-    const _currentDir=call.call;
-    const _post=Number(call.confidence)||50;
-    // 1. Run V10.7.6 reversal check universally
-    const _revCheck=_v10_7_6_reversalCheck(_currentDir==='UP'?_post:(100-_post),analysis);
-    if(_revCheck.flipped){
-      // Reversal evidence too strong — flip
-      const _flipDir=_revCheck.dir;
-      const _flipConf=_revCheck.conf;
-      return{
-        ...call,
-        call:_flipDir,
-        direction:_flipDir,
-        confidence:_flipConf,
-        conviction:Math.abs(_flipConf-50),
-        reason:`Reversal lock · ${_flipDir} · ${_revCheck.revVotes} signals flipped from ${_currentDir} (${_revCheck.reasons.join(', ')})`,
-        _v10_7_11_universalFlipped:true,
-        _v10_7_11_flipType:'reversal-evidence',
-        _v10_7_11_originalDir:_currentDir,
-        _v10_7_11_votes:_revCheck.revVotes,
-        _v10_7_11_reasons:_revCheck.reasons,
-      };
-    }
-    // V10.7.22 REVERTED — Kalshi-extreme consensus override removed.
-    //   Reason: by the time Kalshi market hits 85%+ consensus, entry cost is
-    //   85¢+ with 15¢ payout — need 85%+ WR to break even. Even amplified by
-    //   strong consensus, Tara's 64% lifetime WR doesn't clear that hurdle.
-    //   Negative EV patch. Removed entirely.
-    //
-    // V10.7.24B — PUMP/DUMP DETECTOR
-    //   When tape goes EXTREME (>85% one side) AND price spiked in same direction,
-    //   that's a textbook pump (or dump). Mean reversion typically occurs within
-    //   60-90s. If we're locked AGAINST the mean reversion (riding the pump),
-    //   flip to the reversion direction.
-    //
-    //   Pump pattern (DUMP-DOWN expected after):
-    //   - Tape 15s: buyPct ≥ 85 (extreme buying)
-    //   - AND price moved UP ≥ 8bps in last 60s
-    //   - → reversal DOWN expected
-    //
-    //   Dump pattern (PUMP-UP expected after):
-    //   - Tape 15s: buyPct ≤ 15 (extreme selling)
-    //   - AND price moved DOWN ≥ 8bps in last 60s
-    //   - → reversal UP expected
-    //
-    //   This is similar to BRTI (cross-exchange mean reversion) but uses
-    //   single-exchange tape data. Catches local pumps/dumps even when BRTI
-    //   doesn't show divergence yet.
-    try{
-      const _tape15=_ana?.tapeWindows?.w15;
-      const _drift60=Number(_ana?.last60sDriftBps)||0;
-      if(_tape15&&Number.isFinite(_tape15.buyPct)){
-        const _tapeBuyPct=_tape15.buyPct;
-        const _isPump=_tapeBuyPct>=85&&_drift60>=8;
-        const _isDump=_tapeBuyPct<=15&&_drift60<=-8;
-        if(_isPump&&_currentDir==='UP'){
-          return{
-            ...call,
-            call:'DOWN',
-            direction:'DOWN',
-            confidence:62, // moderate conviction for pump-reversion
-            conviction:12,
-            reason:`Pump-reversion lock · DOWN · tape ${_tapeBuyPct.toFixed(0)}% BUY + ${_drift60.toFixed(0)}bps UP move → mean reversion expected`,
-            _v10_7_11_universalFlipped:true,
-            _v10_7_11_flipType:'pump-reversion',
-            _v10_7_11_originalDir:'UP',
-            _v10_7_24_tapeBuyPct:_tapeBuyPct,
-            _v10_7_24_drift60Bps:_drift60,
-          };
-        }
-        if(_isDump&&_currentDir==='DOWN'){
-          return{
-            ...call,
-            call:'UP',
-            direction:'UP',
-            confidence:62,
-            conviction:12,
-            reason:`Dump-reversion lock · UP · tape ${(100-_tapeBuyPct).toFixed(0)}% SELL + ${_drift60.toFixed(0)}bps DOWN move → mean reversion expected`,
-            _v10_7_11_universalFlipped:true,
-            _v10_7_11_flipType:'dump-reversion',
-            _v10_7_11_originalDir:'DOWN',
-            _v10_7_24_tapeBuyPct:_tapeBuyPct,
-            _v10_7_24_drift60Bps:_drift60,
-          };
-        }
-      }
-    }catch(_){}
-    //
-    // V10.7.23 — TRAJ-PRIORITY OVERRIDE (positive EV at cheap entries)
-    //   User audit (May 20, 2:55am): Tara locked DOWN at 2:45 window when her
-    //   OWN [TRAJ] projection said UP at +11bps. Stale Grand Trend (-245bps,
-    //   from a move that already ended) and learned weights overrode the
-    //   fresh trajectory data.
-    //
-    //   Logic: when Tara's own trajectory projection direction conflicts with
-    //   her final call AND projection magnitude is ≥5bps, FLIP to match TRAJ.
-    //   TRAJ is fresh data — uses last 5s/15s/30s velocity blend (V10.7.13
-    //   reweighted to favor recent). When Tara ignores her own projection,
-    //   it's because other (often stale) signals dominated. Flip to fresh data.
-    //
-    //   This is EV-positive because it fires AT LOCK TIME (cheap entries),
-    //   not late when Kalshi has priced in. Catches scenarios like 2:45 where
-    //   the right direction is visible but other signals are overriding.
-    const _projectedGapBps=Number(analysis?.projectedGapBps)||0;
-    if(Math.abs(_projectedGapBps)>=5){
-      const _trajDir=_projectedGapBps>0?'UP':'DOWN';
-      if(_trajDir!==_currentDir){
-        // Only override weak/mid conviction — don't fight strong calls
-        const _strongOpposite=_post>=70; // very strong call in opposite direction
-        if(!_strongOpposite){
-          // Conviction scales with TRAJ magnitude
-          //   5-9bps:  flip with 55-58 (weak)
-          //   10-19bps: flip with 58-65 (moderate)
-          //   20+bps:  flip with 65-72 (strong)
-          const _trajAbs=Math.abs(_projectedGapBps);
-          const _flipConf=Math.min(72,55+Math.floor(_trajAbs/3));
-          return{
-            ...call,
-            call:_trajDir,
-            direction:_trajDir,
-            confidence:_flipConf,
-            conviction:_flipConf-50,
-            reason:`TRAJ-priority lock · ${_trajDir} · projection ${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike — fresh trajectory overrides stale signals`,
-            _v10_7_11_universalFlipped:true,
-            _v10_7_11_flipType:'traj-priority',
-            _v10_7_11_originalDir:_currentDir,
-            _v10_7_23_projectedGapBps:_projectedGapBps,
-            _v10_7_23_originalConf:_post,
-          };
-        }
-      }
-    }
-    // 2. Strike-distance hard veto
-    const _strikePrice=Number(call.strike)||Number(analysis?.strike)||null;
-    const _spot=Number(analysis?.spotPrice)||Number(analysis?.btcPrice)||null;
-    if(_strikePrice&&_spot){
-      const _gapBps=((_spot-_strikePrice)/_strikePrice)*10000; // bps from strike
-      const _gapAbs=Math.abs(_gapBps);
-      const _gapDir=_gapBps>0?'UP':'DOWN';
-      const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
-      const _minsLeft=_msLeft/60000;
-      // Hard veto: gap is material AND we're close to settlement AND direction conflicts
-      if(_gapAbs>=30&&_minsLeft<8&&_currentDir!==_gapDir){
-        return{
-          ...call,
-          call:_gapDir,
-          direction:_gapDir,
-          confidence:Math.min(75,50+Math.min(25,_gapAbs/3)), // conviction scales with gap
-          conviction:Math.min(25,_gapAbs/3),
-          reason:`Strike-distance lock · ${_gapDir} · ${_gapBps.toFixed(0)}bps from strike, ${_minsLeft.toFixed(1)}min left — gap dominates`,
-          _v10_7_11_universalFlipped:true,
-          _v10_7_11_flipType:'strike-distance',
-          _v10_7_11_originalDir:_currentDir,
-          _v10_7_11_gapBps:_gapBps,
-          _v10_7_11_minsLeft:_minsLeft,
-        };
-      }
-    }
-    // 3. Bottom/top bounce detection — recent sharp reversal off extreme
-    //   If last 60s shows a sharp move OPPOSITE to our direction (≥15bps),
-    //   we may be catching a falling/rising knife. Flip to match the bounce.
-    const _last60Drift=Number(analysis?.last60sDriftBps)||0;
-    if(Math.abs(_last60Drift)>=15){
-      const _driftDir=_last60Drift>0?'UP':'DOWN';
-      if(_driftDir!==_currentDir){
-        return{
-          ...call,
-          call:_driftDir,
-          direction:_driftDir,
-          confidence:Math.min(70,50+Math.abs(_last60Drift)/2),
-          conviction:Math.min(20,Math.abs(_last60Drift)/2),
-          reason:`Bounce lock · ${_driftDir} · ${_last60Drift>0?'+':''}${_last60Drift.toFixed(0)}bps last 60s — riding the reversal`,
-          _v10_7_11_universalFlipped:true,
-          _v10_7_11_flipType:'bounce',
-          _v10_7_11_originalDir:_currentDir,
-          _v10_7_11_driftBps:_last60Drift,
-        };
-      }
-    }
-    // 4. V10.5.2 — BRTI DIVERGENCE MEAN-REVERSION SIGNAL
-    //   BRTI = Bitcoin Reference Trim-mean Index (computed from Coinbase + Kraken
-    //   + OKX + Bitstamp). When BRTI diverges meaningfully from Coinbase (our
-    //   primary feed), it signals that ONE exchange has anomalous pricing —
-    //   typically mean-reverts within 60-90s.
-    //
-    //   Logic:
-    //   - Coinbase price > BRTI by 3+ bps: Coinbase is "too high" → likely
-    //     reverts DOWN. If we're locked UP, that's a warning. Flip to DOWN.
-    //   - Coinbase < BRTI by 3+ bps: Coinbase "too low" → likely reverts UP.
-    //     If we're locked DOWN, warning. Flip to UP.
-    //   Only fires when:
-    //   - We have ≥3 active source exchanges (data quality)
-    //   - BRTI samples ≥10 (statistical confidence)
-    //   - Divergence ≥3bps (above noise)
-    //   - Direction conflicts with current
-    if(brtiApprox&&brtiApprox.sourceCount>=3&&brtiApprox.samples60s>=10){
-      const _divBps=Number(brtiApprox.divergenceBps)||0;
-      // Positive divBps = Coinbase ABOVE BRTI = Coinbase rich = likely revert DOWN
-      // Negative divBps = Coinbase BELOW BRTI = Coinbase cheap = likely revert UP
-      // V10.7.20: lowered threshold from 3 to 2.5bps when BRTI is contrarian to
-      //   strong consensus (catches more contrarian opportunities)
-      const _wasStrongConsensus=Math.abs(_post-50)>=15; // original was high-conviction
-      const _threshold=_wasStrongConsensus?2.5:3;
-      if(Math.abs(_divBps)>=_threshold){
-        const _brtiSnapDir=_divBps>0?'DOWN':'UP'; // direction of expected snap-back
-        if(_brtiSnapDir!==_currentDir){
-          // V10.7.20 — CONTRARIAN AMPLIFIER
-          //   Original V10.5.2: confidence cap at 65, multiplier 2x divBps.
-          //   When BRTI flips a STRONG consensus call (original conviction ≥15pt),
-          //   that's a high-precision contrarian setup. Amplify conviction:
-          //   - Multiplier 2.5x divBps (was 2x)
-          //   - Cap raised to 75 (was 65)
-          //   Logic: BRTI's mean-reversion edge is strongest when fighting consensus.
-          //   The whole market sees one thing, BRTI sees pricing anomaly. Reward this.
-          const _confMult=_wasStrongConsensus?2.5:2.0;
-          const _confCap=_wasStrongConsensus?75:65;
-          const _convCap=_wasStrongConsensus?25:15;
-          const _flipConf=Math.min(_confCap,50+Math.abs(_divBps)*_confMult);
-          return{
-            ...call,
-            call:_brtiSnapDir,
-            direction:_brtiSnapDir,
-            confidence:_flipConf,
-            conviction:Math.min(_convCap,Math.abs(_divBps)*_confMult),
-            reason:`BRTI ${_wasStrongConsensus?'contrarian-amplified':'snap-back'} lock · ${_brtiSnapDir} · Coinbase ${_divBps>0?'+':''}${_divBps.toFixed(1)}bps vs ${brtiApprox.sourceCount}-exchange mean${_wasStrongConsensus?' (fighting consensus '+_post.toFixed(0)+'%)':''}`,
-            _v10_7_11_universalFlipped:true,
-            _v10_7_11_flipType:_wasStrongConsensus?'brti-contrarian-amplified':'brti-divergence',
-            _v10_7_11_originalDir:_currentDir,
-            _v10_7_11_brtiDivBps:_divBps,
-            _v10_7_11_brtiSources:brtiApprox.sourceCount,
-            _v10_7_20_amplified:_wasStrongConsensus,
-            _v10_7_20_originalConf:_wasStrongConsensus?_post:null,
-          };
-        }
-      }
-    }
-    return call; // no flip needed
-  };
-  // Apply V10.7.11 universal override to taraCall (mutates in place)
-  const _v10_7_11_result=_v10_7_11_universalOverride(taraCall);
-  if(_v10_7_11_result&&_v10_7_11_result!==taraCall){
-    Object.keys(_v10_7_11_result).forEach(k=>{taraCall[k]=_v10_7_11_result[k];});
-  }
-
-  // ── V10.7.40 — REVERSAL RISK POSTERIOR DAMPENER ──────────────────────────
-  // Previously: computeReversalRisk() was UI-only — displayed as a warning chip
-  //   in Discord/card but never fed back into the posterior. Tara could show
-  //   "Reversal Risk: EXPECTED" AND call 75% UP simultaneously — contradictory.
-  //
-  // Fix: when Reversal Risk is WATCH or EXPECTED AND Kalshi disagrees by ≥20pts,
-  //   both signals are pointing the same way against the call. Dampen confidence.
-  //
-  // Logic:
-  //   Kalshi disagrees = Kalshi UP% is < 50 when call is UP (or > 50 when DOWN)
-  //   Kalshi disagreement magnitude = |50 - kalshiYesPct| when opposing
-  //   
-  //   WATCH (score 30-59) + Kalshi ≥20pts opposing → reduce confidence 6pts
-  //   EXPECTED (score ≥60) + Kalshi ≥20pts opposing → reduce confidence 12pts
-  //   EXPECTED (score ≥60) + Kalshi ≥35pts opposing + weak call (<58 conf) → flip
-  //
-  // Conservative: only dampens, doesn't flip unless EXPECTED + strongly opposing
-  // Preserves strong calls (≥65 conf) from flip — only weak borderline calls flip
-  try{
-    const _rrCall=taraCall?.call;
-    if((_rrCall==='UP'||_rrCall==='DOWN')&&typeof kalshiYesPrice==='number'){
-      const _kPct=kalshiYesPrice; // 0-100
-      const _callIsUp=_rrCall==='UP';
-      // Kalshi disagrees = YES price opposes call direction
-      const _kalshiOpposes=_callIsUp?_kPct<50:_kPct>50;
-      if(_kalshiOpposes){
-        const _kDis=_callIsUp?(50-_kPct):(_kPct-50);
-        if(_kDis>=20){
-          // Get reversal risk for current call
-          const _rrNow=computeReversalRisk({
-            tier:taraCall?._ctx?.tier||taraCall?.tier||'',
-            regime:analysis?.regime||'',
-            dir:_rrCall,
-            qScore:Math.round(analysis?.qualityGateScore||taraCall?.qScore||0),
-            mtfAlignment:analysis?.mtfAlignment||0,
-            secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
-            whaleLog:typeof whaleLog!=='undefined'?whaleLog:[],
-            dayContext:typeof dayContext!=='undefined'?dayContext:null,
-          });
-          const _rrFlag=_rrNow?.flag||'NONE';
-          const _rrScore=_rrNow?.score||0;
-          const _currentConf=Number(taraCall?.confidence)||50;
-          if(_rrFlag==='EXPECTED'&&_kDis>=35&&_currentConf<58){
-            // Strong case: flip the call
-            const _flipDir=_rrCall==='UP'?'DOWN':'UP';
-            const _flipConf=Math.min(62,50+Math.round(_kDis/4));
-            Object.assign(taraCall,{
-              call:_flipDir,
-              direction:_flipDir,
-              confidence:_flipConf,
-              conviction:_flipConf-50,
-              reason:`[V10.7.40] Reversal Risk EXPECTED (${_rrScore}) + Kalshi ${_kDis.toFixed(0)}pt opposing — flipped ${_rrCall}→${_flipDir}`,
-              _v10_7_40_rrDampened:true,
-              _v10_7_40_rrFlipped:true,
-              _v10_7_40_originalDir:_rrCall,
-              _v10_7_40_rrScore:_rrScore,
-              _v10_7_40_kalshiDis:_kDis,
-            });
-          }else if(_rrFlag==='EXPECTED'&&_kDis>=20){
-            // Dampen: reduce confidence 12pts
-            const _newConf=Math.max(50,_currentConf-12);
-            Object.assign(taraCall,{
-              confidence:_newConf,
-              conviction:_newConf-50,
-              _v10_7_40_rrDampened:true,
-              _v10_7_40_rrFlipped:false,
-              _v10_7_40_originalConf:_currentConf,
-              _v10_7_40_rrScore:_rrScore,
-              _v10_7_40_kalshiDis:_kDis,
-            });
-          }else if(_rrFlag==='WATCH'&&_kDis>=20){
-            // Mild dampen: reduce confidence 6pts
-            const _newConf=Math.max(50,_currentConf-6);
-            Object.assign(taraCall,{
-              confidence:_newConf,
-              conviction:_newConf-50,
-              _v10_7_40_rrDampened:true,
-              _v10_7_40_rrFlipped:false,
-              _v10_7_40_originalConf:_currentConf,
-              _v10_7_40_rrScore:_rrScore,
-              _v10_7_40_kalshiDis:_kDis,
-            });
-          }
-        }
-      }
-    }
-  }catch(_){}
-
-  // ── V10.7.43 — OUTCOME CALIBRATION OVERRIDE ──────────────────────────────
-  // Build fine-grained WR table from historical taraCallLog, lookup current
-  //   context bucket, apply override if bucket has enough samples (n≥15).
-  // Logic:
-  //   wr < 0.40 (n≥20) + weak conviction (<58) → FLIP direction
-  //   wr < 0.50 (n≥15) → reduce confidence by 8pts (dampen)
-  //   wr > 0.65 (n≥15) → boost confidence by 5pts
-  //   Otherwise: no change (insufficient evidence)
-  try{
-    const _calCall=taraCall?.call;
-    if(_calCall==='UP'||_calCall==='DOWN'){
-      const _calTable=buildCalibrationTable(taraCallLogRef.current||[]);
-      const _calLookup=lookupCalibration(_calTable,{
-        regime:analysis?.rawSignalScores?._v10736regime||analysis?.regime||'', // V13.4.45: match regimeV12 keys
-        tier:taraCall?._ctx?.tier||taraCall?.tier||'',
-        dir:_calCall,
-        kalshiAtLock:typeof kalshiYesPrice==='number'?kalshiYesPrice:null,
-      },15);
-      if(_calLookup.found){
-        const _histWR=_calLookup.wr;
-        const _histN=_calLookup.n;
-        const _currentConf=Number(taraCall?.confidence)||50;
-        taraCall._v10_7_43_calBucket=_calLookup.key;
-        taraCall._v10_7_43_calHistWR=Math.round(_histWR*1000)/10;
-        taraCall._v10_7_43_calHistN=_histN;
-        if(_histWR<0.40&&_histN>=20&&_currentConf<58){
-          const _flipDir=_calCall==='UP'?'DOWN':'UP';
-          Object.assign(taraCall,{
-            call:_flipDir,
-            direction:_flipDir,
-            confidence:55,
-            conviction:5,
-            reason:`[V10.7.43] Calibration FLIP: bucket "${_calLookup.key}" historical WR ${(_histWR*100).toFixed(0)}% (n=${_histN}) — flipped ${_calCall}→${_flipDir}`,
-            _v10_7_43_calFlipped:true,
-            _v10_7_43_calOriginalDir:_calCall,
-          });
-        }else if(_histWR<0.50&&_histN>=15){
-          const _newConf=Math.max(50,_currentConf-8);
-          Object.assign(taraCall,{
-            confidence:_newConf,
-            conviction:_newConf-50,
-            _v10_7_43_calDampened:true,
-            _v10_7_43_calOriginalConf:_currentConf,
-          });
-        }else if(_histWR>0.65&&_histN>=15){
-          const _newConf=Math.min(85,_currentConf+5);
-          Object.assign(taraCall,{
-            confidence:_newConf,
-            conviction:_newConf-50,
-            _v10_7_43_calBoosted:true,
-            _v10_7_43_calOriginalConf:_currentConf,
-          });
-        }
-      }
-    }
-  }catch(_){}
-
-  // V10.7.52 anti-MACD guard removed in V10.7.53 — never fired in production
-  //   (pattern was overfit to one loss streak; later data showed anti-MACD trades won 69-75%).
-
-
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
   //   1. ENTRY  — when lockedCallRef transitions to a new committed lock
   //   2. POLL   — while an order is working, check status every 2s
@@ -48355,18 +47522,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         {previousDirection:ref.dir,previousSamples:ref.count,newDirection:tc.call});
       ref=taraCallSampleRef.current={dir:null,count:0};
     }
-    if(ref.dir===null){
-      // First directional sample — claim this direction for the window.
-      // V5.6.7: Sample weight is conviction-magnitude-aware. weight = clamp(conv/14, 0.5, 1.5).
-      //   conv=21 → 1.5 (50% faster lock), conv=14 → 1.0 (par), conv=10 → 0.71, floor 0.5.
-      const _convNow=Math.abs((analysis?.rawProbAbove||50)-50);
-      const _w=Math.max(0.5,Math.min(1.5,_convNow/14));
-      taraCallSampleRef.current={dir:tc.call,count:_w};
-    } else {
-      // Same direction continues — increment by current weight
-      const _convNow=Math.abs((analysis?.rawProbAbove||50)-50);
-      const _w=Math.max(0.5,Math.min(1.5,_convNow/14));
-      taraCallSampleRef.current={dir:tc.call,count:ref.count+_w};
+    const _formation=advanceCallFormation(taraCallSampleRef.current,{direction:tc.call,
+      windowId:computeWindowId(windowType),asset:currentAssetRef.current||'BTC',source:priceSourceRef.current,
+      spotAt:lastPriceSourceRef.current?.time,quote:_kalshiQuote,probabilityUp:analysis?.rawProbAbove,now:Date.now()});
+    taraCallSampleRef.current=_formation.state;
+    if(!_formation.fresh){
+      _noteGateHold('sample-freshness',_formation.reason,{samples:_formation.state.count,scope:'window'});
+      return;
     }
     const samples=taraCallSampleRef.current.count;
     // V5.5d: Use claimed direction for snapshot, not necessarily current tc.call
@@ -50859,7 +50021,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       }
     }catch(_flErr){}
-    if(samples>=needSamples||analysis?.isSystemLocked||_instantForceReady){
+    if(callFormationReady(taraCallSampleRef.current,needSamples,Date.now())||_instantForceReady){
       // V10.8.0: MINIMUM CONVICTION TIME FLOOR.
       //   User trades later in windows anyway — signals at second 3 are noise.
       //   No lock fires in the first 60 seconds regardless of tier.
@@ -53277,7 +52439,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.6.1</small>
+              <small>DECISION ENGINE · V14.7.0</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

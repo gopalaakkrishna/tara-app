@@ -130,6 +130,9 @@ test('alternating qualifying candidates each start fresh and cannot lock by comb
 test('an actual trend-at-lock rejection stays enforced and its exact branch is traced after timing approval',()=>{
   const h=makeHarness({yesPrice:50,quality:85,claimedDirection:null,samples:0});
   applyScore(h,'UP',631,{trendingTape:true});
+  // Exercise the intentional trend policy, not the old contradictory state
+  // where a final RANGE-CHOP forecast still retained _isTrend=true.
+  h.scope.analysis.regime='TRENDING UP';h.scope.analysis.rawSignalScores._isTrend=true;
   for(let i=0;i<30;i++){h.advance(631-i);h.run();}
   assert.equal(h.scope.taraCallSnapshotRef.current,null);assert.equal(h.logs.length,0);
   assert.match(h.scope.currentCallBlockerRef.current.reason,/trend-at-lock/);

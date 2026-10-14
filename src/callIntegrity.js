@@ -2,7 +2,7 @@
 export const CALL_INTEGRITY_VERSION = 1;
 // All persistence fallbacks share this list so original evidence cannot drift
 // out of one of the older, compacted cache formats.
-export const CALL_EVIDENCE_FIELDS = Object.freeze(['originalDecision','callPolicy','blockedDecision','decisionTrace','forecastAvailability','reason','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion']);
+export const CALL_EVIDENCE_FIELDS = Object.freeze(['originalDecision','callPolicy','blockedDecision','decisionTrace','decisionEvidence','formationAtLock','provisionalResult','netCentsSource','forecastAvailability','reason','recordRevisions','recordIntegrity','officialSettlement','manualEditedAt','marketTicker','marketCloseTime','quoteObservedAt','kalshiBidAtLock','kalshiAskAtLock','kalshiResolved','taraVersion']);
 export const callEvidenceSignature = entry => JSON.stringify([entry?.result ?? null,entry?.outcomeDir ?? null,...CALL_EVIDENCE_FIELDS.map(key=>entry?.[key] ?? null)]);
 export const finiteNumber = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
 export const isDirection = value => value === 'UP' || value === 'DOWN';
@@ -60,12 +60,50 @@ export function captureOriginalDecision(entry, {now = Date.now(), provenance = '
     signalScore:finiteNumber(entry.confidence), modelVersion:entry.taraVersion || null, tier:entry.tier || null,
     reason:entry.reason || null, commitPolicy:entry.callPolicy || null, blockedDecision:entry.blockedDecision || null,
     decisionTrace:entry.decisionTrace || null, forecastAvailability:entry.forecastAvailability || null,
+    decisionEvidence:entry.decisionEvidence?JSON.parse(JSON.stringify(entry.decisionEvidence)):null,
+    formation:entry.formationAtLock?JSON.parse(JSON.stringify(entry.formationAtLock)):null,
     ...(entry.learningFeatures?{learningFeatures:JSON.parse(JSON.stringify(entry.learningFeatures)),learningDataReady:entry.learningDataReady===true,learningPredictions:JSON.parse(JSON.stringify(entry.learningPredictions||[]))}:{}),
   };
 }
 
 const correctionFields = ['dir','call','result','outcomeDir','strike','strikeAtLock','closingPrice'];
 const selectCorrectionFields = entry => Object.fromEntries(correctionFields.map(k => [k, entry[k] ?? null]));
+export function hasDecisionAmendment(entry) {
+  if(entry?.manualEdit||entry?.manualEditedAt)return true;
+  return (entry?.recordRevisions||[]).some(r=>{
+    if(!['lifecycle-update','official-settlement','automatic-settlement'].includes(r?.source)||!r.before||!r.after)return true;
+    const {before:b,after:a}=r;
+    if(['dir','call','strikeAtLock'].some(k=>(b[k]??null)!==(a[k]??null)))return true;
+    const strike=finiteNumber(entry.originalDecision?.strike);
+    if(a.strike!=null&&(strike===null||Math.abs(Number(a.strike)-strike)>.02))return true;
+    if(b.strike!=null&&a.strike!==b.strike)return true;
+    if(b.result!=null&&b.result!==a.result)return true;
+    return !['WIN','LOSS','SITOUT',null].includes(a.result??null);
+  });
+}
+
+// Automatic official evidence attachment is not a user edit. Conflicting
+// existing results are quarantined with their original history intact.
+export function applyAutomaticCallSettlement(entry,patch,now=Date.now()) {
+  if(!entry||entry.manualEdit||entry.manualEditedAt)return entry;
+  if(entry.dir==='SIT_OUT'&&patch?.result==='SITOUT'&&now>=windowCloseMs(entry.windowId))
+    return amendCallRecord(entry,patch,{source:'automatic-settlement',at:now});
+  const s=patch?.officialSettlement,o=entry.originalDecision;
+  if(!s||s.source!=='kalshi-public-api'||!o||o.direction!==entry.dir||s.ticker!==o.marketTicker)return entry;
+  const verified=finiteNumber(s.verifiedAt),strike=finiteNumber(o.strike),actualStrike=finiteNumber(s.strike);
+  if(verified===null||verified<windowCloseMs(entry.windowId)||verified>now||strike===null||actualStrike===null||Math.abs(strike-actualStrike)>.02)return entry;
+  const check=settlementPatch(entry,{ticker:s.ticker,close_time:s.closeTime,floor_strike:s.strike,
+    result:s.outcomeDir==='UP'?'yes':s.outcomeDir==='DOWN'?'no':null,status:'settled'},now);
+  if(!check.ok||check.patch.result!==patch.result)return entry;
+  if(entry.result&&entry.result!==patch.result)return amendCallRecord(entry,{officialSettlement:s,
+    recordIntegrity:{version:1,status:'review-required',reason:'official-result-conflict'}},{source:'automatic-settlement',at:now});
+  const bid=finiteNumber(o.yesBid),ask=finiteNumber(o.yesAsk);
+  const cost=entry.dir==='UP'?ask:bid===null?null:100-bid;
+  const estimate=cost!==null&&cost>0&&cost<100?(patch.result==='WIN'?100:0)-cost:null;
+  return amendCallRecord(entry,{...patch,resolvedAt:patch.resolvedAt||now,provisionalResult:null,
+    netCents:estimate,netCentsSource:'original-quote-gross-estimate'},
+    {source:'automatic-settlement',at:now});
+}
 export function amendCallRecord(entry, patch, {source = 'record-update', at = Date.now()} = {}) {
   const next = {...entry, ...patch, originalDecision:captureOriginalDecision(entry, {now:at, provenance:'legacy-observed'})};
   const before = selectCorrectionFields(entry), after = selectCorrectionFields(next);
