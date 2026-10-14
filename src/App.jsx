@@ -3,6 +3,8 @@ import taraDesignStyles from './tara-design.css?raw';
 import taraV14Styles from './tara-v14.css?raw';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
+import {HOURLY_POLL_MS,readHourlyPolicy,normalizeHourlyMarkets,assessHourlyPick,advanceHourlyConfirmation,
+  hourlyProposal,revalidateHourlyProposal,hourlyRecordGuard} from './hourlyDecision.js';
 import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
@@ -5866,8 +5868,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.13-v14.4.9-shared-decision-restoration';
-const TARA_VERSION_DISPLAY='TARA 14.4.9';
+const TARA_BUILD_VERSION='2026.10.13-v14.4.10-hourly-fresh-approval';
+const TARA_VERSION_DISPLAY='TARA 14.4.10';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6408,7 +6410,8 @@ const TARA_CALL_LOG_CAP=1000;
 //   Being well calibrated is NOT the same as beating the market. Kalshi's own price is
 //   probably about this accurate too. No historical Kalshi HOURLY prices exist in the log,
 //   so model-vs-market edge has NEVER been measured. Until it is, treat output as a
-//   second opinion, not an edge. Advisory only -- nothing here touches lock decisions.
+//   model estimate, not a proven edge. Hourly approval requires a positive estimate
+//   after fees as a consistency check; it does not establish out-of-sample returns.
 //
 //   At the exact window open, distance to strike is 0 so this returns ~50% and carries no
 //   information (measured skill at 60m left: -0.0000). It becomes useful ~45m in.
@@ -16654,7 +16657,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
 //   error), then check the payload actually has the shape we asked for.
 const _kLadFetch=async(url,validate,timeoutMs=6000)=>{
   try{
-    const r=await fetch(url,{signal:AbortSignal.timeout(timeoutMs)});
+    const r=await fetch(url,{signal:AbortSignal.timeout(timeoutMs),cache:'no-store'});
     if(!r.ok)return{ok:false,reason:'http '+r.status};
     const t=await r.text();
     if(!t||t.trimStart().startsWith('<'))return{ok:false,reason:'HTML not JSON'};
@@ -16665,7 +16668,7 @@ const _kLadFetch=async(url,validate,timeoutMs=6000)=>{
   }catch(e){return{ok:false,reason:(e&&e.message||'fetch failed').slice(0,48)};}
 };
 // V13.4.205: race several paths instead of trusting one. The first-party
-//   rewrite is normally fastest; the direct public base and a CORS proxy exist
+//   rewrite is normally fastest; the two official public bases exist
 //   only so a single failing path can no longer stop hourly trading.
 const _kLadRace=async(urls,validate)=>{
   try{
@@ -16680,14 +16683,24 @@ const _K_PUB='https://external-api.kalshi.com/trade-api/v2';
 function useHourlyLadder(activeMins){
   const[state,setState]=React.useState({loading:false,err:null,event:null,closeMs:null,strikes:[]});
   React.useEffect(()=>{
-    let alive=true;
+    let alive=true,busy=false,fees=null,feesAt=0;
     const pull=async()=>{
+      if(busy)return;
+      busy=true;
+      const requestedAt=Date.now();
       try{
+        if(!fees||requestedAt-feesAt>3600000){
+          const q='series/KXBTCD';
+          const response=await _kLadRace(['/api/kalshi-public/'+q,_K_PUB+'/'+q,
+            'https://api.elections.kalshi.com/trade-api/v2/'+q],d=>d?.series?.ticker==='KXBTCD');
+          if(!response.ok){if(alive)setState(s=>({...s,err:'fee schedule: '+response.reason}));return;}
+          fees={type:response.data.series.fee_type,multiplier:response.data.series.fee_multiplier};feesAt=Date.now();
+        }
         const _evQ='events?series_ticker=KXBTCD&status=open&limit=20';
         const _evRes=await _kLadRace(
           ['/api/kalshi-public/'+_evQ,
            _K_PUB+'/'+_evQ,
-           'https://corsproxy.io/?url='+encodeURIComponent(_K_PUB+'/'+_evQ)],
+           'https://api.elections.kalshi.com/trade-api/v2/'+_evQ],
           (d)=>!!(d&&Array.isArray(d.events)));
         if(!_evRes.ok){if(alive)setState(s=>({...s,err:'events: '+_evRes.reason}));return;}
         const evs=((_evRes.data&&_evRes.data.events)||[]).map(x=>x.event_ticker).filter(Boolean).sort();
@@ -16697,31 +16710,21 @@ function useHourlyLadder(activeMins){
         const _mkRes=await _kLadRace(
           ['/api/kalshi-public/'+_mkQ,
            _K_PUB+'/'+_mkQ,
-           'https://corsproxy.io/?url='+encodeURIComponent(_K_PUB+'/'+_mkQ)],
+           'https://api.elections.kalshi.com/trade-api/v2/'+_mkQ],
           (d)=>!!(d&&Array.isArray(d.markets)));
         if(!_mkRes.ok){if(alive)setState(s=>({...s,err:'markets: '+_mkRes.reason}));return;}
-        const all=(_mkRes.data&&_mkRes.data.markets)||[];
-        const closeMs=all.length&&all[0].close_time?Date.parse(all[0].close_time):null;
-        const liquid=all.filter(x=>Number(x.volume_fp)>100&&Number.isFinite(Number(x.floor_strike)))
-          .map(x=>({strike:Number(x.floor_strike),
-                    bid:Math.round(Number(x.yes_bid_dollars)*100),
-                    ask:Math.round(Number(x.yes_ask_dollars)*100),
-                    vol:Math.round(Number(x.volume_fp)),
-                    ticker:x.ticker}))
-          .sort((a,b)=>a.strike-b.strike);
-        if(alive)setState({loading:false,err:null,event:ev,closeMs,strikes:liquid});
+        if(alive)setState(normalizeHourlyMarkets(_mkRes.data.markets,ev,requestedAt,Date.now(),fees));
       }catch(e){
         // V13.4.205: keep the previous strikes on a transient error. Blanking the
-        //   list stops the hour locking entirely, which is a far worse outcome
-        //   than briefly showing slightly stale strikes -- and closeMs/strike
-        //   values for an open hourly event do not move once it is open.
+        //   list remains visible for reference. Approval rejects an errored or
+        //   stale poll until fresh market observations arrive.
         if(alive)setState(s=>({...s,loading:false,err:String((e&&e.message)||e).slice(0,90)}));
-      }
+      }finally{busy=false;}
     };
     if(activeMins==null||activeMins<0){setState(s=>({...s,strikes:[]}));return()=>{alive=false;};}
     setState(s=>({...s,loading:true}));
     pull();
-    const iv=setInterval(pull,20000);
+    const iv=setInterval(pull,HOURLY_POLL_MS);
     return()=>{alive=false;clearInterval(iv);};
   },[activeMins==null?'off':'on']);
   return state;
@@ -16853,7 +16856,8 @@ function useHourlyRecord(){
         const _merged=_hrMerge(prev,_cloud);
         // Only commit if something actually changed, so this cannot loop with the
         //   write path (setRec -> _hrSave -> cloudWrite -> ...).
-        if(_merged.history.length===prev.history.length&&_merged.pending.length===prev.pending.length)return prev;
+        // Equal counts do not mean equal evidence or settled outcomes.
+        if(JSON.stringify(_merged)===JSON.stringify(prev))return prev;
         try{localStorage.setItem(_HR_KEY,JSON.stringify(_merged));}catch(_e){}
         try{console.info('[V13.4.162] hourly cloud hydrate: '+prev.history.length+' -> '+_merged.history.length+' settled');}catch(_e){}
         return _merged;
@@ -16893,64 +16897,29 @@ function useHourlyRecord(){
   //   Fix is a fresh read at the moment of committing, not a faster interval:
   //   it fires at most MAX_LOCKS times an hour instead of every 5 minutes for
   //   every client, and it shrinks the blind window from 5 minutes to one round
-  //   trip. If the read fails the lock still proceeds on local state — refusing
-  //   to trade because a network call failed would be worse than the race.
-  const _lockConflictsWith=(pending,lk)=>{
-    if(!Array.isArray(pending))return false;
-    return pending.some(x=>{
-      if(!x||x.closeMs!==lk.closeMs)return false;
-      if(x.ticker===lk.ticker&&x.side===lk.side)return true;   // exact dupe
-      if(x.side===lk.side)return false;
-      const yesK=lk.side==='YES'?Number(lk.strike):Number(x.strike);
-      const noK =lk.side==='YES'?Number(x.strike):Number(lk.strike);
-      return Number.isFinite(yesK)&&Number.isFinite(noK)&&yesK>=noK;
-    });
-  };
-  const addLock=React.useCallback(async(lk)=>{
-    try{
-      if(typeof cloudSupabaseRead==='function'){
-        const _fresh=await cloudSupabaseRead(_HR_CLOUD_PATH);
-        if(_fresh&&_lockConflictsWith(_fresh.pending,lk)){
-          try{console.warn('[hourly] lock refused — another device already holds a conflicting position this hour:',lk.side,lk.strike);}catch(_e){}
-          setRec(prev=>{const m=_hrMerge(prev,_fresh);_hrSave(m);return m;});
-          return false;
-        }
-      }
-    }catch(_e){/* network failed — fall through and use local state */}
-    // Decide from the persisted record, not from the setRec updater. A useState
-    //   updater is not guaranteed to run synchronously (and StrictMode runs it
-    //   twice), so a flag set inside it cannot be read reliably on the next line.
-    //   _hrLoad reads localStorage, which _hrSave writes on every change, so it is
-    //   both synchronous and current.
-    const _cur=_hrLoad();
-    const _dupe=_cur.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side)
-             || _cur.history.some(x=>x.ticker===lk.ticker&&x.side===lk.side);
-    if(_dupe||_lockConflictsWith(_cur.pending,lk))return false;
-    setRec(prev=>{
-      if(prev.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
-      if(prev.history.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
-      if(_lockConflictsWith(prev.pending,lk))return prev;
-      // V13.4.169: persist the WHOLE lock, not six fields of it. The old shape dropped
-      //   conf / model / mktPct / minsAtLock / band, so the moment a lock was rehydrated
-      //   from storage (any reload, any tab foreground -- see the V13.4.164 hydration
-      //   path) the card rendered "Tara conf 0 | mkt % | model --" and
-      //   "02:15 PM, -- -- model accuracy at this range: --". Those values were never
-      //   recoverable because they were never written down. They are cheap ints; there
-      //   was no reason to drop them.
-      const next={...prev,pending:[...prev.pending,{
-        ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs,
-        ms:(Number.isFinite(Number(lk.ms))&&Number(lk.ms)>0)?Number(lk.ms):null,
-        conf:Number(lk.conf)||0,
-        model:(lk.model==null?null:Number(lk.model)),
-        mktPct:(lk.mktPct==null?null:Number(lk.mktPct)),
-        minsAtLock:(lk.minsAtLock==null?null:Number(lk.minsAtLock)),
-        band:lk.band||null,
-      }]};
-      _hrSave(next,true);return next; // V13.4.202: urgent -- a new lock must reach
-                                      //   the cloud fast, since every other device's
-                                      //   contradiction guard depends on seeing it.
-    });
-    return true;
+  //   trip. New picks now wait on read failure; the panel exposes that reason.
+  const addLock=React.useCallback(async(lk,revalidate)=>{
+    let fresh;
+    try{fresh=await cloudSupabaseRead(_HR_CLOUD_PATH,{throwOnError:true});}
+    catch{return {accepted:false,code:'record-read',reason:'Hourly record check failed; retrying with fresh confirmations.'};}
+    // A delayed lookup must not commit an expired or changed candidate. The
+    // caller rechecks fresh data and all current hourly admission conditions.
+    const current=_hrMerge(_hrLoad(),fresh||{});
+    const approval=typeof revalidate==='function'?revalidate(current):{ok:false,code:'approval-missing',reason:'Hourly approval evidence is missing.'};
+    if(!approval.ok)return {accepted:false,...approval};
+    const guard=hourlyRecordGuard(current,lk,readHourlyPolicy(localStorage),Date.now());
+    if(!guard.ok){setRec(current);return {accepted:false,...guard};}
+    if(!lk.approval||!lk.approval.samples?.length)return {accepted:false,code:'approval-missing',reason:'Hourly confirmation evidence is missing.'};
+    const entry={ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs,
+      ms:lk.ms,conf:lk.conf,model:lk.model,mktPct:lk.mktPct,minsAtLock:lk.minsAtLock,band:lk.band||null,
+      approval:JSON.parse(JSON.stringify({...lk.approval,recordedAt:Date.now()}))};
+    const next={...current,pending:[...current.pending,entry]};
+    // Persist synchronously before acknowledging/alerting. Two mounted panels
+    // re-read this after their awaited cloud check, so only one accepts the pick.
+    try{localStorage.setItem(_HR_KEY,JSON.stringify(next));}
+    catch{return {accepted:false,code:'record-storage',reason:'Hourly record could not be saved on this device.'};}
+    _hrSave(next,true);setRec(next);
+    return {accepted:true,record:next};
   },[]);
   React.useEffect(()=>{
     let alive=true;
@@ -16975,7 +16944,9 @@ function useHourlyRecord(){
       if(!alive)return;
       // The visible record is a rolling 500 settlements, not lifetime counters.
       // Recount after capping so W + L cannot silently exceed the stated window.
-      const next=normalizeHourlyRecord({pending:still,history:hist},_HR_HISTORY_CAP);
+      // Preserve a new pick accepted while settlement's network requests were
+      // in flight; settled entries still win over the same pending identity.
+      const next=normalizeHourlyRecord(_hrMerge(_hrLoad(),{pending:still,history:hist}),_HR_HISTORY_CAP);
       _hrSave(next);setRec(next);
     };
     settle();
@@ -17525,342 +17496,73 @@ function HourlyMemoryModal({onClose,embedded=false}){
     </div>
   );
 }
-function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
-  // V13.4.133: hourly memory modal toggle, added alongside the export button.
+function HourlyLadderPanel({spot,spotAt,source,asset='BTC',readiness,taraCall,onHourlyLock}){
   const[_hourlyMemOpen,_setHourlyMemOpen]=React.useState(false);
+  const[_hourlyStatus,setHourlyStatus]=React.useState({code:'starting',reason:'Waiting for fresh hourly observations.'});
+  const confirmationRef=React.useRef(null),busyRef=React.useRef(false),mountedRef=React.useRef(false),commitHoldRef=React.useRef(null);
+  React.useEffect(()=>{mountedRef.current=true;return()=>{mountedRef.current=false;};},[]);
   const nowMs=Date.now();
   const minsToHour=(60-new Date(nowMs).getMinutes())-(new Date(nowMs).getSeconds()/60);
-  const lad=useHourlyLadder(minsToHour);
-  // V13.4.93: HOURLY LOCK. Tara scans, waits for her read to hold, then locks ONE strike
-  //   for the hour. She does not call instantly -- the direction must survive
-  //   CONFIRM_TICKS consecutive polls (~20s each) before anything locks. Deliberately
-  //   ANTI-CHASE: among strikes that pass, it takes the CHEAPEST acceptable entry rather
-  //   than the safest, because the archive is unambiguous -- entries under 50c returned
-  //   +9.27c/ct over 822 locks while entries at 70c+ returned +1.91c/ct over 985. Buying
-  //   the side that already won is what makes an entry cost 70c.
-  //   The confidence shown is TARA'S OWN, not the barrier model: at 65300/24m in live
-  //   testing the model read 59%% while Kalshi read 72c, i.e. the model runs wide in quiet
-  //   markets and would make every cheap side look mispriced. Market price is displayed
-  //   beside it so the disagreement is visible instead of hidden.
-  const lockRef=React.useRef({hourKey:null,dir:null,ticks:0,locks:[]});
+  const on=(()=>{try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch{return true;}})();
+  const lad=useHourlyLadder(on?minsToHour:null);
   const{rec,addLock}=useHourlyRecord();
-  const hourKey=new Date(nowMs).toISOString().slice(0,13);
-  const CONFIRM_TICKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyConfirmTicks'),10);return(Number.isFinite(v)&&v>=1&&v<=10)?v:3;}catch(_e){return 3;}})();
-  // V13.4.146: 40 -> 45. EV audit of the 200 settled hourly locks in the
-  //   2026-08-05 export found the 40-45c band is the single worst thing this
-  //   ladder does:
-  //       cost 40-45c : n=19  WR 10.5%  netEV -30.89c/contract  (-$5.87)
-  //       cost 45-50c : n=25  WR 60.0%  netEV +13.04c
-  //       cost 50-55c : n=25  WR 68.0%  netEV +15.64c
-  //   A 41c contract implies ~41% and won 10.5%. That is not variance at n=19;
-  //   it is the anti-chase rule below ("take the CHEAPEST acceptable entry")
-  //   deliberately hunting the bottom of the allowed band, where the strikes
-  //   are furthest from spot and the barrier model is least reliable.
-  //   NOTE the V13.4.93 comment below claims sub-50c entries returned +9.27c
-  //   over 822 locks. This sample contradicts that for the 40-45c slice
-  //   specifically; 45-55c remains strongly positive, so the floor is raised
-  //   rather than the anti-chase logic removed. Revisit if a larger archive
-  //   disagrees. Still user-overridable via localStorage.
-  const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:45;}catch(_e){return 45;}})();
-  // V13.4.160: 65 -> 60. The ask is "locks at better odds", and on the hourly
-  //   ladder that is actually selectable -- KXBTCD trades up to 6 strikes on the
-  //   same hour (26% of hours are multi-strike), unlike KXBTC15M which is
-  //   single-strike and offers no cheaper contract at all.
-  //   EV by entry cost over the 200 settled hourly locks:
-  //       45-50c : n=25  WR 60.0%  netEV +13.04c
-  //       50-55c : n=25  WR 68.0%  netEV +15.64c
-  //       55-60c : n=35  WR 60.0%  netEV  +2.94c
-  //       60-65c : n=70  WR 58.6%  netEV  -3.83c   <- largest bucket, only loser
-  //       65c+   : n=26  WR 65.4%  netEV  +0.38c
-  //   A 62c contract needs ~63.7% just to break even and got 58.6%. Dropping the
-  //   ceiling to 60 pushes the "cheapest acceptable" pick toward 45-60c, which is
-  //   where every positive bucket lives. Replayed on the settled record:
-  //       ceiling 65 (now): book +$5.62
-  //       ceiling 60      : book +$8.20
-  //   This buys BETTER ODDS rather than fewer trades -- the ladder still locks,
-  //   it just stops reaching for the expensive end of the ladder where the
-  //   implied probability already exceeds the model's own accuracy.
-  //   CAVEAT: n=70 in the excluded bucket, one export. Widen via localStorage
-  //   'taraHourlyMaxCost' if live results disagree.
-  const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:60;}catch(_e){return 60;}})();
-  // V13.4.186: MAX_LOCKS 6 -> 3. Measured on the 286 settled hourly locks, EV by
-  //   the lock's ORDINAL within its hour (first lock of the hour = ord 1):
-  //     ord 1   n=171  WR 64.3%  +9.31c/ct  +1592c   <- essentially the whole book
-  //     ord 2   n= 83  WR 54.2%  +0.27c/ct    +22c
-  //     ord 3   n= 27  WR 59.3%  +4.37c/ct   +118c
-  //     ord 4+  n=  5  WR 40.0% -17.40c/ct    -87c   <- cut
-  //   Hours that reached 4+ locks measure -10.10c/ct across all 20 of their locks.
-  //   Cutting only the clearly-negative tail (ord 4+), same shape as the V13.4.130
-  //   tail cap: ord 2 and 3 are near-breakeven-to-positive and stay, because
-  //   blocking breakeven volume is the V13.4.146 mistake.
-  const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:3;}catch(_e){return 3;}})();
-  const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
-  // V13.4.115: back ON by default. User wants this fixed/verifiable, not removed. Settlement
-  //   code (fetches real Kalshi market, reads Kalshi's own result field) still looks correct
-  //   on inspection -- what was actually missing was VISIBILITY: the panel showed only
-  //   aggregate W-L, with no way to see individual settled locks without opening console.
-  //   Fixed below by rendering real settlement history inline. Toggle: localStorage
-  //   'taraHourlyLadder'='off' to hide.
-  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})(); // V13.4.120 FIX: early-return moved below the useEffect call (was violating Rules of Hooks -- hook was skipped whenever this was off)
+  const policy=readHourlyPolicy(localStorage),CONFIRM_TICKS=policy.confirmTicks;
   const minsLeft=lad.closeMs?Math.max(0,(lad.closeMs-nowMs)/60000):minsToHour;
-  const dir=taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call:null;
-  const s=Number(spot)||0;
+  const dir=['UP','DOWN'].includes(taraCall?.call)?taraCall.call:null,s=Number(spot)||0;
+  const input={lad,spot,spotAt,source,asset,readiness,signal:taraCall,record:rec,now:nowMs,enabled:on};
+  const latestInputRef=React.useRef(input);latestInputRef.current=input;
+  const assessment=assessHourlyPick(input,policy,taraHourlyProb);
+  // Only persisted, accepted picks appear as LOCKED. Restore their actual time
+  // and approval evidence; a refresh never resets cooldown to an invented zero.
+  const LOCKS=rec.pending.filter(p=>p.closeMs===lad.closeMs)
+    .map(p=>({...p,dir:p.side==='YES'?'UP':'DOWN'})).sort((a,b)=>(b.ms||0)-(a.ms||0));
+  React.useEffect(()=>{
+    const step=advanceHourlyConfirmation(confirmationRef.current,assessment,input);
+    confirmationRef.current=step.state;
+    const show=(code,reason)=>{if(mountedRef.current)setHourlyStatus(old=>old.code===code&&old.reason===reason?old:{code,reason});};
+    if(commitHoldRef.current?.poll!==lad?.sampleId)commitHoldRef.current=null;
+    if(!busyRef.current)show(commitHoldRef.current?.code||step.code,commitHoldRef.current?.reason||step.reason);
+    if(!step.ok||busyRef.current)return;
+    const proposal=hourlyProposal(step,input,TARA_BUILD_VERSION);
+    busyRef.current=true;show('checking','Hourly confirmed; checking the shared record.');
+    (async()=>{
+      try{
+        const result=await addLock(proposal,record=>{
+          if(!mountedRef.current||confirmationRef.current?.key!==step.state.key||!confirmationRef.current.samples.length)
+            return {ok:false,code:'candidate-changed',reason:'Hourly observation changed; confirming again.'};
+          const latest={...latestInputRef.current,record,now:Date.now()};
+          return revalidateHourlyProposal(proposal,latest,readHourlyPolicy(localStorage),taraHourlyProb);
+        });
+        if(!result.accepted){
+          confirmationRef.current={samples:[],key:null,lastPoll:latestInputRef.current.lad?.sampleId,lastSpotAt:latestInputRef.current.spotAt};
+          commitHoldRef.current={poll:latestInputRef.current.lad?.sampleId,code:result.code,reason:result.reason};
+          show(result.code,result.reason);return;
+        }
+        show('recorded','Hourly pick saved with its confirmation and approval evidence.');
+        if(typeof onHourlyLock==='function'){
+          try{onHourlyLock({...proposal,spot:Number(input.spot),record:{w:result.record.w,l:result.record.l,open:result.record.pending.length}});}catch(_e){}
+        }
+      }catch{
+        confirmationRef.current={samples:[],key:null,lastPoll:latestInputRef.current.lad?.sampleId,lastSpotAt:latestInputRef.current.spotAt};
+        commitHoldRef.current={poll:latestInputRef.current.lad?.sampleId,code:'record-error',reason:'Hourly record check could not finish; waiting for fresh confirmation.'};
+        show(commitHoldRef.current.code,commitHoldRef.current.reason);
+      }finally{busyRef.current=false;}
+    })();
+  });
   const rows=(lad.strikes||[]).map(k=>{
-    const pUp=(typeof taraHourlyProb==='function')?taraHourlyProb(s,k.strike,minsLeft):null;
-    const modelPct=pUp==null?null:Math.round(pUp*1000)/10;
-    const costYes=k.ask, costNo=100-k.bid;
-    return{...k,modelPct,costYes,costNo};
+    const p=taraHourlyProb(s,k.strike,minsLeft);
+    return {...k,modelPct:p==null?null:p*100,costYes:k.ask,costNo:100-k.bid};
   });
   const tradeable=rows.filter(r=>r.modelPct!=null&&r.ask>2&&r.ask<98);
-  // --- lock machine (runs during render; only mutates a ref, never state) ---
-  const L=lockRef.current;
-  if(L.hourKey!==hourKey){
-    // V13.4.138 FIX: this used to reset L.locks=[] unconditionally on every hourKey
-    //   change -- including the FIRST render after a page reload or tab
-    //   background/foreground cycle, which also resets hourKey from null. That wiped
-    //   the contradiction-check's memory of what's already locked THIS hour, even
-    //   though the real locks were still sitting in rec.pending (localStorage-backed,
-    //   survives reloads). Real result: a NO@$64299.99 lock at 02:00 AM, then a
-    //   directly-contradicting YES@$64299.99 lock at 02:38 AM -- same strike, same
-    //   ticker, opposite sides, impossible for both to win -- because by 02:38 the
-    //   in-memory L.locks had no record the NO lock ever happened. The math in
-    //   contradicts() below was always correct; it just had nothing to check against.
-    //   Rehydrating from rec.pending for the current window closes that gap.
-    // V13.4.164 FIX: the V13.4.138 rehydrate had a race that reproduced the exact
-    //   bug it was written to prevent -- a live NO@$64999.99 at 01:30 followed by a
-    //   directly-contradicting YES@$64999.99 at 01:37, same strike, both PENDING.
-    //   Cause: `L.hourKey=hourKey` was consumed FIRST and unconditionally, while the
-    //   rehydrate itself was gated on `_curCloseMs` being truthy. On the first render
-    //   after a remount (reload, tab foreground) the ladder fetch has NOT resolved yet,
-    //   so lad.closeMs is null, the filter drops every pending lock, and L.locks=[].
-    //   Because hourKey was already marked as handled, the rehydrate never ran again --
-    //   so contradicts() below spent the rest of the hour checking against an empty
-    //   array. The math was never wrong; it had nothing to check against, again.
-    //   Now the hour-change reset and the hydration are SEPARATE steps: hydration
-    //   retries every render until the ladder actually has a closeMs to match on.
-    L.hourKey=hourKey;L.dir=null;L.ticks=0;L.locks=[];L.hydrated=false;
-  }
-  if(!Array.isArray(L.locks))L.locks=[];
-  if(!L.hydrated&&lad.closeMs){
-    const _curCloseMs=lad.closeMs;
-    L.locks=(Array.isArray(rec.pending)?rec.pending:[])
-      .filter(p=>p&&p.closeMs===_curCloseMs)
-      .map(p=>({ms:0,dir:p.side==='YES'?'UP':'DOWN',strike:p.strike,cost:p.cost,conf:Number(p.conf)||0,
-        // V13.4.169: read the persisted values back instead of hardcoding nulls.
-        //   These were null here because addLock never stored them; now it does, so a
-        //   rehydrated lock renders identically to a fresh one. Older pending rows
-        //   written before this ship still have no conf/model, hence the ?? fallbacks.
-        side:p.side,model:p.model??null,ticker:p.ticker,closeMs:p.closeMs,
-        mktPct:p.mktPct??null,at:p.at,minsAtLock:p.minsAtLock??null,band:p.band??null}));
-    L.hydrated=true;
-  }
-  // V13.4.94: MULTIPLE locks per hour. The hour is 60 minutes and the ladder re-prices
-  //   continuously, so one lock per hour throws away most of the window. A new lock is
-  //   allowed when the read is confirmed AND it is genuinely new -- a different strike or
-  //   a flipped direction -- never a re-lock of something already held. Cooldown keeps it
-  //   from stuttering on noise.
-  //   HONESTY ON TIMING: the barrier model's measured directional accuracy depends hard on
-  //   time remaining -- 85%% at 15 min, 77%% at 30, 67%% at 45, and ~52%% (coin flip) at the
-  //   top of the hour, because distance-to-strike carries no information yet. Tara's own
-  //   engine is likewise strongest in the final quarter (+4.80c/ct vs +3.46 overall). So
-  //   early-hour locks are shown but tagged with the accuracy band that applies, rather
-  //   than pretending a 55-minute-out call is as good as a 12-minute-out one.
-  if(dir&&dir===L.dir)L.ticks+=1; else {L.dir=dir;L.ticks=dir?1:0;}
-  {
-    const conf=Number(taraCall&&taraCall.confidence)||0;
-    const eligible=tradeable.map(r=>({r,cost:dir==='UP'?r.ask:r.costNo}))
-      .filter(x=>Number.isFinite(x.cost)&&x.cost>=MIN_C&&x.cost<=MAX_C)
-      .sort((x,y)=>x.cost-y.cost);
-    const last=L.locks.length?L.locks[0]:null;
-    const coolOk=!last||((nowMs-last.ms)>COOLDOWN_MS);
-    // V13.4.97: THREE FIXES after observing a live hour that held YES@65500 AND NO@65400
-    //   simultaneously -- mutually exclusive bets, so one was guaranteed to lose -- plus
-    //   YES@65500 locked twice (02:25 at 41c and 02:31 at 32c), four locks alternating
-    //   direction inside nine minutes.
-    //   (1) DEDUPE ACROSS ALL LOCKS. The old isNew compared only against L.locks[0], so
-    //       NO -> YES -> NO -> YES passed every time because each differed from the one
-    //       immediately before it. Now the whole hour's set is checked.
-    //   (2) FLIPPING COSTS MORE THAN OPENING. Reversing direction needs FLIP_TICKS (2x
-    //       CONFIRM_TICKS) of a stable read, not the same bar as a fresh entry. Cheap
-    //       reversals are how a scanner turns into a coin-flip generator.
-    //   (3) CONTRADICTION CHECK. YES@A wins if close>=A; NO@B wins if close<B. Both can
-    //       only win when A<B. So a new lock whose A>=B against any live opposite lock is
-    //       refused outright rather than quietly stacked on top of it.
-    const FLIP_TICKS=CONFIRM_TICKS*2;
-    const needTicks=(last&&last.dir!==dir)?FLIP_TICKS:CONFIRM_TICKS;
-    // V13.4.133 FIX: the barrier model's own documented accuracy (comment above --
-    //   85% at 15min, 77% at 30, 67% at 45, ~52%/coin-flip beyond that) was being
-    //   tagged on every lock but never actually GATED -- the only time restriction was
-    //   minsLeft>1.5, meaning the ~52% coin-flip zone locked exactly as freely as the
-    //   85% zone. Real aggregate result: 194W-188L, 51% -- almost exactly what blending
-    //   a genuinely strong late-hour signal with a genuinely random early-hour one would
-    //   produce. Cutting the coin-flip band entirely; keeping 67/77/85%.
-    // V13.4.146: STAYS AT 45. A tightening to 20min was built and then REJECTED
-    //   by its own replay, recorded here so it is not proposed again.
-    //   EV by minutes-left at lock, over the 196 settled locks with a derivable
-    //   lock time:
-    //       <=20 min : n= 21  WR 76.2%  netEV +18.38c/contract
-    //       20-30min : n= 18  WR 44.4%  netEV -14.50c
-    //       30-45min : n= 45  WR 62.2%  netEV  +5.11c
-    //       45-61min : n=113  WR 53.1%  netEV  -2.89c   <- already blocked by 45
-    //   The <=20min bucket is much the best per contract, but cutting to 20
-    //   removes n=162 whose aggregate EV is POSITIVE (+1.17c), and the surviving
-    //   book is SMALLER than leaving the cap alone:
-    //       MIN_C=45 alone        n=181  netEV  +3.10c  book +$5.62
-    //       MIN_C=45 + <=20min    n= 19  netEV +19.58c  book +$3.72
-    //   Blocking profitable trades to raise per-contract EV is the same error as
-    //   the dlq-gate removed in V13.4.145. The 20-45min region is also not
-    //   monotonic (20-30 is sharply negative, 30-45 positive), so there is no
-    //   clean boundary to cut on. The existing 45 cap is doing the right job:
-    //   it already removes the genuinely negative 45-61min band.
-    //   Lateness is instead used to SIZE UP (see the V11 gate's late-window
-    //   boost), which captures the effect without discarding good volume.
-    // V13.4.340: the above held on 196 locks; it no longer holds on the most
-    //   recent 500 settled (real, chronologically split train/test, cost
-    //   deconfounded -- avg cost ~53c in every zone below):
-    //       0-15min left (the "85%" band): n=68   avgNet -14.94c  (train -19 to -24c, test -3 to -8c)
-    //       40-45min left ("67%" tail):    n=208  avgNet  -4.63c  (train -3.08c, test -6.10c) -- 42% of ALL volume
-    //       15-40min left:                 n=222  avgNet  +3.90c  (train +3.03c, test +4.69c)
-    //   Applying only-lock-15-40min retroactively to this exact book flips it
-    //   from -1016c total to +865c. The 45-61min region this comment
-    //   originally protected is irrelevant now -- the notch moved to the two
-    //   ends instead of the middle. Lowering the cap to 40 removes the worst
-    //   AND most voluminous bucket; the mid-dead-zone below now covers 0-15
-    //   instead of 25-35 (that old zone was down to n=3/500, negligible).
-    //   Override if wanted: localStorage 'taraHourlyMaxMinsLeft'.
-    const MAX_MINS_LEFT_TO_LOCK=(function(){
-      try{const v=parseFloat(localStorage.getItem('taraHourlyMaxMinsLeft'));
-        return(Number.isFinite(v)&&v>0&&v<=60)?v:40;}catch(_e){return 40;}
-    })();
-    // V13.4.164: require hydration before taking a NEW lock. Locking while L.locks is
-    //   still empty-but-unhydrated is precisely how the contradicting pair got through.
-    // V13.4.186: MID-WINDOW DEAD ZONE (25-35 min left). The V13.4.146 note above
-    //   correctly refused to move the 45-min CAP, because the region is not
-    //   monotonic and there is no clean boundary to cut on. It is not a boundary --
-    //   it is a notch. Measured on the settled book with minsAtLock persisted:
-    //     <25m left    n=41  +2.87/+5.38c/ct
-    //     25-35m left  n=18  WR 33.3%  -21.06c/ct  -379c   <- the notch
-    //     35-45m left  n=60  WR 70.0%  +15.10c/ct  +906c
-    //   Three independent checks before shipping a middle cut:
-    //     (a) it is negative in EVERY cost bucket (<55 -11.50, 55-59 -29.57, 60+ -26.67),
-    //         so it is not the cost story;
-    //     (b) it survives the ordinal control -- negative for first-locks (n=13,
-    //         -17.46) AND for stacked locks (n=5, -30.40), so it is not the
-    //         MAX_LOCKS story either;
-    //     (c) the older independent sample recorded in the V13.4.146 note above
-    //         (196 locks, different window, derived lock times) flags the same
-    //         region: 20-30min n=18 WR 44.4% -14.50c.
-    //   Mechanism that makes this more than a curve fit: 35-45m locks are signals
-    //   already strong enough to fire the moment the 45m cap lets them -- the
-    //   strongest reads. <25m locks are late, where distance-to-strike finally
-    //   carries real information (the 85%-at-15min band). 25-35m is the worst of
-    //   both: too weak to fire early, too early for the barrier to have resolved.
-    //   NOT a volume cut -- the ladder keeps scanning, so a signal blocked at 30m
-    //   can still lock at 20m once it re-confirms. Deferral, not deletion.
-    // V13.4.340: the 25-35 notch above is gone -- on the most recent 500
-    //   settled it's down to n=3/500 (negligible). The notch moved to the
-    //   LATE end instead: 0-15min left is now -14.94c/ct (train -19 to -24c,
-    //   test -3 to -8c, both halves consistently bad; see MAX_MINS_LEFT_TO_LOCK
-    //   comment above for the full breakdown). Repointing this same dead-zone
-    //   mechanism at 0-15 instead of 25-35 -- one dead zone, moved to where
-    //   the real notch is now, not a second gate stacked on the old one.
-    //   Dials: 'taraHourlyDeadLo' / 'taraHourlyDeadHi' (minutes; set equal to disable).
-    const _MID_DEAD_LO=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadLo'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:0;}catch(_e){return 0;}})();
-    const _MID_DEAD_HI=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadHi'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:15;}catch(_e){return 15;}})();
-    const _inMidDead=_MID_DEAD_HI>_MID_DEAD_LO&&minsLeft>=_MID_DEAD_LO&&minsLeft<_MID_DEAD_HI;
-    // V13.4.202: the open-lock set is computed BEFORE the gate, because the cap
-    //   has to count the same thing the contradiction check does. Union of the
-    //   in-memory cache and the persisted record, deduped on strike|side.
-    const _openNow=(()=>{
-      const _seen=new Set(L.locks.map(x=>x.strike+'|'+x.side));
-      const _extra=(Array.isArray(rec.pending)?rec.pending:[])
-        .filter(p=>p&&lad.closeMs&&p.closeMs===lad.closeMs&&!_seen.has(p.strike+'|'+p.side))
-        .map(p=>({strike:p.strike,side:p.side}));
-      return L.locks.map(x=>({strike:x.strike,side:x.side})).concat(_extra);
-    })();
-    // V13.4.202: lad.closeMs is now REQUIRED. Without it the rec.pending half of
-    //   the union filters to nothing, and a stale cache then leaves the guards
-    //   checking against an empty set. Refuse rather than lock blind.
-    if(dir&&L.hydrated&&lad.closeMs&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&!_inMidDead&&coolOk&&_openNow.length<MAX_LOCKS){
-      const side=dir==='UP'?'YES':'NO';
-      // V13.4.164: check the PERSISTED record too, not just the in-memory mirror.
-      //   L.locks is a cache of rec.pending; rec.pending is the thing that actually
-      //   survives a reload. Twice now (V13.4.138, and the race it left behind) the
-      //   cache has been empty while the record was correct, and both times the guard
-      //   silently passed. Taking the union means a stale/missing cache can no longer
-      //   defeat either the dedupe or the contradiction check.
-      const _liveOpen=_openNow; // V13.4.202: one definition, shared with the cap
-      const pick=eligible.find(c=>!_liveOpen.some(x=>x.strike===c.r.strike&&x.side===side))||null;
-      const contradicts=(k)=>_liveOpen.some(x=>{
-        if(x.side===side)return false;
-        const yesK=side==='YES'?k:x.strike;
-        const noK =side==='YES'?x.strike:k;
-        return yesK>=noK;   // no close price can satisfy both
-      });
-      const isNew=!!pick&&!contradicts(pick.r.strike);
-      if(isNew){
-        const band=minsLeft<=15?'85%':(minsLeft<=30?'77%':(minsLeft<=45?'67%':'~52% (coin flip this early)'));
-        L.locks.unshift({ms:nowMs,dir,strike:pick.r.strike,cost:pick.cost,conf,
-          side:dir==='UP'?'YES':'NO',model:pick.r.modelPct,ticker:pick.r.ticker,closeMs:lad.closeMs,
-          mktPct:dir==='UP'?pick.r.ask:(100-pick.r.bid),
-          at:new Date(nowMs).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
-          minsAtLock:minsLeft,band});
-      }
-    }
-  }
-  const LOCKS=L.locks;
-  // Mark mutually exclusive pairs already on the board (from before 13.4.97) so the
-  //   conflict is labelled instead of looking like two healthy positions.
   const _conflictKeys=new Set();
   for(const a of LOCKS){for(const b of LOCKS){
     if(a===b||a.side===b.side)continue;
-    const yesK=a.side==='YES'?a.strike:b.strike, noK=a.side==='YES'?b.strike:a.strike;
+    const yesK=a.side==='YES'?a.strike:b.strike,noK=a.side==='NO'?a.strike:b.strike;
     if(yesK>=noK){_conflictKeys.add(a.ms);_conflictKeys.add(b.ms);}
   }}
-  // V13.4.95: per-strike status. LOCKED = this exact strike+side is already held this hour.
-  //   WATCHING = it is the strike the lock machine would take right now if the direction
-  //   survives its remaining confirmations, so you can see the target BEFORE it fires.
   const _lockedSet=new Set(LOCKS.map(x=>x.strike+'|'+x.side));
-  const _watchPick=(function(){
-    if(!dir)return null;
-    const el=tradeable.map(r=>({r,cost:dir==='UP'?r.ask:r.costNo}))
-      .filter(x=>Number.isFinite(x.cost)&&x.cost>=MIN_C&&x.cost<=MAX_C)
-      .sort((x,y)=>x.cost-y.cost);
-    for(const c of el){if(!_lockedSet.has(c.r.strike+'|'+(dir==='UP'?'YES':'NO')))return c.r.strike;}
-    return null;
-  })();
-  // V13.4.170: hourly locks now ALSO fire a Discord alert. They never did -- there was
-  //   no broadcast call anywhere in this component, so an hourly lock existed only as a
-  //   card on a page you had to be looking at. That is the whole reason they get missed.
-  //   Guarded by a ref so a re-render cannot re-send the same lock: keyed on
-  //   ticker|side, which is exactly the uniqueness addLock already enforces.
-  const _hrSentRef=React.useRef(new Set());
-  React.useEffect(()=>{
-    const top=LOCKS[0];
-    if(!top||!top.ticker||!top.closeMs)return;
-    const _key=top.ticker+'|'+top.side;
-    if(_hrSentRef.current.has(_key))return;
-    _hrSentRef.current.add(_key);
-    // V13.4.236: addLock is async now (it re-reads the cloud to catch a
-    //   conflicting position taken on another device), and it can REFUSE. The
-    //   alert has to wait for that answer — firing it first would page about a
-    //   lock that was then rejected, which is worse than not alerting at all.
-    (async()=>{
-    const _accepted=await addLock(top);
-    if(!_accepted){_hrSentRef.current.delete(_key);return;}
-    if(typeof onHourlyLock==='function'){
-      try{
-        onHourlyLock({
-          side:top.side,dir:top.dir,strike:top.strike,cost:top.cost,
-          conf:top.conf,model:top.model,mktPct:top.mktPct,
-          minsAtLock:top.minsAtLock,band:top.band,ticker:top.ticker,
-          closeMs:top.closeMs,spot:Number(spot)||null,
-          record:{w:rec.w,l:rec.l,open:(Array.isArray(rec.pending)?rec.pending.length:0)},
-        });
-      }catch(_e){/* an alert must never break the lock machine */}
-    }
-    })();
-  },[LOCKS.length,addLock,onHourlyLock,spot,rec.w,rec.l]);
+  const _watchPick=assessment.pick?.strike??null;
+  const L={ticks:confirmationRef.current?.samples?.length||0};
   if(!on)return null; // V13.4.120 FIX: moved from above the useEffect (see note above) -- panel still hides the same way, hook now always runs
   return(
     <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
@@ -17971,9 +17673,10 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
                   were real. Each stat now appears only when it exists. */}
               {(()=>{
                 const _bits=[];
-                if(Number(LK.conf)>0)_bits.push(`Tara ${Number(LK.conf).toFixed(0)}%`);
+                if(Number(LK.conf)>0)_bits.push(`Signal ${Number(LK.conf).toFixed(0)}/100`);
                 if(LK.mktPct!=null&&Number.isFinite(Number(LK.mktPct)))_bits.push(`mkt ${Number(LK.mktPct).toFixed(0)}%`);
-                if(LK.model!=null&&Number.isFinite(Number(LK.model)))_bits.push(`model ${Number(LK.model).toFixed(0)}%`);
+                if(LK.model!=null&&Number.isFinite(Number(LK.model)))_bits.push(`model ${LK.side} ${(LK.side==='NO'?100-Number(LK.model):Number(LK.model)).toFixed(1)}%`);
+                if(LK.approval)_bits.push(`${LK.approval.samples.length} fresh samples · est. net edge ${LK.approval.netEdgeCents.toFixed(1)}¢`);
                 return _bits.length
                   ?<div className="mt-0.5 text-[11px] text-zinc-400 tabular-nums">{_bits.join('  ·  ')}</div>
                   :null;
@@ -17982,7 +17685,7 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
                 {[
                   LK.at||null,
                   LK.minsAtLock!=null?`${Number(LK.minsAtLock).toFixed(0)}m left`:null,
-                  LK.band?`model accuracy here ${LK.band}`:null,
+                  LK.band?`historical model band ${LK.band}`:null,
                 ].filter(Boolean).join('  ·  ')}
                 {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">— CONFLICTS with another lock, both cannot win</span>}
               </div>
@@ -18042,16 +17745,14 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
           ),
         );
       })()}
-      {LOCKS.length===0&&(
-        <div className="mb-2 text-[11px] text-zinc-500">
-          {dir?('scanning '+dir+' – '+L.ticks+'/'+CONFIRM_TICKS+' confirmations'+(tradeable.length?'':', waiting on liquid strikes')):'no directional read yet – watching'}
-        </div>
-      )}
+      <div className="mb-2 text-[11px] text-zinc-400" role="status" data-hourly-gate={_hourlyStatus.code}>
+        {_hourlyStatus.reason}
+      </div>
       {!tradeable.length&&<div className="text-[11px] text-zinc-500">{lad.loading?'loading ladder...':'no liquid strikes yet'}</div>}
       {!!tradeable.length&&(
         <div className="space-y-1">
           <div className="grid grid-cols-5 gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
-            <div>Strike</div><div className="text-right">Model</div><div className="text-right">Yes</div><div className="text-right">No</div><div className="text-right">Status</div>
+            <div>Strike</div><div className="text-right">Model YES</div><div className="text-right">Yes</div><div className="text-right">No</div><div className="text-right">Status</div>
           </div>
           {tradeable.map(r=>{
             const near=s>0&&Math.abs(r.strike-s)<=150;
@@ -18090,9 +17791,7 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
             {(()=>{
               if(!dir)return 'No directional call right now -- ladder shown for reference only.';
               const _openOpp=LOCKS.filter(x=>x.side!==(dir==='UP'?'YES':'NO'));
-              const _base='Tara reads '+dir+' RIGHT NOW. Buy '+(dir==='UP'?'YES':'NO')
-                +' at whichever strike gives the price you want -- green marks under 50c. Kalshi is'
-                +' well calibrated here, so a cheaper strike changes payoff shape and variance, not edge.';
+              const _base='Live candidate: '+dir+'. Hourly approval checks signal confidence, fresh confirmations and the hourly model against price plus estimated fees. Model edge is an estimate; recorded locks retain their original evidence.';
               if(_openOpp.length){
                 return React.createElement(React.Fragment,null,
                   React.createElement('span',{className:'text-amber-400/90'},
@@ -26378,7 +26077,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir,lockedSnapshot,onHourlyLock}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir,lockedSnapshot,onHourlyLock,hourlyContext}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -26413,7 +26112,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
       {(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
         <>
           <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
-          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={onHourlyLock}/>
+          <HourlyLadderPanel spot={currentPrice} {...hourlyContext} taraCall={taraCall} onHourlyLock={onHourlyLock}/>
         </>
       )}
     </div>
@@ -44843,6 +44542,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const startupReadiness=useStartupReadiness({asset:currentAsset,source:priceSource,history,tfCandles,
     spot:currentPrice,spotAt:_startupSpotAt,analysis,intervalSeconds:windowType==='15m'?900:300,
     minimumUntil:_startupUserHold,now:_startupNow});
+  const _hourlyObservation={spot:currentPrice,spotAt:_startupSpotAt,source:priceSource,asset:currentAsset,readiness:startupReadiness};
 
   // V3.2.4: TARA'S CALL — a separate, higher-conviction decision layer.
   //   The "general prediction" (analysis.prediction / posterior) tells you the most likely
@@ -53779,7 +53479,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.4.9</small>
+              <small>DECISION ENGINE · V14.4.10</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -55119,7 +54819,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           settings={tradingSettings}
         />
 
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+          <ProjectionsCard hourlyContext={_hourlyObservation} analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
             //   Direction edit recomputes the result automatically if we have closing price + strike,
@@ -55268,7 +54968,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             so both are visible together on desktop; single column on mobile,
             same convention as the main grid above. */}
         <div className="tara-hourly-row grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0" id="tara-schedule-surface">
-          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
+          <HourlyLadderPanel {..._hourlyObservation} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
           <ScheduleBySessionCard taraCallLog={taraCallLog}/>
           <div className="tara-trade-schedule min-w-0">
             <DayAwareScheduleHeader dayContext={dayContext}/>
