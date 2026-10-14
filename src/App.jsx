@@ -18,6 +18,10 @@ import {coinbaseCandleRange} from './candleRequests.js';
 import { useCallLedger } from './useCallLedger.js';
 import { CALL_EVIDENCE_FIELDS, callEvidenceSignature, callKey, amendCallRecord, captureOriginalDecision, hydrateDecisionQuote, inspectDecisionQuote, isDirection, isScoredCall, normalizeCallLedger, settlementPatch } from './callIntegrity.js';
 import { useLockStudy } from './useLockStudy.js';
+import {useLearningRegistry} from './useLearningRegistry.js';
+import {LearningStatus} from './LearningStatus.jsx';
+import {LEARNING_PROTOCOL,directionFeatures,learningSource,preferLearningSummary} from './learningCore.js';
+import {learningPredictions,capturePickLearning,capturePickSettlement} from './learningCapture.js';
 import LockStudyPanel from './LockStudyPanel.jsx';
 import './lockStudy.css';
 import {useEconomicCalendar,computeEconCalendarRisk,getMacroEventState,getUpcomingMacroEvents} from './useEconomicCalendar.js';
@@ -5871,8 +5875,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.14-v14.5.0-approved-interface';
-const TARA_VERSION_DISPLAY='TARA 14.5.0';
+const TARA_BUILD_VERSION='2026.10.14-v14.6.0-verified-shadow-learning';
+const TARA_VERSION_DISPLAY='TARA 14.6.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13883,66 +13887,10 @@ const computeV99Posterior=(params)=>{
     rawSignalScores._spdDivBps=(spotPerpDiv&&Number.isFinite(spotPerpDiv.divBps))?Math.round(spotPerpDiv.divBps*10)/10:null;
     rawSignalScores._spdStatus=(spotPerpDiv&&spotPerpDiv.status)?String(spotPerpDiv.status):'none';
   }catch(_eSpd){}
-  // V9.2.2: ML MODEL SIGNAL — logistic regression trained on historical trades.
-  //   Outputs a WIN probability (0-1). If model thinks this setup has high/low WIN
-  //   chance, boost/penalize the posterior by up to ±10 pts.
-  // V9.11.4 CRITICAL BUG FIX: ML was treating P(WIN) as a UP-bias score, always
-  //   adding `(prob - 0.5) * 20` to totalScore regardless of Tara's current direction
-  //   lean. Audit of 274 ML-firing trades showed:
-  //     - ml-aligned-with-call wins 62%, ml-opposed-to-call wins 72% (10pp INVERTED)
-  //     - ml directional accuracy vs actual outcome: 46% (slightly worse than random)
-  //   Root cause: the model predicts P(WIN) for whatever direction signals point to,
-  //   so high P(WIN) means "this lean is reliable," not "UP is likely." Adding a
-  //   high prob as +score biases toward UP even when Tara is leaning DOWN — actively
-  //   fighting the DOWN call ~54% of trades.
-  //   Fix: detect current lean from totalScore sign, then ML amplifies that lean's
-  //   conviction. High prob + UP lean → push UP harder. High prob + DOWN lean →
-  //   push DOWN harder. Low prob → dampen current lean (signal model is uncertain).
-  const _mlModel=params.mlModel;
-  if(_mlModel&&_mlModel.weights){
-    // Build a synthetic entry with current signal scores for prediction
-    const _mlEntry={
-      signalScoresAtLock:{...rawSignalScores},
-      calibratedPosteriorAtLock:50+totalScore*0.95, // approximate current posterior
-      atrBpsAtLock:atrBps,
-      regime:params.currentRegime||'RANGE-CHOP',
-    };
-    const _mlProb=taraMLPredict(_mlModel,_mlEntry);
-    if(_mlProb!=null){
-      // V9.11.4: direction-aware ML interpretation.
-      //   _mlConfidenceBoost ranges -10 (low confidence) to +10 (high confidence).
-      //   _currentLeanSign is +1 (UP) or -1 (DOWN) based on totalScore prior to ML.
-      //   When totalScore is near zero (no clear lean), don't apply ML signal — it
-      //   would arbitrarily push one direction. The 5-point deadband prevents ML
-      //   noise when signals are split.
-      const _mlConfidenceBoost=Math.round((_mlProb-0.5)*20); // -10 to +10
-      const _currentLeanSign=totalScore>5?1:totalScore<-5?-1:0; // 0 = no clear lean
-      const _mlScore=_currentLeanSign*_mlConfidenceBoost;
-      // V10.4.7 — ML SIGNAL RE-ENABLED with strict activation guards.
-      //   V10.2.41 disabled ML because it was 49.3% accurate (random output).
-      //   V10.4.7 keeps it computed for telemetry, but only APPLIES it when:
-      //     1) Model accuracy ≥ 55% (above random) AND
-      //     2) |_mlScore| ≥ 5 (meaningful signal magnitude) AND
-      //     3) _currentLeanSign !== 0 (underlying signals show clear lean)
-      //   Each condition is conservative. The model will activate naturally
-      //   once accumulated post-V10.4 trades push its accuracy past 55%.
-      const _mlAccuracy=Number(_mlModel?.accuracy)||0;
-      const _mlActivated=_mlAccuracy>=0.55&&Math.abs(_mlScore)>=5&&_currentLeanSign!==0;
-      if(_mlActivated){
-        totalScore+=_mlScore;
-        rawSignalScores.ml=_mlScore;
-        const _leanLabel=_currentLeanSign>0?'UP':'DOWN';
-        reasoning.push(`[V10.4.7 ML] ${(_mlProb*100).toFixed(0)}% WIN × ${_leanLabel}-lean → ${_mlScore>0?'+':''}${_mlScore} (trained ${_mlModel.nTrades}t, ${(_mlAccuracy*100).toFixed(0)}% acc)`);
-      } else {
-        // Track ML output as telemetry (so we can audit gain over time)
-        rawSignalScores.ml=_mlScore;
-        if(Math.abs(_mlScore)>=5){
-          const _why=_mlAccuracy<0.55?`acc ${(_mlAccuracy*100).toFixed(0)}% < 55%`:_currentLeanSign===0?'no clear lean':'|score|<5';
-          reasoning.push(`[V10.4.7 ML-SHADOW] Would have applied ${_mlScore>0?'+':''}${_mlScore} (suppressed: ${_why})`);
-        }
-      }
-    }
-  }
+  // Freeze a pre-ML feature vector for shadow learning. A training-set fit
+  // cannot prove an improvement, and no shadow candidate affects live scores.
+  const learningFeatures=directionFeatures({signals:rawSignalScores,baseUp:Math.max(0,Math.min(100,50+totalScore*.95)),atrBps,secondsLeft:clockSeconds});
+  const _mlModel=null; // legacy in-sample activation retired
   // V9.2.3: TIME-OF-DAY BOOST — data-driven hourly WR feeds back into posterior.
   //   Computed from historical call log (per-asset). Hours with ≥8 trades and WR ≥60%
   //   get a boost; hours with WR <45% get a penalty. Up to ±6 pts.
@@ -14986,7 +14934,7 @@ const computeV99Posterior=(params)=>{
     reasoning.push(`[WIN-TYPE] ${windowAmplitude.label} · ${windowAmplitude.context}`);
   }
 
-  return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
+  return{learningFeatures,posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
   // V10.2.36 — Range-chop override flag + computed avg bps. Stamped on engine
   //   result for call-log capture and UI surfacing.
   _v10_2_36_rangeOverrideFired:_rangeOverrideFired,
@@ -16941,7 +16889,9 @@ function useHourlyRecord(){
     if(!lk.approval||!lk.approval.samples?.length)return {accepted:false,code:'approval-missing',reason:'Hourly confirmation evidence is missing.'};
     const entry={ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs,
       ms:lk.ms,conf:lk.conf,model:lk.model,mktPct:lk.mktPct,minsAtLock:lk.minsAtLock,band:lk.band||null,
-      approval:JSON.parse(JSON.stringify({...lk.approval,recordedAt:Date.now()}))};
+      approval:JSON.parse(JSON.stringify({...lk.approval,recordedAt:Date.now()})),
+      learningCapture:capturePickLearning(lk,{profile:'BTC_hourly',at:lk.ms,close:lk.closeMs,version:lk.approval.modelVersion,
+        probability:lk.side==='YES'?lk.model:1-lk.model,confidence:lk.conf,price:lk.cost,event:lk.approval.quote.event,quoteAt:lk.approval.quote.requestedAt})};
     const next={...current,pending:[...current.pending,entry]};
     // Persist synchronously before acknowledging/alerting. Two mounted panels
     // re-read this after their awaited cloud check, so only one accepts the pick.
@@ -16965,7 +16915,7 @@ function useHourlyRecord(){
           const res=j&&j.market&&j.market.result;
           if(res!=='yes'&&res!=='no')continue;
           const won=(x.side==='YES')?(res==='yes'):(res==='no');
-          hist.push({...x,result:res,won,netCents:won?(100-x.cost):-x.cost,settledAt:Date.now()});
+          hist.push({...x,result:res,won,netCents:won?(100-x.cost):-x.cost,settledAt:Date.now(),learningSettlement:capturePickSettlement(x,j.market)});
           const k=still.findIndex(y=>y.ticker===x.ticker&&y.side===x.side);
           if(k>=0)still.splice(k,1);
         }catch(_e){}
@@ -26171,8 +26121,8 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 //     4. What's blocking entry? (gates that fired, what would unblock them)
 //
 //   Designed to read like a trader's thought process, not a dump of internals.
-function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeSource,strikeMode,taraCall,taraScorecards,windowType,onClose,embedded=false,snapshot=null}){
-  if(!analysis)return embedded?<TaraBrainSummary snapshot={snapshot} candidate={taraCall} analysis={null} lock={readLockState(snapshot)}/>:null;
+function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeSource,strikeMode,taraCall,taraScorecards,windowType,onClose,embedded=false,snapshot=null,learning}){
+  if(!analysis)return embedded?<><TaraBrainSummary snapshot={snapshot} candidate={taraCall} analysis={null} lock={readLockState(snapshot)}/><LearningStatus learning={learning}/></>:null;
   const post=analysis.rawProbAbove||50;
   // V3.2.1: Acknowledge balanced posterior. When |post-50|<3, signals are genuinely mixed.
   //   Don't force a UP/DOWN tiebreaker that creates false 'UP bias' framing.
@@ -26325,6 +26275,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
         </div>}
 
         {embedded&&<TaraBrainSummary snapshot={_snap} candidate={taraCall} analysis={analysis} lock={readLockState(_snap)}/>}
+        {embedded&&<LearningStatus learning={learning}/>}
         <details className="p-5 space-y-6 tara-v145-deep-brain" open={!embedded}>
           <summary>Full signals, for / against ledger &amp; model diagnostics</summary>
           {/* V4.2: TARA'S CALL — leading panel. Her actual decision, framed first. */}
@@ -28098,7 +28049,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
 //   Accessible via header button. Shows: WR heatmap by hour×day, P&L curve by asset,
 //   ML model status + feature importance, loss pattern distribution, regime×direction
 //   performance matrix, signal attribution chart.
-function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=false,lockResearch,asset='BTC',windowType='15m'}){
+function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=false,lockResearch,asset='BTC',windowType='15m',learning}){
   React.useEffect(()=>{
     if(embedded)return;
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
@@ -28283,12 +28234,13 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=
         React.createElement('button',{onClick:onClose,className:'w-8 h-8 rounded-lg flex items-center justify-center text-[#EDEDED]/50 hover:text-white hover:bg-[#EDEDED]/5 text-xl'},'✕')
       ),
       embedded&&React.createElement(TaraEvidenceAnalytics,{entries:taraCallLog,asset,windowType}),
+      React.createElement(LearningStatus,{learning}),
       React.createElement(embedded?'details':'div',{className:embedded?'tara-v145-advanced-analytics':'p-5 space-y-6'},
         embedded&&React.createElement('summary',null,'Full analysis, learning model, heatmaps & research'),
         embedded&&React.createElement('div',{className:'tara-analytics-summary'},
           [['TARA CALL RECORD',`${_wins}–${_losses}`,`${resolved.length} settled directional calls`],
            ['CALL WIN RATE',`${_wrPct}%`,'sit-outs are not scored wins'],
-           ['MODEL ACCURACY',mlInfo?`${(mlInfo.accuracy*100).toFixed(0)}%`:'—',mlInfo?`${mlInfo.nTrades} training samples`:'model not trained'],
+           ['LIVE MODEL',mlInfo?'Active':'Off','shadow validation is shown in Learning Lab'],
            ['SIGNAL COVERAGE',`${signalEV.coverage.toFixed(0)}%`,`${signalEV.n} calls with signal evidence`]].map(([label,value,note])=>
             React.createElement('div',{key:label},React.createElement('span',null,label),React.createElement('strong',null,value),React.createElement('small',null,note))),
           React.createElement('p',null,'This is the Tara Call record and model evidence. AutoTrade order fills, actual positions, and execution P&L belong to Execution and the exchange audit.'),
@@ -28485,7 +28437,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat,embedded=
             )
           )
         ):React.createElement('div',{className:'p-3 rounded-lg bg-[#050508] border border-[#24242E] text-[11px] text-[#EDEDED]/40'},
-          `ML model needs ≥${TARA_ML_MIN_TRADES} resolved trades with signal data. Currently: ${resolved.filter(e=>e.signalScoresAtLock).length}.`
+          'Live ML activation is off. See Learning Lab for trusted-data coverage, chronological holdout and frozen forward evidence. Legacy training-set accuracy is not proof.'
         ),
       )
     )
@@ -29379,7 +29331,7 @@ const _wxScan=async(city)=>{
         // Model-vs-market disagreement, measured side-agnostically off the YES mid
         //   so the bid/ask spread cannot flip the verdict.
         const yesMid=(bid>0&&ask>0)?(bid+ask)/2:ask;
-        return{sub,b,bid,ask,noBid,noAsk,oi,p,dead,ticker:m.ticker,
+        return{sub,b,bid,ask,noBid,noAsk,oi,p,dead,ticker:m.ticker,closeMs:Date.parse(m.close_time),quoteAt:Date.now(),
           // Dead buckets keep their edge even before the gate: "this bucket is
           //   already impossible" is arithmetic off the observed max, not forecasting.
           best:(best&&best.edge!=null&&(ready||dead))?best:null,
@@ -29558,6 +29510,7 @@ const _wxPickFrom=(scan)=>{
     if(arith.length){
       const w=arith[0];
       return{...base,tier:'live',ticker:w.r.ticker,sub:w.r.sub,side:'NO',
+        closeMs:w.r.closeMs,quoteAt:w.r.quoteAt,
         price:w.r.noAsk,edge:w.edge,marginF:w.margin,oi:w.r.oi,model:0,
         why:`the day already reached ${scan.runMax}°F, which is ${w.margin}° clear of the top of this bucket`};
     }
@@ -29570,6 +29523,7 @@ const _wxPickFrom=(scan)=>{
   if(model.length){
     const m=model[0];
     return{...base,tier:'paper',ticker:m.ticker,sub:m.sub,side:m.best.side,
+      closeMs:m.closeMs,quoteAt:m.quoteAt,
       price:m.best.price,edge:Math.round(m.best.edge),marginF:null,oi:m.oi,model:m.p,
       why:`model reads ${Math.round(m.p*100)}% against a ${m.best.price}c ask`};
   }
@@ -29646,7 +29600,7 @@ const _wxGrade=(pick,m)=>{
   //   which is exactly the direction a record must never lean.
   const fee=_wxFeeCents(pick.price);
   const pnl=won?(100-pick.price-fee):(-pick.price-fee);
-  return{...pick,result:won?'win':'loss',settledAt:Date.now(),settledResult:res,
+  return{...pick,result:won?'win':'loss',settledAt:Date.now(),settledResult:res,learningSettlement:capturePickSettlement(pick,m),
     pnl:Math.round(pnl*100)/100};
 };
 
@@ -29787,7 +29741,10 @@ function useWeatherPicks(){
         try{
           const scan=await _wxScan(c);
           const pick=_wxPickFrom(scan);
-          if(pick)found.push({...pick,atMs:Date.now(),result:null});
+          if(pick){const at=Date.now();found.push({...pick,atMs:at,result:null,
+            learningCapture:capturePickLearning(pick,{profile:`Weather_${pick.tier}`,at,close:pick.closeMs,version:TARA_BUILD_VERSION,
+              probability:pick.side==='YES'?pick.model:1-pick.model,confidence:100*Math.abs(2*pick.model-1),price:pick.price,
+              event:`${pick.city}|${pick.dayKey}`,quoteAt:pick.quoteAt})});}
         }catch(_e){}
       }
 
@@ -35891,10 +35848,12 @@ function TaraApp(){
   //   Read from the taraCall post-processor cascade further down.
   const _lossCooldownRef=useRef({windowsRemaining:0,triggeredForId:null});
   // V9.2.2: ML model state — declared here, training effect runs after taraCallLog is available (below).
+  const learning=useLearningRegistry();
   const[taraMLModel,setTaraMLModel]=useState(()=>{
     try{
       const stored=localStorage.getItem('taraML_model_v1');
-      if(stored)return JSON.parse(stored);
+      // Preserve the old file for audit, but do not activate an in-sample fit.
+      if(stored)return null;
     }catch(_){}
     return null;
   });
@@ -36676,34 +36635,7 @@ function TaraApp(){
   //   comment claimed "cached for fast paint on next mount" and nothing ever
   //   read it -- taraScorecards is a useMemo over taraCallLog, so it is
   //   recomputed on every mount and the cache could never have been consulted.
-  // V9.2.2: ML auto-retrain — runs after taraCallLog is in scope. Debounced 2s.
-  useEffect(()=>{
-    if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);
-    _mlTrainDebounceRef.current=setTimeout(()=>{
-      const resolved=_canonicalTrades((taraCallLog||[]).filter(e=>e&&e.signalScoresAtLock));
-      if(resolved.length<TARA_ML_MIN_TRADES){
-        try{console.info(`[ML] ${resolved.length}/${TARA_ML_MIN_TRADES} resolved trades with signals — need more data`);}catch(_){}
-        return;
-      }
-      // V10.4.7 — DATA QUALITY FILTER FOR TRAINING.
-      //   When enough post-V10.4 trades exist (n≥150), train ONLY on those.
-      //   The pre-V10.4 era had a logging bug where many trades had all-zero
-      //   signal vectors, which taught the model noise. The _v10_4_0_calibration
-      //   stamp marks clean-data trades. Falls back to all data below the threshold.
-      const _v104Era=resolved.filter(e=>e._v10_4_0_calibration!=null);
-      const _trainOn=_v104Era.length>=150?_v104Era:resolved;
-      const _eraLabel=_v104Era.length>=150?'V10.4+ era':'all-data';
-      const model=taraMLTrain(_trainOn);
-      if(model){
-        setTaraMLModel(model);
-        try{
-          localStorage.setItem('taraML_model_v1',JSON.stringify(model));
-          console.info(`[V10.4.7 ML] Trained on ${model.nTrades}t (${_eraLabel}) — ${(model.accuracy*100).toFixed(1)}% acc. Top: ${model.importance.slice(0,3).map(f=>`${f.name}(${f.weight>=0?'+':''}${f.weight.toFixed(3)})`).join(', ')}`);
-        }catch(_){}
-      }
-    },2000);
-    return()=>{if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);};
-  },[taraCallLog]);
+  // Model fitting runs in the scheduled shadow trainer, not in the browser.
   // V9.2.3: STREAK — derived from call log, surfaces in UI as a badge.
   const currentStreak=React.useMemo(()=>computeStreak(taraCallLog,currentAsset),[taraCallLog,currentAsset]);
   // V9.2.3: TIME-OF-DAY MODEL — per-hour WR boost map, fed into engine.
@@ -36720,6 +36652,7 @@ function TaraApp(){
   },[taraCallLog]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
+  const _learningCloudSourceRef=useRef(null);
   // V13.4.347: arm the loss-streak cooldown when the two MOST RECENT settled
   //   (WIN/LOSS only -- SIT_OUT/NO_TRADE/pending entries are skipped, they
   //   are neither a win nor a loss) results are both LOSS. triggeredForId
@@ -37563,6 +37496,7 @@ function TaraApp(){
   useEffect(()=>{
     const unsub=cloudWatch('memory/taraCallLog',(d)=>{
       _callLogHydratedRef.current=true;
+      if(Array.isArray(d?.entries))_learningCloudSourceRef.current=learningSource(d.entries);
       if(!d||!Array.isArray(d.entries)||!d.entries.length)return;
       try{
         const _now=Date.now();
@@ -37920,6 +37854,7 @@ function TaraApp(){
   taraLearningsRef.current=taraLearnings;
   // V10.9.7: speedDialRef removed — dial removed entirely.
   const _learningsHydratedRef=useRef(false);
+  const [learningSummaryHydrated,setLearningSummaryHydrated]=useState(false);
   // V8.6: Ref so RMW write reads freshest local state at debounce-fire time
   const _learningsRef=useRef(taraLearnings);
   _learningsRef.current=taraLearnings;
@@ -37935,24 +37870,25 @@ function TaraApp(){
         'learnings/tara',
         ()=>_learningsRef.current,
         (cloudData,localData)=>{
-          const cN=Number(cloudData?.totalResolved)||0;
-          const lN=Number(localData?.totalResolved)||0;
-          // Local has more samples → write local. Cloud has more or equal → skip write.
-          if(lN>cN)return localData;
+          // Equal-size rolling windows and corrected records invalidate by
+          // evidence contents, not by a lifetime maximum sample count.
+          if(preferLearningSummary(localData,cloudData,{canonicalSource:_learningCloudSourceRef.current}))return localData;
           return null;
         },
         // V10.7.85: throttle to 120s
         120000,
       );
     }
-  },[taraLearnings]);
+  },[taraLearnings,learningSummaryHydrated]);
   useEffect(()=>{
     const unsub=cloudWatch('learnings/tara',(d)=>{
       _learningsHydratedRef.current=true;
+      setLearningSummaryHydrated(true);
       if(!d||typeof d!=='object')return;
-      // Cloud wins if it has more total samples (cross-device convergence)
+      // This is a display cache, never an independent decision authority.
+      // The local canonical ledger effect below recomputes the actual summary.
       setTaraLearnings(prev=>{
-        if((d.totalResolved||0)<=(prev.totalResolved||0))return prev;
+        if(prev?.learningProtocol===LEARNING_PROTOCOL||d.learningProtocol!==LEARNING_PROTOCOL)return prev;
         return d;
       });
     });
@@ -38018,7 +37954,7 @@ function TaraApp(){
     const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{},byEdge:{},byLossPattern:{}};
     let total=0;
     (log||[]).forEach(e=>{
-      if(!e||!e.result||e.result==='SITOUT')return;       // only resolved UP/DOWN calls
+      if(!isScoredCall(e)||(e.asset||'BTC')!=='BTC'||(e.windowType||'15m')!=='15m'||e.manualEditedAt||e.recordRevisions?.length)return;
       if(e.dir!=='UP'&&e.dir!=='DOWN')return;
       const won=e.result==='WIN';
       total++;
@@ -38055,8 +37991,11 @@ function TaraApp(){
       }
     });
     const multipliers=_deriveMultipliers(stats);
-    setTaraLearnings({...stats,multipliers,lastUpdated:Date.now(),totalResolved:total});
+    const source=learningSource(log);
+    setTaraLearnings(prev=>prev.learningProtocol===LEARNING_PROTOCOL&&prev.source?.signature===source.signature?prev:
+      {...stats,multipliers,lastUpdated:Date.now(),totalResolved:total,learningProtocol:LEARNING_PROTOCOL,source,scope:'BTC_15m'});
   },[_deriveMultipliers]);
+  useEffect(()=>{_recomputeLearningsFromLog(taraCallLog);},[taraCallLog,_recomputeLearningsFromLog]);
   // V5.6: Save/clear the active window's lock state to Firestore. Refresh restores from this.
   //   _persistLock writes whatever the refs currently hold (engine lock + Tara snapshot +
   //   sample formation progress). _clearLock retires local refs only; the shared
@@ -38153,6 +38092,11 @@ function TaraApp(){
     }
     snapshot.decisionTrace ||= captureDecisionTrace(callDecisionTraceRef.current,_wid);
     snapshot.forecastAvailability ||= forecastAvailability(analysis?.fgtResults);
+    if(!snapshot.originalDecision&&analysis?.learningFeatures){
+      snapshot.learningFeatures=JSON.parse(JSON.stringify(analysis.learningFeatures));
+      snapshot.learningDataReady=startupReadiness.ready===true;
+      snapshot.learningPredictions=learningPredictions(snapshot.learningFeatures,{profile:`${snapshot.asset}_${snapshot.windowType}`,key:callKey(snapshot),at:snapshot._committedAt});
+    }
     snapshot.originalDecision ||= captureOriginalDecision(snapshot);
   };
   const _persistLock=()=>{
@@ -38447,69 +38391,15 @@ function TaraApp(){
   // Bump local timestamps whenever weights change (we set the timestamp before write fires,
   //   so the RMW merge sees a fresh local timestamp). updatedAt is set per-asset based on
   //   which asset was active at the time of the change.
-  useEffect(()=>{
-    if(!_weightsCloudHydratedRef.current)return;
-    // Mark the active asset's adaptive slice as freshly updated. This is approximate
-    //   (doesn't perfectly track which asset's weights changed), but in practice
-    //   updateWeights only ever modifies the active asset's slice anyway.
-    const _a=currentAssetRef.current||'BTC';
-    {
-      _weightsByAssetUpdatedAtRef.current[_a].adaptive=Date.now();
-      _weightsByAssetUpdatedAtRef.current[_a].regime=Date.now();
-    }
-    cloudWriteDebouncedRMW(
-      'learnings/taraWeights',
-      ()=>({
-        adaptive:adaptiveWeightsByAssetRef.current,
-        regime:regimeWeightsByAssetRef.current,
-        updatedAtBTC:_weightsByAssetUpdatedAtRef.current.BTC,
-
-      }),
-      (cloudData,localData)=>{
-        // Per-asset, per-slice timestamp merge. For each (asset, slice), pick whichever
-        //   side has the newer updatedAt — local or cloud. Default to local on tie.
-        const _pickSlice=(localSlice,cloudSlice,localT,cloudT)=>{
-          if(!cloudSlice)return localSlice;
-          if(!localSlice)return cloudSlice;
-          // If timestamps missing, prefer non-empty (the slice with content > empty defaults)
-          if(!cloudT||cloudT===0)return localSlice;
-          if(!localT||localT===0)return cloudSlice;
-          return cloudT>localT?cloudSlice:localSlice;
-        };
-        const cBTC=cloudData?.adaptive?.BTC;
-        const cBTCr=cloudData?.regime?.BTC;
-        const cBTCt=cloudData?.updatedAtBTC?.adaptive||0;
-        
-        const cBTCrt=cloudData?.updatedAtBTC?.regime||0;
-        
-        const lBTCt=localData.updatedAtBTC.adaptive||0;
-        
-        const lBTCrt=localData.updatedAtBTC.regime||0;
-        
-        const merged={
-          adaptive:{
-            BTC:_pickSlice(localData.adaptive?.BTC,cBTC,lBTCt,cBTCt),
-
-          },
-          regime:{
-            BTC:_pickSlice(localData.regime?.BTC,cBTCr,lBTCrt,cBTCrt),
-
-          },
-          updatedAtBTC:{
-            adaptive:Math.max(lBTCt,cBTCt),
-            regime:Math.max(lBTCrt,cBTCrt),
-          },
-        };
-        return merged;
-      },
-      // V10.7.85: throttle to 120s
-      120000,
-    );
-  },[adaptiveWeightsByAsset,regimeWeightsByAsset]);
+  // No automatic weight republishing: hydration is not a training event.
   useEffect(()=>{
     const unsub=cloudWatch('learnings/taraWeights',(d)=>{
-      _weightsCloudHydratedRef.current=true;
       if(!d||typeof d!=='object')return;
+      if(typeof d.adaptive?.BTC?.gap!=='number'&&!d.regime?.BTC)return;
+      // Load the existing saved baseline once. Subsequent old-client gradient
+      // writes cannot silently alter this release's live scoring weights.
+      if(_weightsCloudHydratedRef.current)return;
+      _weightsCloudHydratedRef.current=true;
       // V8.6: Merge cloud → local based on per-slice timestamps. Cloud slice adopted only
       //   if its updatedAt is newer than local's (or local hasn't been touched yet).
       const cBTCt=d.updatedAtBTC?.adaptive||0;
@@ -38577,160 +38467,11 @@ function TaraApp(){
   // V7.1: Centralized learning helper. Use the TRADE's asset (not the active one)
   //   to update both adaptive and regime weights. Filters newLog to same-asset trades
   //   for updateWeights' rolling-window calculations.
-  const applyTradeLearning=(newLog,resolvedTrade,finalResult)=>{
-    if(!resolvedTrade||(finalResult!=='WIN'&&finalResult!=='LOSS'))return;
-    const _ta=resolvedTrade.asset||'BTC';
-    const _safe='BTC';
-    const _curW=(adaptiveWeightsByAssetRef.current||{})[_safe]||(adaptiveWeightsByAssetRef.current||{}).BTC;
-    const _curRW=(regimeWeightsByAssetRef.current||{})[_safe]||(regimeWeightsByAssetRef.current||{}).BTC;
-    const _assetLog=(newLog||[]).filter(t=>t&&(t.asset||'BTC')===_safe);
-    // ── V9.11.0 LAYER 3: SESSION WEIGHT UPDATE HELPER ─────────────────────
-    // Updates the session-specific weight set for THIS trade's session. Same gradient-
-    //   descent algorithm as the global / regime weights, but applied to a session-keyed
-    //   slice. The session is derived from the resolved trade's `session` field (stamped
-    //   at lock time from getMarketSessions().dominant). Normalization: OFF-HOURS → OFFHOURS.
-    // Operates on the session-specific subset of the asset log when available, so the
-    //   recency multiplier inside updateWeights reflects how recently this session's data
-    //   has been touched. If the subset is too small (<3 trades), still updates — let
-    //   the learning be aggressive early and stabilize over time.
-    const _updateSessionWeightsFor=(_trade,_log,_result,_safeAsset)=>{
-      try{
-        const _sessRaw=(_trade?.session||'').toUpperCase();
-        if(!_sessRaw)return;
-        const _sessKey=_sessRaw==='OFF-HOURS'?'OFFHOURS':_sessRaw;
-        if(!['ASIA','EU','US','OFFHOURS'].includes(_sessKey))return;
-        const _byAsset=sessionWeightsByAssetRef.current||{};
-        const _assetSlice=_byAsset[_safeAsset]||{};
-        const _curSessW=_assetSlice[_sessKey];
-        if(!_curSessW||typeof _curSessW!=='object')return;
-        // Filter the asset log to same-session trades for sensible recency
-        const _sessLog=(_log||[]).filter(t=>{
-          const _ts=(t?.session||'').toUpperCase();
-          const _tsKey=_ts==='OFF-HOURS'?'OFFHOURS':_ts;
-          return _tsKey===_sessKey;
-        });
-        if(_sessLog.length===0)return;
-        const _newSessW=updateWeights(_curSessW,_sessLog,_result);
-        setSessionWeightsByAsset(prev=>{
-          const _a=prev[_safeAsset]||{};
-          return{...prev,[_safeAsset]:{..._a,[_sessKey]:_newSessW}};
-        });
-      }catch(err){
-        try{console.warn('[V9.11.0 session-weight] update failed',err?.message);}catch(_){}
-      }
-    };
-    // ── V8.5: SHOCK-AWARE LEARNING ──────────────────────────────────────
-    // When loss pattern is WHALE_SPIKE or MACRO_SHOCK, the loss was caused by external
-    //   circumstances (large contrary print, geo/macro event) — NOT a signal misread.
-    // Punishing weights at full force teaches Tara to distrust signals that were correct.
-    // We dampen the punishment to 25% (still some learning, but doesn't unlearn correct
-    //   signals due to bad luck), and tag the trade for telemetry.
-    const _isShockLoss=finalResult==='LOSS'&&resolvedTrade.lossPattern&&SHOCK_LOSS_PATTERNS.has(resolvedTrade.lossPattern);
-    // V9.2.0: PATH-AWARE LEARNING — modulate gradient by HOW the trade lost.
-    //   Call log analysis: signals that read the market correctly early but lost to
-    //   late reversal shouldn't be punished the same as signals that were wrong from
-    //   the start. Loss patterns:
-    //   - LATE_REVERSAL: was favorable, reversed in last third → 30% gradient (signals were right initially)
-    //   - MID_REVERSAL:  was favorable at midpoint, faded → 50% gradient (mixed read)
-    //   - EARLY_PEAK:    peaked early, sustained loss → 75% gradient (partial misread)
-    //   - WRONG_FROM_START: never above water → 100% gradient (genuine misread)
-    //   - WHALE_SPIKE / MACRO_SHOCK: handled by existing shock-dampening (25%)
-    // V10.4.4 extensions:
-    //   - NARROW_SETTLEMENT_LOSS: lost <3bps, BRTI averaging caught us → 30% (signals right, settlement wrong)
-    //   - EXPENSIVE_ENTRY_LOSS: k$60+ at lock → 60% (cost was the issue not the signal)
-    //   - WRONG_DIRECTION: lost >15bps → 100% (genuine miss, full punishment)
-    const _lossPattern=resolvedTrade.lossPattern;
-    let _pathDampMultiplier=finalResult==='LOSS'&&_lossPattern&&!_isShockLoss?(
-      _lossPattern==='LATE_REVERSAL'?0.30:
-      _lossPattern==='MID_REVERSAL'?0.50:
-      _lossPattern==='EARLY_PEAK'?0.75:
-      _lossPattern==='NARROW_SETTLEMENT_LOSS'?0.30:
-      _lossPattern==='EXPENSIVE_ENTRY_LOSS'?0.60:
-      _lossPattern==='WRONG_DIRECTION'?1.0:
-      1.0 // WRONG_FROM_START or unknown → full
-    ):1.0;
-    // V10.4.4: MAE/MFE QUALITY MULTIPLIER
-    //   On WINS, modulate by adverse excursion — clean wins reinforce more than
-    //   lucky comebacks. On LOSSES, modulate by favorable excursion — losses
-    //   where signals were right initially punish less.
-    //   These STACK on top of path-dampening so a "narrow settlement loss with
-    //   big MFE" gets near-zero gradient (signals were right, settlement caught).
-    let _qualityMult=1.0;
-    if(finalResult==='WIN'){
-      const _mae=Math.abs(Number(resolvedTrade.maxAdverseExcursionBps||0));
-      if(_mae>=8)_qualityMult=0.5;      // big dip mid-trade = lucky win
-      else if(_mae>=4)_qualityMult=0.75; // some dip = moderate quality
-      else _qualityMult=1.0;             // clean win, full reinforcement
-    }else if(finalResult==='LOSS'){
-      const _mfe=Math.abs(Number(resolvedTrade.maxFavorableExcursionBps||0));
-      if(_mfe>=10)_qualityMult=0.4;     // we were clearly winning before this lost
-      else if(_mfe>=5)_qualityMult=0.7;  // some upside seen, partial signal validity
-      else _qualityMult=1.0;             // never really winning, signals were off
-    }
-    _pathDampMultiplier=_pathDampMultiplier*_qualityMult;
-    const _isPathDampened=_pathDampMultiplier<1.0;
-    if(_isShockLoss){
-      try{console.info('[V8.5] Shock loss detected — dampening gradient descent. Pattern:',resolvedTrade.lossPattern);}catch(_){}
-      const _softLog=_assetLog.map((t,i,arr)=>{
-        if(i!==arr.length-1)return t;
-        if(!t||!t.signals)return t;
-        const _softSignals={};
-        Object.keys(t.signals).forEach(k=>{_softSignals[k]=Number(t.signals[k]||0)*0.25;});
-        return{...t,signals:_softSignals};
-      });
-      const _softTrade={...resolvedTrade};
-      if(_softTrade.signals){
-        const _softSigs={};
-        Object.keys(_softTrade.signals).forEach(k=>{_softSigs[k]=Number(_softTrade.signals[k]||0)*0.25;});
-        _softTrade.signals=_softSigs;
-      }
-      const _newW=updateWeights(_curW,_softLog,finalResult);
-      const _newRW=updateRegimeWeights(_curRW,_softTrade,finalResult);
-      // V9.11.0: also update session-of-day weights using softened signals
-      _updateSessionWeightsFor(_softTrade,_softLog,finalResult,_safe);
-      const _diffs=computeWeightDiff(_curW,_newW);
-      setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
-      setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
-      
-      return;
-    }
-    // V9.2.0: PATH-DAMPENED learning path — applies when lossPattern indicates the
-    //   signals were partially correct. Same mechanism as shock dampening but with
-    //   variable multiplier based on HOW the trade lost.
-    if(_isPathDampened){
-      try{console.info(`[V9.2.0] Path-aware loss dampening: ${_lossPattern} → ${(_pathDampMultiplier*100).toFixed(0)}% gradient`);}catch(_){}
-      const _softLog=_assetLog.map((t,i,arr)=>{
-        if(i!==arr.length-1)return t;
-        if(!t||!t.signals)return t;
-        const _softSignals={};
-        Object.keys(t.signals).forEach(k=>{_softSignals[k]=Number(t.signals[k]||0)*_pathDampMultiplier;});
-        return{...t,signals:_softSignals};
-      });
-      const _softTrade={...resolvedTrade};
-      if(_softTrade.signals){
-        const _softSigs={};
-        Object.keys(_softTrade.signals).forEach(k=>{_softSigs[k]=Number(_softTrade.signals[k]||0)*_pathDampMultiplier;});
-        _softTrade.signals=_softSigs;
-      }
-      const _newW=updateWeights(_curW,_softLog,finalResult);
-      const _newRW=updateRegimeWeights(_curRW,_softTrade,finalResult);
-      // V9.11.0: also update session-of-day weights using softened signals
-      _updateSessionWeightsFor(_softTrade,_softLog,finalResult,_safe);
-      const _diffs=computeWeightDiff(_curW,_newW);
-      setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
-      setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
-      
-      return;
-    }
-    // Normal path — full gradient descent
-    const _newW=updateWeights(_curW,_assetLog,finalResult);
-    const _newRW=updateRegimeWeights(_curRW,resolvedTrade,finalResult);
-    // V9.11.0: also update session-of-day weights
-    _updateSessionWeightsFor(resolvedTrade,_assetLog,finalResult,_safe);
-    const _diffs=computeWeightDiff(_curW,_newW);
-    setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
-    setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
-    
+  const applyTradeLearning=()=>{
+    // Live event-by-event gradients stay frozen at their saved values. The
+    // scheduled trainer derives shadow revisions once per verified window;
+    // replay/refresh/manual trade outcomes cannot mutate live weights.
+    return;
   };
   const[tradeLog,setTradeLog]=useState(()=>loadTradeLog());
 
@@ -44220,6 +43961,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         structAlignment:eng.structAlignment||null,
         // V6.3.5: surface raw signal scores + tape windows for log analysis
         rawSignalScores:eng.rawSignalScores||null,
+        learningFeatures:eng.learningFeatures||null,
         tapeWindows:tapeWindows||null,
         // V9.7.9: diagnostic state from V9.7.x gates — stamped on trade log entries
         //   for post-hoc audit ("did the cap fire?" / "did the damper change the lock?").
@@ -47653,6 +47395,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     spot:currentPrice,strike:kalshiStrike,atrBps:analysis?.atrBps,
     tape15:analysis?.tapeWindows?.w15?.buyPct,tape30:analysis?.tapeWindows?.w30?.buyPct,
     tape60:analysis?.tapeWindows?.w60?.buyPct,momentum:analysis?.rawSignalScores?.momentum,regime:analysis?.regime,
+    learningFeatures:analysis?.learningFeatures,dataReady:startupReadiness.ready,
     dataProvenance:{calendarStatus:economicCalendar.status,calendarSources:economicCalendar.sources.map(s=>({id:s.id,status:s.status,fetchedAt:s.fetchedAt})),derivativesStatus:bloomberg.status,derivativesAt:bloomberg.lastUpdate,referenceSources:brtiApprox?.sourceHealth||[],referenceIsBenchmark:false},
   },{device:_taraDeviceId,version:TARA_BUILD_VERSION,publish:async(path,data)=>{
     if(!_sbClient)throw new Error('Research cloud unavailable');
@@ -53534,7 +53277,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.5.0</small>
+              <small>DECISION ENGINE · V14.6.0</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -54134,8 +53877,8 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           onOpenFlow={()=>setShowWhaleLog(true)}
           onOpenTheory={()=>setShowTheoryLab(true)}
         />}
-        {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded asset={currentAsset} windowType={windowType} taraCallLog={taraCallLog} taraMLModel={taraMLModel} lockResearch={lockResearch} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
-        {workspaceFocus==='brain'&&showBrain&&<BrainView embedded snapshot={taraCallSnapshotRef.current||null} analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
+        {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded learning={learning} asset={currentAsset} windowType={windowType} taraCallLog={taraCallLog} taraMLModel={taraMLModel} lockResearch={lockResearch} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
+        {workspaceFocus==='brain'&&showBrain&&<BrainView embedded learning={learning} snapshot={taraCallSnapshotRef.current||null} analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
         {workspaceFocus==='schedule'&&<TaraHourlyRecordSummary/>}
         {workspaceFocus==='signals'&&<><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/><TaraSignalsSummary analysis={analysis} candidate={taraCall} lock={readLockState(taraCallSnapshotRef.current)} orderBook={orderBook} tapeWindows={tapeWindows} smartMoneySignals={_smartMoneySignals} qualityGate={qualityGate} deadline={callLockDeadline(windowType)}/></>}
         {/* V13.4.298: lg:auto-rows-fr + the grid default (stretch) forced every
@@ -54311,7 +54054,9 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
                       kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
                       resolvedTimestampISO:new Date().toISOString()};
                     const newLog=[...tradeLogRef.current,resolvedTrade];saveTradeLog(newLog);setTradeLog(newLog);
-                    const newW=updateWeights(adaptiveWeights,newLog,result);const _diffs=computeWeightDiff(adaptiveWeights,newW);setAdaptiveWeights(newW);setRegimeWeights(prev=>updateRegimeWeights(prev,resolvedTrade,result));pendingTradeRef.current=null;
+                    // Personal force exits remain in the personal record, not
+                    // the exact-market supervised learning corpus.
+                    pendingTradeRef.current=null;
                   }
                 }
                 setUserPosition(null);setPositionEntry(null);taraAdviceRef.current='CLOSED';setForceRender(p=>p+1);
@@ -55946,7 +55691,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               <section className={'bg-[#101014] border-2 rounded-lg p-4'} style={{borderColor:'rgba(35,185,129,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:T2_GOLD}}>★ Current Tara — V8.7 Overview</h3>
                 <div className="space-y-3 text-xs leading-relaxed text-[#EDEDED]/75">
-                  <p><strong className="text-white">What Tara does:</strong> Reads BTC price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
+                  <p><strong className="text-white">What Tara does:</strong> Reads BTC price action, tape flow, regime and multi-timeframe alignment to predict whether price will close above or below the window strike. She makes a Call only when the existing rules qualify it. Verified original outcomes feed separate shadow training and forward validation; a live model change requires policy review.</p>
                   <p><strong className="text-white">Per-asset everything:</strong> BTC and ETH have separate weights, regime memories, scorecards, and learning histories. Switching assets shows that asset's data — they don't blend.</p>
                   <p><strong className="text-white">Cloud-synced across all your devices:</strong> Trades, scorecards, weights, and learning all sync to Supabase. Open Tara on any browser, on any device, and you see the same data. The SyncStatusPill in the header shows sync health (green = synced, amber = writing, rose = error). Click it to force a fresh resync.</p>
                   <p><strong className="text-white">Multi-tab safe:</strong> Open Tara in 5 tabs at once — they all share state via BroadcastChannel + atomic Supabase transactions. The TabPresencePill shows when peer tabs are active. No more lost trades from concurrent writes.</p>
@@ -55957,16 +55702,16 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               <section className={'bg-[#101014] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(168,85,247,0.95)'}}>🧠 How Tara Learns Every Trade</h3>
                 <div className="space-y-2.5 text-xs leading-relaxed text-[#EDEDED]/70">
-                  <p><strong className="text-white">5 parallel learning loops fire on every WIN/LOSS:</strong></p>
+                  <p><strong className="text-white">Verified shadow learning · v14.6:</strong> Scheduled training runs independently of the dashboard. Separate profiles keep 15-minute, 5-minute, hourly, Sports and Weather evidence apart. New models are evaluated on chronological holdout and independently witnessed forward predictions; only verified original captures qualify.</p>
                   <ol className="list-decimal pl-5 space-y-1">
-                    <li><strong className="text-white">Adaptive weight gradient descent</strong> — only signals that contributed &gt;10% to the decision get adjusted. Bystanders untouched. Magnitude scales with conviction × recency.</li>
-                    <li><strong className="text-white">Per-regime weight learning</strong> — runs in parallel at 2.5× rate so regime-specific patterns differentiate fast.</li>
+                    <li><strong className="text-white">Saved adaptive weights</strong> — retained unchanged. Unvalidated event-by-event gradient writes are frozen; a replay, refresh or manual result cannot train the live model.</li>
+                    <li><strong className="text-white">Frozen shadow candidates</strong> — never trained on their test labels. A shadow improvement requires policy review before live activation.</li>
                     <li><strong className="text-white">Statistical buckets</strong> — recomputes WR across 7 dimensions: regime, direction, tier, session, regime+direction combo, confluence type, edge bucket vs Kalshi.</li>
                     <li><strong className="text-white">Multipliers</strong> — derived from buckets, fed back into decision gates (regime safety floor, regime+direction speed adjustment, confidence boosts).</li>
                     <li><strong className="text-white">Calibration engine</strong> — maps her displayed posterior to actual historical WR.</li>
                   </ol>
                   <p className="pt-1"><strong className="text-white">Path-aware learning (V8.5):</strong> Every resolved trade now records max favorable/adverse excursion, peak time, last-60s drift, and a loss pattern classification (WHALE_SPIKE, MACRO_SHOCK, LATE_REVERSAL, MID_REVERSAL, EARLY_PEAK, WRONG_FROM_START).</p>
-                  <p><strong className="text-white">Shock-aware learning (V8.5):</strong> When a loss is caused by external shock (whale spike or macro event), gradient descent is dampened to 25% — signals that pointed correctly don't get unlearned because of bad luck.</p>
+                  <p><strong className="text-white">Honest exclusions:</strong> Missing browser observations are not sit-outs. Edited, reconstructed, partial, stale-quote and unverified outcomes stay out of new-model training. Sports needs independent settlement proof; source-record wins alone are not accepted as that proof.</p>
                   <p><strong className="text-white">Saved fields per trade:</strong> 25+ fields including signal scores at lock, regime, session, phase, tape windows, FGT alignment, Kalshi edge at lock, closing price + Kalshi at close, path metrics, window context (whale activity, geoRisk), loss pattern. Open the export button on the call log to download.</p>
                 </div>
               </section>
@@ -55980,7 +55725,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
                     <li><code className="text-[10px] bg-[#050508] px-1">memory/taraCallLog</code> — windowId-keyed merge, prefer resolved over unresolved</li>
                     <li><code className="text-[10px] bg-[#050508] px-1">scorecards/personal</code> — max-per-cell W/L</li>
                     <li><code className="text-[10px] bg-[#050508] px-1">history/pastWindows</code> — windowId union</li>
-                    <li><code className="text-[10px] bg-[#050508] px-1">learnings/tara</code> — totalResolved tiebreaker</li>
+                    <li><code className="text-[10px] bg-[#050508] px-1">learnings/tara</code> — evidence-content signature and canonical-ledger watermark, not a maximum lifetime count</li>
                     <li><code className="text-[10px] bg-[#050508] px-1">learnings/regimeMemory</code> — max-per-cell</li>
                     <li><code className="text-[10px] bg-[#050508] px-1">learnings/taraWeights</code> — per-asset slice timestamps</li>
                     <li><code className="text-[10px] bg-[#050508] px-1">state/lifetimePnL</code> — timestamp inside transaction</li>

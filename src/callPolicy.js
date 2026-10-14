@@ -1,6 +1,6 @@
 import {finiteNumber, inspectDecisionQuote, isDirection, windowCloseMs} from './callIntegrity.js';
 
-export const CALL_POLICY_VERSION = '14.5.0';
+export const CALL_POLICY_VERSION = '14.6.0';
 export const ALLOW_CLOCK_FORCED_CALLS = false;
 export const callLockDeadline = windowType => windowType === '15m' ? 420 : 30;
 export function directionalConfidence(probabilityUp, direction) {

@@ -45,7 +45,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
   const logs=[],errors=[],audit=[],cloud=[],timers=[],storage=new Map();
   const ref=current=>({current});
   const FakeDate=class extends Date {constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-  const scope={...integrity,...policy,...forecasts,...tracing,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
+  const scope={...integrity,...policy,...forecasts,...tracing,learningPredictions,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
     captureOriginalDecision:(entry,options={})=>integrity.captureOriginalDecision(entry,{now:clock,...options}),
     console:{info(){},warn(){},error(...args){errors.push(args.map(String).join(' '));}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
@@ -79,7 +79,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     getMarketSessions:()=>({dominant:'OFF-HOURS'}),getPhaseKey:()=>null,buildCalibrationTable:()=>({}),lookupCalibration:()=>({found:false}),
     brtiApprox:null,dayContext:null,whaleLog:[],adaptiveWeightsByAssetRef:ref({}),_otherAssetRef:ref({}),
     tradingSettings:{tier1OnlyMode:tier1Only},sessionTierMode:'off',_resolveSessionTierMultiplier:()=>1,
-    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.14-v14.5.0-approved-interface',
+    betAmount:1,maxPayout:2,TARA_CALL_LOG_CAP:1000,TARA_BUILD_VERSION:'2026.10.14-v14.6.0-verified-shadow-learning',
     _lossCooldownRef:ref(null),taraCallLog:logs,_ana:null,computeReversalRisk:()=>({flag:'NONE',score:0}),
     playAlert(){},brtiApproxRef:ref(null),lastKalshiSuccessRef:ref(clock),_windowCushionHistoryRef:ref([]),
     kalshiStrikeRef:ref(83200),_mountTimeRef:ref(clock-180000),_deriveSitoutCategory:()=>null,
@@ -113,3 +113,4 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
     advance,
     missing:[...new Set([...candidate.dependencies,...effect.dependencies,...boundary.dependencies])].filter(name=>!(name in scope))};
 }
+import {learningPredictions} from '../../src/learningCapture.js';

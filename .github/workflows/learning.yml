@@ -1,0 +1,36 @@
+name: Tara continuous learning - shadow validation
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['src/learning*.js', 'scripts/train-learning.mjs', '.github/workflows/learning.yml']
+permissions:
+  contents: write
+concurrency:
+  group: tara-learning-registry
+  cancel-in-progress: false
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Test decision, data and learning invariants
+        run: npm test
+      - name: Read public evidence and train frozen shadow candidates
+        run: node scripts/train-learning.mjs
+      - name: Publish derived registry without rebuilding production
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view learning-registry-v1 >/dev/null 2>&1 || gh release create learning-registry-v1 --target "$GITHUB_SHA" --title "Tara learning registry" --notes "Derived shadow models. Not a live execution release." --prerelease --latest=false
+          gh release upload learning-registry-v1 learning-output/registry-*.json
+          gh release upload learning-registry-v1 learning-output/trainer-state.json --clobber
+          gh release upload learning-registry-v1 learning-output/registry.json --clobber

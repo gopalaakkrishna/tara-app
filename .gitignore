@@ -3,3 +3,4 @@ dist/
 run-dev.bat
 .claude/
 .wrangler/
+learning-output/

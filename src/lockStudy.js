@@ -1,4 +1,6 @@
 import {finiteNumber as number, inspectDecisionQuote, isDirection, windowCloseMs} from './callIntegrity.js';
+import {LEARNING_PROTOCOL,validFeatures} from './learningCore.js';
+import {learningPredictions} from './learningCapture.js';
 
 // Frozen research protocol. This module cannot return an order or arm AutoTrade.
 export const LOCK_STUDY_POLICY = Object.freeze({id:'early-7m-v1', mode:'shadow-only', cutoffSeconds:420, cadenceMs:15000, stabilityMs:30000, maxGapMs:22000, minRawSideProbability:0.65, minEstimatedEdgeCents:3});
@@ -8,7 +10,7 @@ export const estimatedTakerFeeCents = cost => Math.ceil((7 * (cost / 100) * (1 -
 const side = (up, direction) => direction === 'UP' ? up : 1-up;
 
 export function createLockStudy({windowId, asset='BTC', device, version, now=Date.now()}) {
-  return {schema:1, policy:{...LOCK_STUDY_POLICY}, windowId, asset, windowType:'15m', device, version,
+  return {schema:1, learningProtocol:LEARNING_PROTOCOL, policy:{...LOCK_STUDY_POLICY}, windowId, asset, windowType:'15m', device, version,
     firstObservedAt:now, lastObservedAt:null, observations:[], early:{status:'observing', reason:'collecting-stability'}, marketAtEarly:null, current:null, settlement:null};
 }
 
@@ -29,7 +31,10 @@ export function observeLockStudy(study, input) {
     quoteIssue:quote.ok?null:quote.reason, costCents:cost, estimatedEdgeCents:estimate,
     referencePrice:number(input.referencePrice), spot:number(input.spot), strike:number(input.strike), atrBps:number(input.atrBps),
     tape15:number(input.tape15), tape30:number(input.tape30), tape60:number(input.tape60), momentum:number(input.momentum),
-    regime:input.regime||null, visibility:input.visibility||'unknown',dataProvenance:input.dataProvenance||null};
+    regime:input.regime||null, visibility:input.visibility||'unknown',dataProvenance:input.dataProvenance||null,
+    dataReady:input.dataReady===true,learningFeatures:validFeatures(input.learningFeatures)?JSON.parse(JSON.stringify(input.learningFeatures)):null};
+  const anchor=[720,600,480,420].find(s=>remaining>=s&&remaining<=s+20);
+  o.learningPredictions=anchor?learningPredictions(o.learningFeatures,{profile:`${study.asset}_15m`,key:`study|${study.asset}|${study.windowId}|${anchor}`,at:now}):[];
   const observations=[...study.observations,o].slice(-100);
   const next={...study,lastObservedAt:now,observations};
   const decision=input.currentDecision, original=decision?.originalDecision;

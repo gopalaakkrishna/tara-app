@@ -34,7 +34,7 @@ export const API_BASE = (readStorage() || fromBuild).replace(/\/+$/, '');
 
 const shouldRewrite = (url) =>
   url.origin === window.location.origin && url.pathname.startsWith('/api/') &&
-  url.pathname !== '/api/economic-calendar'; // hosted Pages function, not a legacy proxy route
+  !['/api/economic-calendar','/api/learning'].includes(url.pathname); // hosted Pages functions, not legacy proxy routes
 
 // "/api/okx/market/ticker?x=1" -> "<API_BASE>/okx/market/ticker?x=1"
 const rewritten = (url) => API_BASE + url.pathname.slice('/api'.length) + url.search;

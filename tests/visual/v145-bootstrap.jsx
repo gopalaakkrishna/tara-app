@@ -35,6 +35,10 @@ window.fetch=async(input,init={})=>{
   if(url.origin===location.origin&&!url.pathname.startsWith('/api/'))return originalFetch(input,init);
   if(method!=='GET'){window.__visualNetwork.interceptedWrites++;return new Response(null,{status:204});}
   window.__visualNetwork.reads++;
+  if(url.pathname==='/api/learning')return Response.json({protocol:'tara-learning-v2',generatedAt:NOW,datasetId:'ISOLATED-FIXTURE',
+    profiles:{BTC_15m:{status:'shadow',reason:'awaiting-forward-evidence',independentGroups:135,forwardGroups:32,liveInfluence:false,
+      challenger:{model:{id:'ISOLATED-SHADOW-MODEL'},holdout:{candidate:{accuracy:.61,brier:.218},baseline:{accuracy:.56,brier:.243}}}},
+      Sports:{status:'source-review',reason:'external-record-not-independent-settlement-proof'}},sourceHealth:{fixture:{status:'isolated-no-network'}},exclusions:{'legacy-features-unavailable':24}});
   if(url.pathname.endsWith('/tara_state')){const key=(url.searchParams.get('doc_path')||'').replace(/^eq\./,'');return Response.json(documents[key]===undefined?null:{data:documents[key],updated_at:new NativeDate(NOW).toISOString()});}
   if(url.href.includes('/series/KXBTCD'))return Response.json({series:{ticker:'KXBTCD',fee_type:'quadratic',fee_multiplier:1}});
   if(url.pathname.endsWith('/events'))return Response.json({events:[url.searchParams.get('series_ticker')==='KXBTCD'?{event_ticker:'KXBTCD-26OCT1421'}:{event_ticker:'KXBTC15M-26OCT142030',markets:[{ticker,status:'active',strike_type:'greater',floor_strike:84521.2,yes_bid_dollars:'.62',yes_ask_dollars:'.64',close_time:closeTime}]}]});

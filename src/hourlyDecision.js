@@ -1,6 +1,6 @@
 // Hourly advisory picks have their own market/horizon and evidence. Nothing in
 // this module changes the 5m/15m Call lifecycle or places an order.
-export const HOURLY_POLICY_VERSION='14.5.0';
+export const HOURLY_POLICY_VERSION='14.6.0';
 export const HOURLY_POLL_MS=20000;
 export const HOURLY_QUOTE_MAX_AGE_MS=45000;
 export const HOURLY_SPOT_MAX_AGE_MS=15000;

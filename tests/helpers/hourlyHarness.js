@@ -3,6 +3,7 @@ import traverseModule from '@babel/traverse';
 import {app,compile} from './callDecisionHarness.js';
 import * as hourly from '../../src/hourlyDecision.js';
 import {normalizeHourlyRecord} from '../../src/hourlyRecordMath.js';
+import {capturePickLearning,capturePickSettlement} from '../../src/learningCapture.js';
 const traverse=traverseModule.default||traverseModule,ast=parse(app,{sourceType:'module',plugins:['jsx']});
 const declarations=new Map();
 traverse(ast,{
@@ -24,7 +25,7 @@ export function hourlyHarness({lad,now,props={},record={w:0,l:0,pending:[],histo
     useEffect(fn,deps){const i=cursor++,old=hooks[i];if(!old||!deps||deps.some((v,j)=>v!==old.deps?.[j])){effects.push(()=>{old?.cleanup?.();const cleanup=fn();hooks[i]={deps,cleanup};});}},
   };
   const FakeDate=class extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-  const scope={...hourly,normalizeHourlyRecord,React,Date:FakeDate,encodeURIComponent,console:{info(){},warn(){}},
+  const scope={...hourly,normalizeHourlyRecord,capturePickLearning,capturePickSettlement,React,Date:FakeDate,encodeURIComponent,console:{info(){},warn(){}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,v)=>storage.set(key,v)},
     _HR_KEY:'taraHourlyRecord_v1',_HR_HISTORY_CAP:500,_HR_PENDING_CAP:40,_HR_CLOUD_PATH:'memory/hourlyRecord',_hrIntervalActive:false,
     cloudSupabaseRead:(...args)=>readCloud(...args),cloudWriteDebounced:(...args)=>writes.push(structuredClone(args)),

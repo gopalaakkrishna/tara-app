@@ -60,6 +60,7 @@ export function captureOriginalDecision(entry, {now = Date.now(), provenance = '
     signalScore:finiteNumber(entry.confidence), modelVersion:entry.taraVersion || null, tier:entry.tier || null,
     reason:entry.reason || null, commitPolicy:entry.callPolicy || null, blockedDecision:entry.blockedDecision || null,
     decisionTrace:entry.decisionTrace || null, forecastAvailability:entry.forecastAvailability || null,
+    ...(entry.learningFeatures?{learningFeatures:JSON.parse(JSON.stringify(entry.learningFeatures)),learningDataReady:entry.learningDataReady===true,learningPredictions:JSON.parse(JSON.stringify(entry.learningPredictions||[]))}:{}),
   };
 }
 
