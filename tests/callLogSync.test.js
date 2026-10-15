@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {callLogSyncSignature,callLogSyncStatus} from '../src/callLogSync.js';
 import {CALL_EVIDENCE_FIELDS,callKey,normalizeCallLedger} from '../src/callIntegrity.js';
 import {mergeWeatherRecords} from '../src/weatherRecord.js';
+import {supabaseHourlyTransport} from '../src/hourlyAdmission.js';
 
 const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
 const path='memory/taraCallLog';
@@ -48,14 +49,14 @@ function harness({initial={entries:[base]},readError=false,writeError=false,conf
   const timer=(fn,delay)=>{if(delay<1000){queueMicrotask(fn);return ++sequence;}timers.set(++sequence,{fn,delay});return sequence;};
   const client={from:()=>({
     select:()=>({eq:()=>({maybeSingle:async()=>{reads++;return {data:cloud?{data:cloud,updated_at:'version'}:null,error:readFailed?{message:'read failure'}:null};}})}),
-    update:payload=>({eq:()=>({eq:async()=>{writes++;if(beforeWrite)await beforeWrite(writes);if(failed)return{error:{message:'write failure'},count:0};
-      if(conflicts-->0)return{error:null,count:0};cloud=payload.data;return{error:null,count:1};}})}),
+    update:payload=>{const q={eq:()=>q,is:()=>q,then(resolve){return (async()=>{writes++;if(beforeWrite)await beforeWrite(writes);if(failed)return{error:{message:'write failure'},count:0};
+      if(conflicts-->0)return{error:null,count:0};cloud=payload.data;return{error:null,count:1};})().then(resolve);}};return q;},
     insert:async payload=>{writes++;if(failed)return{error:{message:'insert failure'}};cloud=payload.data;return{error:null};}
   })};
   const body=app.slice(app.indexOf('const cloudSupabaseWriteDebouncedRMW='),app.indexOf('// Force-flush all pending Supabase RMW writes'));
-  const sync=new Function('_sbClient','_sbWriteQueueRMW','_sbWritePendingRMW','_sbLastSyncSig','callLogSyncSignature','_stripEntryForCloud',
+  const sync=new Function('supabaseHourlyTransport','_sbClient','_sbWriteQueueRMW','_sbWritePendingRMW','_sbLastSyncSig','callLogSyncSignature','_stripEntryForCloud',
     '_setCloudStatus','_cloudSyncStatus','setTimeout','clearTimeout','console',body+';return cloudSupabaseWriteDebouncedRMW;')(
-      client,queue,pending,synced,callLogSyncSignature,e=>e,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
+      supabaseHourlyTransport,client,queue,pending,synced,callLogSyncSignature,e=>e,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
   const mergeBody=app.slice(app.indexOf('  const _mergeCallLogEntries='),app.indexOf('  const[callStorageStatus',app.indexOf('  const _mergeCallLogEntries=')));
   const merge=new Function('React','CALL_EVIDENCE_FIELDS','normalizeCallLedger','TARA_CALL_LOG_CAP','_auditLogEvent',mergeBody+';return _mergeCallLogEntries;')(
     {useCallback:fn=>fn},CALL_EVIDENCE_FIELDS,normalizeCallLedger,1000,()=>{});

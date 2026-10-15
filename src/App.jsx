@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import taraDesignStyles from './tara-design.css?raw';
 import taraV14Styles from './tara-v14.css?raw';
 import taraV145Styles from './tara-v145.css?raw';
-import {TaraStorageStatus,EvidenceMetrics,RecordInspector,RecordVersionFilter,TaraEvidenceAnalytics,TaraBrainSummary,HourlyApprovalSummary,TaraSignalsSummary,TaraDetailEnvelope} from './TaraPresentation.jsx';
+import {TaraStorageStatus,EvidenceMetrics,RecordInspector,RecordVersionFilter,TaraEvidenceAnalytics,TaraBrainSummary,HourlyApprovalSummary,TaraSignalsSummary,TaraDetailEnvelope,PaperPerformanceSummary} from './TaraPresentation.jsx';
 import {capturedReason,recordVersion,presentationRows} from './presentationEvidence.js';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
@@ -33,6 +33,9 @@ import {dampenScore} from './economicCalendar.js';
 import MarketIntelligencePanel from './MarketIntelligencePanel.jsx';
 import {assessSpotResponse, freshOkxResults, freshFeedStatus, observedFundingPair} from './marketDataQuality.js';
 import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executionIntegrity.js';
+import {buildSafeEntry,buildSafeExit,normalizeExecutionOrder,runSafeEntryLadder,heldQuote,executionFeeCents,fetchAllExecutionPages,accountRiskSnapshot,affordableContracts,summarizeOrderFills} from './executionSafety.js';
+import {executionIntentId,stableExecutionId,reserveExecutionIntent,updateExecutionIntent,readExecutionState,writeExecutionState,restoreExecutionLedger} from './executionJournal.js';
+import {commitHourlyAdmission,supabaseHourlyTransport} from './hourlyAdmission.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
 import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
@@ -552,26 +555,14 @@ const _execFairCents=(dir,maxAgeMs=60000)=>{
 //                      bid is 100 - yes ask.
 // Returns null on a missing or stale quote so callers hold rather than act on
 // a price they cannot trust.
-const _exitValueCents=(dir,maxAgeMs=30000)=>{
-  const q=_kalshiQuote;
-  if(!q||!q.at||(Date.now()-q.at)>maxAgeMs)return null;
-  if(dir==='UP')  return (q.bid!=null&&isFinite(q.bid))?q.bid:null;
-  if(dir==='DOWN')return (q.ask!=null&&isFinite(q.ask))?(100-q.ask):null;
-  return null;
-};
+const _exitValueCents=(dir,maxAgeMs=30000,ticker=_kalshiQuote?.ticker)=>heldQuote(_kalshiQuote,{dir,ticker,maxAgeMs})?.value??null;
 
 // The YES limit price that closes the position immediately, i.e. crossing.
 // Exits are not laddered: a stop or a closing bell is not the moment to shave a
 // cent and risk not filling at all.
 //   UP   sell YES at the bid.
 //   DOWN sell NO by buying YES at the ask.
-const _exitYesLimitCents=(dir,maxAgeMs=30000)=>{
-  const q=_kalshiQuote;
-  if(!q||!q.at||(Date.now()-q.at)>maxAgeMs)return null;
-  if(dir==='UP')  return (q.bid!=null&&isFinite(q.bid))?q.bid:null;
-  if(dir==='DOWN')return (q.ask!=null&&isFinite(q.ask))?q.ask:null;
-  return null;
-};
+const _exitYesLimitCents=(dir,maxAgeMs=30000,ticker)=>heldQuote(_kalshiQuote,{dir,ticker,maxAgeMs})?.yesLimit??null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // V11 SELECTIVITY ENGINE — data-driven gate on all directional snap commits.
@@ -956,6 +947,17 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           Array.isArray(_localData)?_localData:(_localData?.entries||[]),_stripEntryForCloud):null;
         const _merged=_mergeFn(_cloudData,_localData);
         if(_merged==null){_completed=true;return;} // mergeFn signaled "skip write"
+        if(path==='memory/hourlyRecord'){
+          // Settlement/hydration writers share the admission revision protocol:
+          // even same-millisecond writes cannot erase an accepted approval.
+          _merged._admissionRevision=crypto.randomUUID();
+          const transport=supabaseHourlyTransport(_sbClient,path);
+          const saved=_cur?await transport.compareAndSwap(_cur,_merged):await transport.insert(_merged);
+          if(!saved)continue;
+          _completed=true;
+          _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+          return;
+        }
         // Conditional upsert: succeed only if row's updated_at hasn't changed.
         //   For a brand-new row (no _cloudUpdatedAt), this is an INSERT and
         //   has no conflict to check. For an existing row, we use the eq()
@@ -4801,37 +4803,7 @@ const _kV2PriceDollars=(yesCents)=>(yesCents/100).toFixed(4);
 // Each YES contract pays out $1 if it resolves YES; cost = yes_price (cents).
 //   stake $10 @ 65¢ → 10/0.65 = 15 contracts (cost $9.75, net win $5.25 if hit).
 //   For NO contracts: cost = (100 - yes_price) cents, capped at 99.
-const kalshiBuildOrder=({ticker,dir,limitCents,betDollars})=>{
-  if(!ticker||(dir!=='UP'&&dir!=='DOWN'))return{ok:false,reason:'bad-args'};
-  const lim=Math.max(1,Math.min(99,Math.round(Number(limitCents)||0)));
-  if(!lim)return{ok:false,reason:'no-limit-price'};
-  const stake=Math.max(0,Number(betDollars)||0);
-  if(!stake)return{ok:false,reason:'no-stake'};
-  const side=dir==='UP'?'yes':'no';
-  const costPerContractCents=side==='yes'?lim:(100-lim);
-  if(costPerContractCents<=0)return{ok:false,reason:'bad-cost'};
-  // Floor to integer contracts; cap at 250 contracts as a per-order safety bound.
-  const count=Math.max(1,Math.min(250,Math.floor((stake*100)/costPerContractCents)));
-  const expiration_time=Math.floor(Date.now()/1000)+90; // 90s TTL (will expire if unfilled)
-  const client_order_id=`tara_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-  // Always buying to open: UP buys YES (bid), DOWN buys NO, which on the YES
-  // book is a sell (ask). `lim` is the YES price either way, so it goes on the
-  // wire unchanged; only costPerContractCents above differs between the legs.
-  const v2Side=_kV2Side(side,'buy');
-  const body={
-    ticker,
-    client_order_id,
-    side:v2Side,
-    price:_kV2PriceDollars(lim),
-    count:String(count),
-    time_in_force:'good_till_canceled',
-    expiration_time,
-    // Cancel our own incoming order rather than disturbing a resting one if we
-    // would ever cross ourselves. Single-user account, so this rarely fires.
-    self_trade_prevention_type:'taker_at_cross',
-  };
-  return{ok:true,body,count,costPerContractCents,side,v2Side,client_order_id};
-};
+const kalshiBuildOrder=(args)=>buildSafeEntry(args);
 
 // Place order (or simulate in dry-run). Returns {ok, dryRun, order?, reason?}.
 // V13.4.79: realized money per settled lock, in cents, for ONE contract.
@@ -4851,48 +4823,13 @@ const taraNetCents=(e)=>{
     return Math.round((r==='WIN')?(100-cost):(-cost));
   }catch(_e){return null;}
 };
-const kalshiPlaceOrder=async({apiKeyId,privateKeyPem,ticker,dir,limitCents,betDollars,dryRun})=>{
-  const built=kalshiBuildOrder({ticker,dir,limitCents,betDollars});
-  if(!built.ok)return{ok:false,reason:built.reason,dryRun:!!dryRun};
-  if(dryRun){
-    // V13.4.311 FIX: was status:'resting'. kalshiRunEntryLadder gives a
-    //   takesSpread rung zero wait time (deadline=Date.now()+0, "it either
-    //   fills or it does not") and only ever learns of a fill by polling
-    //   kalshiGetOrder -- but a zero-length deadline means that poll loop
-    //   never runs even once, so a 'resting' placement response can NEVER
-    //   become 'filled' for the single rung entryLadderEnabled:false (the
-    //   common case) ever produces. Confirmed live: every dry-run entry
-    //   attempt failed with reason:'no-fill', 100% of the time, regardless
-    //   of settings -- dry-run mode was silently non-functional for its
-    //   one stated purpose ("verify one sandbox order end-to-end" before
-    //   arming real money). kalshiExitPosition's own dry-run branch already
-    //   hardcodes status:'filled' (line ~4899) and kalshiGetOrder's dry-run
-    //   branch does too -- this was the one place that still said
-    //   'resting', and the file's own comment history above
-    //   kalshiNormalizeOrder ("Dry-run worked because dry-run hardcoded
-    //   'filled'") confirms 'filled' was the original, correct intent.
-    return{ok:true,dryRun:true,order:{
-      order_id:`DRY_${built.client_order_id}`,client_order_id:built.client_order_id,
-      ticker,side:built.side,v2Side:built.v2Side,action:'buy',type:'limit',count:built.count,
-      price:built.body.price,status:'filled',
-      created_time:new Date().toISOString(),
-      _simulated:true,
-    }};
-  }
+const kalshiPlaceOrder=async({apiKeyId,privateKeyPem,ticker,dir,limitCents,betDollars,dryRun,clientOrderId,count})=>{
+  const built=kalshiBuildOrder({ticker,dir,limitCents,betDollars,clientOrderId,count});
+  if(!built.ok)return {...built,dryRun:!!dryRun};
+  if(dryRun)return {ok:true,dryRun:true,order:{order_id:'DRY_'+built.client_order_id,client_order_id:built.client_order_id,ticker,side:built.side,v2Side:built.v2Side,action:'buy',count:built.count,fill_count_fp:String(built.count),remaining_count_fp:'0',average_fill_price:(built.costPerContractCents/100).toFixed(4),taker_fees_dollars:(executionFeeCents(built.costPerContractCents,built.count)/100).toFixed(4),maker_fees_dollars:'0',status:'filled',_simulated:true}};
   const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:KALSHI_ORDERS_PATH,body:built.body});
-  if(!res.ok)return{
-    ok:false,reason:res.reason||'order failed',dryRun:false,raw:res,
-    // V9.17.28: expose full diagnostic so the UI banner can render request +
-    //   response inline without making the user crack open DevTools.
-    diag:{
-      status:res.status,
-      reason:res.reason,
-      requestBody:built.body,
-      responseHeaders:res.respHeaders||{},
-      responseBody:res.rawBody||'',
-    },
-  };
-  return{ok:true,dryRun:false,order:res.data?.order||res.data,raw:res};
+  if(!res.ok)return {ok:false,reason:res.reason||'order failed',dryRun:false,definitiveRejection:[400,401,403,404,422].includes(res.status),raw:res};
+  return {ok:true,dryRun:false,order:res.data?.order||res.data};
 };
 
 // V9.18.10: KALSHI RESPONSE NORMALIZATION
@@ -4925,45 +4862,7 @@ const _kalshiParseDollarString=(s)=>{
   const cents=Math.round(n*100);
   return cents>=1&&cents<=99?cents:null;
 };
-const kalshiNormalizeOrder=(_ord)=>{
-  if(!_ord||typeof _ord!=='object')return{status:null,fillPriceCents:null,filledCount:0};
-  const _rawStatus=_ord.status||null;
-  // Normalize 'executed' → 'filled' for downstream consumers
-  const _status=KALSHI_FILLED_STATUSES.includes(_rawStatus)?'filled':_rawStatus;
-  // Filled contract count: prefer fixed-point string, fallback to legacy integer
-  let _filledCount=0;
-  if(_ord.fill_count_fp!=null){
-    const n=Number(_ord.fill_count_fp);
-    if(Number.isFinite(n))_filledCount=Math.floor(n);
-  }else if(_ord.fill_count!=null){
-    const n=Number(_ord.fill_count);
-    if(Number.isFinite(n))_filledCount=Math.floor(n);
-  }
-  // Fill price (in cents on the user-side axis they queried). Try several
-  // fields in priority order:
-  //   1. average_fill_price (V2 endpoint) — string $ on the side that filled
-  //   2. taker_fill_cost_dollars — string $ average for taker fills
-  //   3. maker_fill_cost_dollars — string $ average for maker fills
-  //   4. fill_price (legacy integer cents) — last resort
-  //   5. yes_price_dollars (limit price, NOT fill — only if filled and no other data)
-  let _fillCents=null;
-  _fillCents=_kalshiParseDollarString(_ord.average_fill_price);
-  if(_fillCents==null)_fillCents=_kalshiParseDollarString(_ord.taker_fill_cost_dollars);
-  if(_fillCents==null)_fillCents=_kalshiParseDollarString(_ord.maker_fill_cost_dollars);
-  if(_fillCents==null&&_ord.fill_price!=null){
-    const n=Number(_ord.fill_price);
-    if(Number.isFinite(n)&&n>=1&&n<=99)_fillCents=Math.round(n);
-  }
-  // Only use the limit price as a last-resort estimate if the order is filled.
-  // Conservative — limit might equal fill price for marketable limits. V2 order
-  // objects carry the limit as `price` (YES, fixed-point dollars); older ones
-  // used yes_price_dollars. Try both so this works across the migration.
-  if(_fillCents==null&&_status==='filled'){
-    _fillCents=_kalshiParseDollarString(_ord.price);
-    if(_fillCents==null)_fillCents=_kalshiParseDollarString(_ord.yes_price_dollars);
-  }
-  return{status:_status,fillPriceCents:_fillCents,filledCount:_filledCount,_raw:_ord};
-};
+const kalshiNormalizeOrder=(order)=>normalizeExecutionOrder(order);
 
 const kalshiGetOrder=async({apiKeyId,privateKeyPem,orderId,dryRun})=>{
   if(dryRun||(orderId&&String(orderId).startsWith('DRY_'))){
@@ -4989,27 +4888,12 @@ const kalshiCancelOrder=async({apiKeyId,privateKeyPem,orderId,dryRun})=>{
 // Selling the leg held reduces that exposure: dumping YES is an ask, dumping NO
 // is a bid, because shedding NO is the same trade as buying YES. `limitCents`
 // is the YES price in both cases, so it goes on the wire unchanged.
-const kalshiExitPosition=async({apiKeyId,privateKeyPem,ticker,side,count,limitCents,dryRun})=>{
-  const lim=Math.max(1,Math.min(99,Math.round(Number(limitCents)||1)));
-  const client_order_id=`tara_exit_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-  const _count=Math.max(1,Math.floor(Number(count)||0));
-  const v2Side=_kV2Side(side,'sell');
-  const body={
-    ticker,
-    client_order_id,
-    side:v2Side,
-    price:_kV2PriceDollars(lim),
-    count:String(_count),
-    time_in_force:'good_till_canceled',
-    expiration_time:Math.floor(Date.now()/1000)+30,
-    self_trade_prevention_type:'taker_at_cross',
-  };
-  if(dryRun){
-    return{ok:true,dryRun:true,order:{order_id:`DRY_${client_order_id}`,client_order_id,ticker,side,v2Side,action:'sell',count:_count,status:'filled',_simulated:true}};
-  }
-  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:KALSHI_ORDERS_PATH,body});
-  if(!res.ok)return{ok:false,reason:res.reason||'exit failed',raw:res};
-  return{ok:true,order:res.data?.order||res.data};
+const kalshiExitPosition=async({apiKeyId,privateKeyPem,ticker,side,count,limitCents,dryRun,positionId})=>{
+  const clientOrderId=await stableExecutionId(['exit',apiKeyId||'simulation',ticker,side,positionId||'unattributed']);
+  const built=buildSafeExit({ticker,side,count,limitCents,clientOrderId});if(!built.ok)return built;
+  if(dryRun)return {ok:true,dryRun:true,order:{order_id:'DRY_'+clientOrderId,client_order_id:clientOrderId,ticker,side,action:'sell',count:built.count,fill_count_fp:String(built.count),remaining_count_fp:'0',average_fill_price:((side==='yes'?limitCents:100-limitCents)/100).toFixed(4),taker_fees_dollars:(executionFeeCents(side==='yes'?limitCents:100-limitCents,built.count)/100).toFixed(4),maker_fees_dollars:'0',status:'filled',_simulated:true}};
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:KALSHI_ORDERS_PATH,body:built.body});
+  return res.ok?{ok:true,order:res.data?.order||res.data}:{ok:false,reason:res.reason||'exit failed'};
 };
 
 // ── ENTRY LADDER ─────────────────────────────────────────────────────────────
@@ -5068,167 +4952,17 @@ const planEntryLadder=({offerCents,undercutCents=2,maxSteps=2,stepSec=8,enabled=
 // filled order plus which rung filled, so the caller can log realised entry cost
 // against the -1.85c / +1.00c figures above and see whether the ladder is
 // actually earning its keep on this account.
-const kalshiRunEntryLadder=async({
-  apiKeyId,privateKeyPem,ticker,dir,betDollars,offerCents,settings,dryRun,
-  shouldAbort,onRung,onPlaced,pollMs=1000,
-})=>{
-  // The ladder plans on the COST axis — what we pay per contract on the side we
-  // are taking — which always walks upward toward the offer. kalshiBuildOrder
-  // takes the YES price, and for a DOWN call those run in OPPOSITE directions,
-  // because NO cost = 100 - yes. Paying less for NO means quoting a HIGHER yes
-  // price. Convert per rung; planning in YES terms would rest every DOWN ladder
-  // on the wrong side of the book.
-  //   UP   cost 66 -> yes limit 66  (buy YES at 66)
-  //   DOWN cost 56 -> yes limit 44  (buy NO at 56, i.e. sell YES at 44)
-  const _costToYesLimit=(c)=>dir==='UP'?c:(100-c);
-  const plan=planEntryLadder({
-    offerCents,
-    undercutCents:settings?.entryLadderUndercutCents,
-    maxSteps:settings?.entryLadderMaxSteps,
-    stepSec:settings?.entryLadderStepSec,
-    enabled:!!settings?.entryLadderEnabled,
-  });
-  if(!plan.ok)return{ok:false,reason:plan.reason};
-  const attempts=[];
-  for(const rung of plan.rungs){
-    if(typeof shouldAbort==='function'&&shouldAbort())return{ok:false,reason:'aborted',attempts};
-    if(typeof onRung==='function'){try{onRung(rung);}catch(_e){}}
-    const placed=await kalshiPlaceOrder({
-      apiKeyId,privateKeyPem,ticker,dir,limitCents:_costToYesLimit(rung.priceCents),betDollars,dryRun,
-    });
-    if(!placed.ok){attempts.push({rung,error:placed.reason});continue;}
-    const orderId=placed.order?.order_id;
-    if(typeof onPlaced==='function'){
-      try{onPlaced({orderId,clientOrderId:placed.order?.client_order_id||null,rung});}catch(_e){}
-    }
-    // The taking rung is not given time to rest; it either fills or it does not.
-    const deadline=Date.now()+(rung.takesSpread?0:rung.waitSec*1000);
-    let normalized=kalshiNormalizeOrder(placed.order);
-    // V13.4.333: RUNAWAY BAILOUT. Reported live, twice in one night: a resting
-    //   rung waits out its FULL timer even when the market has already blown
-    //   straight past the point where waiting still makes sense -- a fast,
-    //   one-directional move leaves the resting order behind, it sits
-    //   unfilled for the whole wait, and the entry is missed entirely on a
-    //   call that was correct the whole time. If the live market cost for our
-    //   side is already worse than this ladder's OWN final "take it now"
-    //   price (the price we would have accepted outright, no questions asked,
-    //   at lock time), the setup has moved further than this plan ever
-    //   anticipated -- stop waiting on this rung immediately instead of
-    //   burning the rest of its timer on a price that is already stale. Falls
-    //   through to the existing verify-before-cancel logic exactly as a
-    //   normal timeout would, so a fill landing in the last instant is never
-    //   missed by exiting early -- this only shortens a wait that the
-    //   ladder's own plan has already been overtaken by, it never shortens
-    //   the taking rung (which isn't given a wait at all) and never fires on
-    //   a rung that's merely resting normally.
-    const _takeRungCents=plan.rungs[plan.rungs.length-1]?.priceCents;
-    const _runawayBail=()=>{
-      if(rung.takesSpread||_takeRungCents==null)return false;
-      const _liveYes=Number(_kalshiQuote?.mid);
-      const _liveAt=Number(_kalshiQuote?.at)||0;
-      if(!Number.isFinite(_liveYes)||(Date.now()-_liveAt)>5000)return false;
-      const _liveCost=dir==='UP'?_liveYes:(100-_liveYes);
-      return _liveCost>_takeRungCents;
-    };
-    while(normalized.status!=='filled'&&Date.now()<deadline){
-      if(typeof shouldAbort==='function'&&shouldAbort())break;
-      if(_runawayBail())break;
-      await new Promise(r=>setTimeout(r,pollMs));
-      const look=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
-      // V13.4.322: a failed POLL is not a failed ORDER. The old `if(!look.ok)
-      //   break;` here treated "we could not check this tick" identically to
-      //   "confirmed still resting" -- one transient network/API blip mid-wait
-      //   was enough to fall through to the cancel+no-fill path below even
-      //   when the order had genuinely filled moments earlier. Keep polling
-      //   until the deadline instead of giving up on the first bad read.
-      if(!look.ok)continue;
-      normalized=kalshiNormalizeOrder(look.order);
-    }
-    if(normalized.status==='filled'){
-      return{ok:true,order:placed.order,normalized,rung,attempts,plan};
-    }
-    // V13.4.322: VERIFY BEFORE CANCEL. Reported live: a real fill happened on
-    //   Kalshi (user confirmed the fill on Kalshi's own side at the exact
-    //   price Tara had shown) while this ladder reported 'no-fill' with zero
-    //   contracts and no P&L tracking -- because the wait loop above can exit
-    //   on an unconfirmed read (every poll failing counts as "not yet
-    //   filled"), and the code then canceled the order and reported no-fill
-    //   without ever checking again. One direct status check, right before
-    //   touching the order, catches the common case.
-    const _final=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
-    if(_final.ok){
-      normalized=kalshiNormalizeOrder(_final.order);
-      if(normalized.status==='filled'){
-        return{ok:true,order:_final.order,normalized,rung,attempts,plan};
-      }
-    }
-    // Still not confirmed filled. Cancel it -- but a FAILED cancel is itself a
-    //   signal worth keeping: an order that already filled has nothing left
-    //   to cancel, and Kalshi's error response for that case says so. The old
-    //   code discarded this result entirely (`await kalshiCancelOrder(...)`
-    //   with the return value thrown away).
-    // V13.4.322: no order id at all (kalshiPlaceOrder claimed success but its
-    //   response carried none) means there is nothing to cancel and nothing
-    //   to re-check either -- that is NOT a safely-confirmed non-fill, so it
-    //   must not default to _cancelOk=true the way a merely-skipped cancel
-    //   attempt would read.
-    let _cancelOk=!orderId?false:true;
-    if(orderId){
-      const _cancelRes=await kalshiCancelOrder({apiKeyId,privateKeyPem,orderId,dryRun});
-      _cancelOk=!!_cancelRes.ok;
-      // V13.4.330: a cancel racing a fill is a normal exchange condition --
-      //   Kalshi can return a clean success for "cancel" on an order that
-      //   filled moments before the DELETE landed, with nothing left to
-      //   cancel. The old code trusted _cancelOk (did the DELETE request
-      //   itself succeed) alone and never looked at what the cancel
-      //   response's own order object said about the order's actual final
-      //   state. Reported live: a real fill at 91.2c on Kalshi's own site,
-      //   the ladder declared 'no-fill' and gave up -- the cancel response
-      //   would have shown the fill if anything had checked it.
-      if(_cancelOk&&_cancelRes.order){
-        const _cancelNorm=kalshiNormalizeOrder(_cancelRes.order);
-        if(_cancelNorm.status==='filled'){
-          return{ok:true,order:_cancelRes.order,normalized:_cancelNorm,rung,attempts,plan};
-        }
-      }
-      // V13.4.334: the ABOVE check only ever fires on a SUCCESSFUL cancel --
-      //   but a FAILED cancel is at least as strong a signal of a hidden
-      //   fill, arguably stronger: Kalshi commonly rejects cancelling an
-      //   order that has already been fully executed, because there is
-      //   nothing left on the book to cancel. The V13.4.322 comment right
-      //   above this block already named this exact case ("a FAILED cancel
-      //   is itself a signal worth keeping") but the code only ever acted on
-      //   the cancel response when it succeeded -- a failed cancel fell
-      //   straight through to "unfilled" with no further check at all.
-      //   Reported live: a taking rung (no resting wait, immediate verify)
-      //   whose one verify read caught the order mid-match (not yet
-      //   reflected as filled), whose cancel then failed -- and the real
-      //   fill was never caught, because nothing looked again after that
-      //   failure. One more direct read here, exactly mirroring the
-      //   verify-before-cancel check above, settles it either way.
-      if(!_cancelOk){
-        const _postCancelCheck=await kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun});
-        if(_postCancelCheck.ok){
-          const _pcNorm=kalshiNormalizeOrder(_postCancelCheck.order);
-          if(_pcNorm.status==='filled'){
-            return{ok:true,order:_postCancelCheck.order,normalized:_pcNorm,rung,attempts,plan};
-          }
-        }
-      }
-    }
-    // V13.4.322: if the final direct check could not reach Kalshi AND the
-    //   cancel also failed, the true fill state is genuinely UNKNOWN -- not
-    //   "confirmed unfilled." Reporting this identically to a clean no-fill is
-    //   exactly the bug that produced a real, untracked position with no exit
-    //   protection. Distinct reason so the caller can show something that
-    //   says "go check Kalshi directly," not a normal-looking error.
-    if(!_final.ok&&!_cancelOk){
-      attempts.push({rung,status:'unknown',orderId});
-      return{ok:false,reason:'unknown-verify-kalshi-directly',attempts,plan,orderId};
-    }
-    attempts.push({rung,status:normalized.status||'unfilled'});
-  }
-  return{ok:false,reason:'no-fill',attempts,plan};
+const kalshiRunEntryLadder=async({apiKeyId,privateKeyPem,ticker,dir,betDollars,offerCents,settings,dryRun,clientOrderId,shouldAbort,onRung,onPlaced,pollMs=1000})=>{
+  const plan=planEntryLadder({offerCents,undercutCents:settings?.entryLadderUndercutCents,maxSteps:settings?.entryLadderMaxSteps,stepSec:settings?.entryLadderStepSec,enabled:!!settings?.entryLadderEnabled});
+  return runSafeEntryLadder({plan,dir,betDollars,clientOrderId,shouldAbort,onRung,onPlaced,pollMs,
+    place:({rung,count,clientOrderId})=>kalshiPlaceOrder({apiKeyId,privateKeyPem,ticker,dir,limitCents:dir==='UP'?rung.priceCents:100-rung.priceCents,betDollars,dryRun,clientOrderId,count}),
+    read:orderId=>kalshiGetOrder({apiKeyId,privateKeyPem,orderId,dryRun}),
+    cancel:orderId=>kalshiCancelOrder({apiKeyId,privateKeyPem,orderId,dryRun}),
+    amend:async({orderId,rung,count,clientOrderId})=>{
+      if(dryRun)return {ok:true};
+      const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:KALSHI_ORDERS_PATH+'/'+encodeURIComponent(orderId)+'/amend',body:{ticker,side:dir==='UP'?'bid':'ask',price:((dir==='UP'?rung.priceCents:100-rung.priceCents)/100).toFixed(4),count:String(count),client_order_id:clientOrderId}});
+      return res.ok?{ok:true,order:res.data?.order||res.data}:{ok:false,reason:res.reason};
+    }});
 };
 
 // Quick credentials check — calls /portfolio/balance which requires auth but no params.
@@ -5908,8 +5642,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.15-v14.7.5-paper-settlement';
-const TARA_VERSION_DISPLAY='TARA 14.7.5';
+const TARA_BUILD_VERSION='2026.10.15-v14.7.6-execution-safety';
+const TARA_VERSION_DISPLAY='TARA 14.7.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16660,7 +16394,7 @@ let _hrIntervalActive=false;
 const _hrSave=(r,urgent)=>{
   // Age or queue size is not settlement evidence. Keep every unresolved pick;
   // never erase it or infer a loss/void merely because a feed failed.
-  const _payload={w:r.w,l:r.l,pending:r.pending,history:r.history.slice(-_HR_HISTORY_CAP)};
+  const _payload={w:r.w,l:r.l,pending:r.pending,history:r.history.slice(-_HR_HISTORY_CAP),_admissionRevision:r._admissionRevision,settlementHealth:r.settlementHealth};
   try{localStorage.setItem(_HR_KEY,JSON.stringify(_payload));}catch(_e){}
   // Cloud mirror. Debounced hard (60s, same as the 15m log) because settlement can
   //   resolve several pending locks in one burst and each would otherwise be a write.
@@ -16705,8 +16439,11 @@ const _hrMerge=(a,b)=>{
     l:history.filter(h=>h.won===false).length,
     pending:Array.from(pend.values()),
     history,
+    _admissionRevision:a?._admissionRevision||b?._admissionRevision,
+    settlementHealth:(a?.settlementHealth?.at||0)>(b?.settlementHealth?.at||0)?a?.settlementHealth:b?.settlementHealth,
   };
 };
+const _hrAdmissionTransport=()=>supabaseHourlyTransport(_sbClient,_HR_CLOUD_PATH);
 function useHourlyRecord(){
   const[rec,setRec]=React.useState(_hrLoad);
   // V13.4.162: hydrate from Supabase once on mount. Without this the cloud mirror is
@@ -16775,29 +16512,20 @@ function useHourlyRecord(){
   //   every client, and it shrinks the blind window from 5 minutes to one round
   //   trip. New picks now wait on read failure; the panel exposes that reason.
   const addLock=React.useCallback(async(lk,revalidate)=>{
-    let fresh;
-    try{fresh=await cloudSupabaseRead(_HR_CLOUD_PATH,{throwOnError:true});}
-    catch{return {accepted:false,code:'record-read',reason:'Hourly record check failed; retrying with fresh confirmations.'};}
-    // A delayed lookup must not commit an expired or changed candidate. The
-    // caller rechecks fresh data and all current hourly admission conditions.
-    const current=_hrMerge(_hrLoad(),fresh||{});
-    const approval=typeof revalidate==='function'?revalidate(current):{ok:false,code:'approval-missing',reason:'Hourly approval evidence is missing.'};
-    if(!approval.ok)return {accepted:false,...approval};
-    const guard=hourlyRecordGuard(current,lk,readHourlyPolicy(localStorage),Date.now());
-    if(!guard.ok){setRec(current);return {accepted:false,...guard};}
     if(!lk.approval||!lk.approval.samples?.length)return {accepted:false,code:'approval-missing',reason:'Hourly confirmation evidence is missing.'};
     const entry={ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs,
       ms:lk.ms,conf:lk.conf,model:lk.model,mktPct:lk.mktPct,minsAtLock:lk.minsAtLock,band:lk.band||null,
       approval:JSON.parse(JSON.stringify({...lk.approval,recordedAt:Date.now()})),
       learningCapture:capturePickLearning(lk,{profile:'BTC_hourly',at:lk.ms,close:lk.closeMs,version:lk.approval.modelVersion,
-        probability:lk.side==='YES'?lk.model:1-lk.model,confidence:lk.conf,price:lk.cost,event:lk.approval.quote.event,quoteAt:lk.approval.quote.requestedAt})};
-    const next={...current,pending:[...current.pending,entry]};
-    // Persist synchronously before acknowledging/alerting. Two mounted panels
-    // re-read this after their awaited cloud check, so only one accepts the pick.
-    try{localStorage.setItem(_HR_KEY,JSON.stringify(next));}
-    catch{return {accepted:false,code:'record-storage',reason:'Hourly record could not be saved on this device.'};}
-    _hrSave(next,true);setRec(next);
-    return {accepted:true,record:next};
+        probability:(lk.side==='YES'?lk.model:100-lk.model)/100,confidence:lk.conf,price:lk.cost,event:lk.approval.quote.event,quoteAt:lk.approval.quote.requestedAt})};
+    let transport;try{transport=_hrAdmissionTransport();}catch{return {accepted:false,code:'record-read',reason:'Hourly shared record unavailable.'};}
+    const result=await commitHourlyAdmission({...transport,entry,merge:_hrMerge,readLocal:_hrLoad,
+      preflightLocal:()=>localStorage.setItem(_HR_KEY,JSON.stringify(_hrLoad())),
+      saveLocal:next=>localStorage.setItem(_HR_KEY,JSON.stringify(next)),
+      revalidate:record=>typeof revalidate==='function'?revalidate(record):{ok:false,code:'approval-missing',reason:'Hourly approval evidence is missing.'},
+      guard:record=>hourlyRecordGuard(record,lk,readHourlyPolicy(localStorage),Date.now())});
+    if(result.record)setRec(result.record);
+    return result;
   },[]);
   React.useEffect(()=>{
     let alive=true;
@@ -16805,28 +16533,29 @@ function useHourlyRecord(){
       const cur=_hrLoad();
       const due=cur.pending.filter(x=>x.ticker&&x.closeMs&&Date.now()>x.closeMs+45000);
       if(!due.length)return;
-      const hist=[...cur.history];const still=[...cur.pending];
+      const hist=[...cur.history];const still=[...cur.pending];const failures=[];
       for(const x of due){
         try{
-          const r=await fetch('/api/kalshi-public/markets/'+encodeURIComponent(x.ticker));
-          if(!r.ok)continue;
-          const j=await r.json();
+          const path='markets/'+encodeURIComponent(x.ticker);
+          const r=await _kLadRace(['/api/kalshi-public/'+path,_K_PUB+'/'+path,'https://tara-kalshi-proxy.onrender.com/kalshi-public/'+path],d=>d?.market?.ticker===x.ticker);
+          if(!r.ok){failures.push({ticker:x.ticker,code:'settlement-read',reason:r.reason});continue;}
+          const j=r.data;
           const res=j&&j.market&&j.market.result;
           const verified=inspectHourlySettlement(x,j.market,Date.now());
-          if(!verified.ok)continue;
+          if(!verified.ok){failures.push({ticker:x.ticker,code:verified.reason||'official-pending',reason:verified.reason||'Official result is pending.'});continue;}
           const won=verified.won;
           hist.push({...x,result:res,won,netCents:won?(100-x.cost):-x.cost,settledAt:Date.now(),
             officialSettlement:verified.officialSettlement,learningSettlement:capturePickSettlement(x,j.market)});
           const k=still.findIndex(y=>y.ticker===x.ticker&&y.side===x.side);
           if(k>=0)still.splice(k,1);
-        }catch(_e){}
+        }catch(_e){failures.push({ticker:x.ticker,code:'settlement-read',reason:'Hourly settlement read failed; original pending pick retained.'});}
       }
       if(!alive)return;
       // The visible record is a rolling 500 settlements, not lifetime counters.
       // Recount after capping so W + L cannot silently exceed the stated window.
       // Preserve a new pick accepted while settlement's network requests were
       // in flight; settled entries still win over the same pending identity.
-      const next=normalizeHourlyRecord(_hrMerge(_hrLoad(),{pending:still,history:hist}),_HR_HISTORY_CAP);
+      const next=normalizeHourlyRecord(_hrMerge(_hrLoad(),{pending:still,history:hist,settlementHealth:{at:Date.now(),failures:failures.slice(-10),pending:still.length}}),_HR_HISTORY_CAP);
       _hrSave(next);setRec(next);
     };
     settle();
@@ -17456,6 +17185,7 @@ function HourlyLadderPanel({engine}){
   return(
     <div className="tara-v145-hourly-panel mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <HourlyApprovalSummary locks={LOCKS} candidate={assessment.ok?assessment.pick:null} status={_hourlyStatus} samples={confirmationRef.current?.samples||[]} required={assessment.pick?.needTicks||CONFIRM_TICKS}/>
+      {!!rec.settlementHealth?.failures?.length&&<div role="status" data-hourly-settlement="waiting" className="text-xs text-amber-300">Settlement waiting: {rec.settlementHealth.failures.map(f=>`${f.ticker}: ${f.reason}`).join(' · ')}. Pending records are retained.</div>}
       <details className="tara-v145-disclosure" open><summary>Strike ladder, all open picks, record &amp; export</summary><div className="tara-v145-hourly-details">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] uppercase tracking-wider text-zinc-400">Hourly ladder <span className="text-zinc-600">KXBTCD</span></div>
@@ -30481,14 +30211,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
                   <span className="text-[11px] text-[#EDEDED]/45">{p.wins}–{p.losses} settled · {p.open} open</span>
                 </div>
                 <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]" style={T2_MONO_STYLE}>
-                  <span>win rate <b className="text-white">{Math.round(p.win_rate*100)}%</b></span>
-                  <span className="text-[#EDEDED]/55">breakeven {Math.round(p.breakeven*100)}%</span>
-                  <span style={{color:p.edge>0?SPORTS_GREEN:SPORTS_RED}}>
-                    edge {p.edge>0?'+':''}{Math.round(p.edge*100)}%
-                  </span>
-                  <span style={{color:p.units>=0?SPORTS_GREEN:SPORTS_RED}}>
-                    {p.units>=0?'+':''}{p.units.toFixed(2)}u
-                  </span>
+                  <PaperPerformanceSummary stats={p} label="Totals · price-matched sample"/>
                 </div>
                 <div className="text-[11px] text-[#EDEDED]/40 mt-1.5 leading-relaxed">
                   Not counted in the record above. This exists to test whether the
@@ -30499,6 +30222,8 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
               </div>
             );
           })()}
+
+          {data.open_lane&&<div className="rounded-xl border border-[#24242E] bg-[#111] p-3 mb-3"><PaperPerformanceSummary stats={data.open_lane} label="Unfiltered PAPER · separate experimental record"/></div>}
 
           {data.edge_lab&&(()=>{
             const e=data.edge_lab;
@@ -35369,7 +35094,8 @@ function TaraApp(){
   //   the persisted realized-P&L block were ALL dead, silently, for their whole
   //   lifetime. Read through readOrderState rather than these keys; it accepts both
   //   the real names and the legacy ones. If you add a field here, add a writer.
-  const[autoOrderState,setAutoOrderState]=useState(null);
+  const[autoOrderState,setAutoOrderState]=useState(()=>readExecutionState(localStorage));
+  useEffect(()=>{try{writeExecutionState(localStorage,autoOrderState);}catch{console.warn('[execution] durable state unavailable; new entry will fail closed');}},[autoOrderState]);
   const autoOrderStateRef=useRef(autoOrderState);
   useEffect(()=>{autoOrderStateRef.current=autoOrderState;},[autoOrderState]);
   const[exchangeAudit,setExchangeAudit]=useState({status:'idle',at:0,audit:null,errors:[]});
@@ -35382,33 +35108,26 @@ function TaraApp(){
     setExchangeAudit(prev=>({...prev,status:'loading',errors:[]}));
     // Read-only, on demand, never synced to the public Call store. A cursor
     // limit or a failed endpoint produces a partial audit, never fake profit.
-    const fetchPages=async(base,key)=>{
-      const items=[];let cursor=null;
-      for(let page=0;page<10;page++){
-        const path=`${base}?limit=1000${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`;
-        const response=await kalshiAuthedFetch({apiKeyId:creds.apiKeyId,
-          privateKeyPem:creds.privateKeyPem,method:'GET',path,timeoutMs:12000});
-        if(!response.ok||!Array.isArray(response.data?.[key]))
-          return{ok:false,items,error:`${base}: ${response.reason||response.status||'invalid response'}`};
-        items.push(...response.data[key]);
-        cursor=response.data.cursor||null;
-        if(!cursor)return{ok:true,items};
-      }
-      return{ok:false,items,error:`${base}: pagination limit reached`};
-    };
+    const fetchPages=(base,key)=>fetchAllExecutionPages(path=>kalshiAuthedFetch({apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,method:'GET',path,timeoutMs:12000}),base,key);
     try{
-      const [orders,fills,historicalFills,settlements]=await Promise.all([
+      const [orders,fills,historicalFills,settlements,historicalOrders,positions,balance]=await Promise.all([
         fetchPages('/portfolio/orders','orders'),
         fetchPages('/portfolio/fills','fills'),
         fetchPages('/historical/fills','fills'),
         fetchPages('/portfolio/settlements','settlements'),
+        fetchPages('/historical/orders','orders'),
+        fetchPages('/portfolio/positions?count_filter=position','market_positions'),
+        kalshiAuthedFetch({apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,method:'GET',path:'/portfolio/balance',timeoutMs:12000}),
       ]);
       const allFills=[...fills.items,...historicalFills.items];
-      const audit=buildExchangeAudit({orders:orders.items,fills:allFills,
+      const allOrders=[...orders.items,...historicalOrders.items];
+      const audit=buildExchangeAudit({orders:allOrders,fills:allFills,
         settlements:settlements.items,
         complete:{orders:orders.ok,fills:fills.ok,historicalFills:historicalFills.ok,settlements:settlements.ok},
         localEvents:_autoExecLogGet()});
-      const errors=[orders,fills,historicalFills,settlements].filter(r=>!r.ok).map(r=>r.error);
+      audit.risk=accountRiskSnapshot({orders:allOrders,fills:allFills,positions:positions.items,balance:balance.data,
+        complete:{orders:orders.ok,historicalOrders:historicalOrders.ok,fills:fills.ok,historicalFills:historicalFills.ok,settlements:settlements.ok,positions:positions.ok,balance:balance.ok}});
+      const errors=[orders,fills,historicalFills,settlements,historicalOrders,positions,balance].filter(r=>!r.ok).map(r=>r.error||r.reason||'Account endpoint unavailable');
       setExchangeAudit({status:errors.length?'partial':'ready',at:Date.now(),audit,errors});
     }catch(error){
       setExchangeAudit({status:'unavailable',at:Date.now(),audit:null,
@@ -41774,7 +41493,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       // Closed early (trailing stop / take-profit / cut-loss / time
                       //   exit) -- the real exit fill, not settlement math.
                       _realized=_ledger.realizedPnLDollars;
-                    } else if(_ledger.stakeDollars!=null&&_ledger.filledCount!=null){
+                    } else if(_ledger.exitedAt==null&&_ledger.stakeDollars!=null&&_ledger.filledCount!=null&&_ledger.filledFeesCents!=null){
                       // Held to natural settlement -- standard win/lose-max-payout
                       //   math on the REAL stake/count this window actually filled.
                       // V13.4.316: _resolvedResult reflects whether TARA'S SETTLED
@@ -41795,7 +41514,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       const _ledgerWon=(_ledger.dir==='UP'||_ledger.dir==='DOWN')&&(_outcomeDir==='UP'||_outcomeDir==='DOWN')
                         ?(_ledger.dir===_outcomeDir)
                         :(_resolvedResult==='WIN');
-                      _realized=_ledgerWon?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
+                      _realized=(_ledgerWon?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars)-_ledger.filledFeesCents/100;
                     }
                     return{
                       autoExec:true,realizedPnLDollars:_realized,
@@ -44891,7 +44610,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   between fill and settlement loses that window's entry here, which the
   //   settlement effect treats as an honest gap (mission.bankrollDataGaps),
   //   never a silently wrong number.
-  const _execSettlementLedgerRef=useRef({});
+  const _execSettlementLedgerRef=useRef(restoreExecutionLedger(localStorage));
+  const _executionControlRef=useRef(null);
+  _executionControlRef.current={enabled:autoExecSettings?.enabled,kill:killSwitchEngaged,windowId:computeWindowId(windowType)};
 
   // Stake, always clamped to the per-trade cap. 'percent' has no balance in
   // scope here, so it falls back to the cap rather than guessing large.
@@ -44945,12 +44666,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         return blocked('loss-streak-cooldown:'+_lossCooldownRef.current.windowsRemaining+'-windows-left');
       }
     }catch(_){}
-    // V13.4.251: there is NO daily-loss, trades-per-day or loss-streak check
-    //   here, and none anywhere else either -- maxDailyLoss,
-    //   maxAutoTradesPerDay and autoExecCooldownUntil are never compared
-    //   against anything in this file. The settings UI for them is live and
-    //   looks authoritative, which makes this worse rather than better. If
-    //   those rails are ever wanted back they must be WRITTEN, not re-enabled.
+    // Risk caps are checked against the durable execution budget below.
+    // Live entry still fails closed before any authenticated write.
     // Dry run never reaches the network — kalshiPlaceOrder and friends return
     // synthetic orders — so requiring credentials to simulate would block the
     // exact rehearsal this mode exists for. Live runs still demand them.
@@ -44961,6 +44678,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // still be exited and reconciled, but no new real orders can be sent while
     // account-wide loss/exposure limits and fill attribution remain unverified.
     if(!_entryMode.ok)return blocked(_entryMode.reason);
+    const _entryWindow=computeWindowId(windowType);
+    const _entryClose=windowCloseMs(_entryWindow);
+    if(!Number.isFinite(_entryClose)||(_entryClose-Date.now())/1000<=callLockDeadline(windowType))return blocked('execution-cutoff');
     const creds=kalshiCreds||{};
     if(!dryRun&&(!creds.apiKeyId||!creds.privateKeyPem))return blocked('no-credentials');
 
@@ -45041,6 +44761,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const stake=_resolveStakeDollars(s,costCents);
     if(!(stake>0))return blocked('no-stake',{dir,ticker});
 
+    let intentId;
+    try{intentId=await executionIntentId({account:dryRun?'simulation':creds.apiKeyId,asset:'BTC',windowId:_entryWindow});}
+    catch{return blocked('execution-journal-unavailable',{dir,ticker});}
+    const reservation=await reserveExecutionIntent({storage:localStorage,id:intentId,windowId:_entryWindow,stake,dryRun,
+      now:Date.now(),settings:{...s,cooldownUntil:autoExecCooldownUntil},
+      withLock:typeof navigator!=='undefined'&&navigator.locks?(name,fn)=>navigator.locks.request('tara-execution:'+name,fn):null,
+      accountRisk:exchangeAudit.audit?.risk?{...exchangeAudit.audit.risk,windowTrades:exchangeAudit.audit.risk.tradesByTicker?.[ticker]||0}:null});
+    if(!reservation.ok)return blocked(reservation.reason,{dir,ticker});
+
     _entryFiredForRef.current=lockKey;
     _entryBusyRef.current=true;
     // V13.4.290 (ORD-4): the partial-fill explainer's own gate
@@ -45051,7 +44780,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   how many whole contracts this stake buys at the quoted per-contract cost. The
     //   ladder may fill at slightly different rungs as it works the price, which is
     //   exactly the comparison "requested vs filled" needs to make.
-    const requestedCount=Math.max(1,Math.floor((stake*100)/costCents));
+    const requestedCount=affordableContracts(stake,costCents);
     // V13.4.291: placedAt, fairValueCents, attempts and ladderPath are all read
     //   downstream (the "waiting Ns" line, the 15s stale-limit estimate, and the
     //   trade log's entryFairValue / entrySlippageBps / entryAttempts /
@@ -45061,7 +44790,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   check never fired. Stamp them here, where the reference price is known and
     //   still fresh: _quoteUsable was asserted three lines up.
     setAutoOrderState({
-      status:'placing',dir,ticker,dryRun,manual:!!manual,
+      status:'placing',dir,ticker,dryRun,intentId,manual:!!manual,
       offerCents:costCents,requestedCount,
       // V13.4.291: the trade log gates its whole auto-exec entry-pricing block on
       //   `_aos.windowId===_capturedWindowId && _aos.asset===_resolveAsset`, and
@@ -45085,8 +44814,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const res=await kalshiRunEntryLadder({
         apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,
         ticker,dir,betDollars:stake,offerCents:costCents,
-        settings:s,dryRun,
+        settings:s,dryRun,clientOrderId:intentId,
         shouldAbort:()=>{
+          const controls=_executionControlRef.current;
+          if(!controls?.enabled||controls.kill||controls.windowId!==_entryWindow||(_entryClose-Date.now())/1000<=callLockDeadline(windowType))return true;
+          if(!inspectDecisionQuote(_kalshiQuote,{windowId:_entryWindow,ticker,asset:'BTC',now:Date.now()}).ok)return true;
           // V13.4.316: abort against whichever signal this entry is actually
           //   trading on -- aborting on the engine lock changing while trading
           //   off Tara's settled call (or vice versa) would cancel a perfectly
@@ -45113,10 +44845,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           ladderPath:[...(Array.isArray(prev&&prev.ladderPath)?prev.ladderPath:[]),
             {step:rung.step,cents:rung.priceCents,tookSpread:!!rung.takesSpread}].slice(-10),
         })),
-        onPlaced:({orderId,clientOrderId,rung})=>_autoExecLogPush({type:'placed',asset:'BTC',
+        onPlaced:({orderId,clientOrderId,rung})=>{updateExecutionIntent(localStorage,intentId,{status:'placed',orderId});_autoExecLogPush({type:'placed',asset:'BTC',
           windowId:lock.windowId,dir,ticker,dryRun,manual:!!manual,
           orderId:orderId||null,clientOrderId:clientOrderId||null,
-          limitCents:rung.priceCents,requestedCount}),
+          limitCents:rung.priceCents,requestedCount});},
       });
       if(!res.ok){
         // V13.4.322: kalshiRunEntryLadder now returns a distinct reason when
@@ -45152,7 +44884,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   have actually filled and a retry would risk a real double-fill.
         //   This mirrors the order-in-flight gate's own existing distinction
         //   exactly; it was just never applied here too.
-        if(!_statusUnknown)_entryFiredForRef.current=null;
+        // The intent survives errors/reloads. Never send a new POST to find
+        // out whether a previous POST filled; the exchange read is authority.
+        updateExecutionIntent(localStorage,intentId,{status:_statusUnknown?'unknown':'no-fill',reason:res.reason,orderId:res.orderId||null});
         setAutoOrderState(prev=>Object.assign({},prev||{},{
           dir,ticker,dryRun,windowId:(lock&&lock.windowId)||null,asset:'BTC',
           status:_statusUnknown?'unknown':'error',
@@ -45185,8 +44919,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
         return res;
       }
-      const filledAt=res.rung?res.rung.priceCents:costCents;
+      const filledAt=res.normalized?.fillPriceCents??null;
       const _execFilledCount=(res.normalized&&res.normalized.filledCount)||Number(res.order&&res.order.count)||0;
+      updateExecutionIntent(localStorage,intentId,{status:'filled',filled:true,dir,ticker,orderId:res.order?.order_id,filledCount:_execFilledCount,filledAtCents:filledAt,filledFeesCents:res.normalized?.feeCents??null});
       _autoExecLogPush({type:'filled',asset:'BTC',windowId:lock.windowId,dir,ticker,
         dryRun,manual:!!manual,orderId:res.order?.order_id||null,
         clientOrderId:res.order?.client_order_id||null,
@@ -45207,13 +44942,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   call) -- restating them costs nothing and makes every write in
       //   this function self-sufficient regardless of what `prev` holds.
       setAutoOrderState(prev=>Object.assign({},prev||{},{
-        dir,ticker,status:'filled',dryRun,windowId:(lock&&lock.windowId)||null,asset:'BTC',order:res.order,
+        dir,ticker,status:'filled',dryRun,intentId,windowId:(lock&&lock.windowId)||null,asset:'BTC',order:res.order,filledFeesCents:res.normalized?.feeCents??null,
         filledCount:_execFilledCount,
         filledAtCents:filledAt,
         tookSpread:!!(res.rung&&res.rung.takesSpread),
         // Realised saving versus crossing — the number V13.4.228 says decides
         // whether arming this was worth doing at all.
-        savedVsTakeCents:costCents-filledAt,
+        savedVsTakeCents:filledAt==null?null:costCents-filledAt,
         // V13.4.291: raw YES mid at the moment of the fill. Stored raw (not
         //   our-side) to match kalshiAtLock, the field it is meant to be compared
         //   against; fairValueCents above is the our-side figure that pairs with
@@ -45232,8 +44967,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           filled:true, // V13.4.346: explicit, so the reader below can tell this
                        //   apart from a failed-attempt-only record (filled:false)
           attempts:_priorAttempts+1, // carries forward any earlier no-fill retries
-          dir,filledCount:_execFilledCount,filledAtCents:filledAt,
-          stakeDollars:(filledAt*_execFilledCount)/100,
+          dir,filledCount:_execFilledCount,filledAtCents:filledAt,filledFeesCents:res.normalized?.feeCents??null,
+          stakeDollars:filledAt==null?null:(filledAt*_execFilledCount)/100,
           dryRun,enteredAt:Date.now(),
           // V13.4.316: which signal this entry actually traded on, plus what
           //   BOTH signals said at the moment of entry -- so a future pass can
@@ -45259,7 +44994,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }finally{
       _entryBusyRef.current=false;
     }
-  },[autoExecSettings,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,taraCallSnapshotRef,windowType,_resolveStakeDollars]);
+  },[autoExecSettings,autoExecCooldownUntil,exchangeAudit,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,taraCallSnapshotRef,windowType,_resolveStakeDollars]);
 
   // V9.17.18: MANUAL PLACE-ORDER on Tara's call. Tara's snapshot paths commit
   //   without writing lockedCallRef, so the automatic path can sit out; this
@@ -45355,9 +45090,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const dryRun=st.dryRun!==false;
     const creds=kalshiCreds||{};
     if(!dryRun&&(!creds.apiKeyId||!creds.privateKeyPem))return{ok:false,reason:'no-credentials'};
-    const count=Math.max(1,Math.floor(Number(st.filledCount)||0));
+    const count=Number(st.filledCount);
+    if(!Number.isInteger(count))return{ok:false,reason:'invalid-position-count'};
     if(!(count>0))return{ok:false,reason:'no-count'};
-    const limitCents=_exitYesLimitCents(dir);
+    const limitCents=_exitYesLimitCents(dir,30000,st.ticker);
     if(limitCents==null)return{ok:false,reason:'no-usable-quote'};
 
     const key=String(st.at||0);
@@ -45374,7 +45110,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const res=await kalshiExitPosition({
         apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,
         ticker:st.ticker,side:dir==='UP'?'yes':'no',
-        count,limitCents,dryRun,
+        count,limitCents,dryRun,positionId:st.intentId||st.order?.order_id||st.orderId,
       });
       if(!res.ok){
         // Leave the ref set so a failed exit does not retry in a tight loop;
@@ -45404,12 +45140,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       let _exitOrderObj=res.order;
       let _exitNorm=kalshiNormalizeOrder(_exitOrderObj);
       const _exitOrderId=_exitOrderObj?.order_id;
-      for(let _i=0;_i<3&&_exitNorm.status!=='filled';_i++){
+      for(let _i=0;_i<3&&(_exitNorm.status!=='filled'||!_exitNorm.countKnown||_exitNorm.filledCount!==count);_i++){
         await new Promise(r=>setTimeout(r,1000));
         const _look=await kalshiGetOrder({apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,orderId:_exitOrderId,dryRun});
         if(_look.ok){_exitOrderObj=_look.order;_exitNorm=kalshiNormalizeOrder(_look.order);}
       }
-      if(_exitNorm.status!=='filled'){
+      if(_exitNorm.status!=='filled'||!_exitNorm.countKnown||_exitNorm.filledCount!==count){
         // Could not confirm the exit actually closed the position. Leave the
         //   resting exit order alone -- it is still the one thing trying to
         //   get this position closed; canceling it here would remove that
@@ -45427,7 +45163,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         return{ok:false,reason:'exit-unconfirmed-verify-kalshi-directly',order:_exitOrderObj,orderId:_exitOrderId};
       }
       res.order=_exitOrderObj;
-      const exitVal=_exitValueCents(dir);
+      let _verifiedExit=dryRun?_exitNorm:null;
+      if(!dryRun)try{
+        const fills=await fetchAllExecutionPages(path=>kalshiAuthedFetch({apiKeyId:creds.apiKeyId,privateKeyPem:creds.privateKeyPem,method:'GET',path}),'/portfolio/fills?order_id='+encodeURIComponent(_exitOrderId),'fills');
+        if(fills.ok)_verifiedExit=summarizeOrderFills(fills.items,{ticker:st.ticker,orderId:_exitOrderId,side:dir==='UP'?'yes':'no',action:'sell',count});
+      }catch{/* Confirmed closure survives a cost-history outage; P&L stays unknown. */}
+      const exitVal=_verifiedExit?.fillPriceCents??null;
       // Realised move per contract against the entry fill, so a session can
       // be judged on what it actually got rather than on the signal. Uses
       // st.filledAtCents (captured at the top of this function) rather than
@@ -45440,13 +45181,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   priced the entry at $0.00 instead of reporting P&L as unknown,
       //   fabricating a wildly wrong profit number. Caught by this session's
       //   own verification test before it ever shipped.
-      const _execPnlPerContract=(exitVal!=null&&st.filledAtCents!=null&&Number.isFinite(Number(st.filledAtCents)))
-        ?(exitVal-Number(st.filledAtCents)):null;
+      const _execPnlPerContract=(exitVal!=null&&st.filledAtCents!=null&&Number.isFinite(Number(st.filledAtCents))&&st.filledFeesCents!=null&&_verifiedExit?.feeCents!=null)
+        ?(exitVal-Number(st.filledAtCents)-(st.filledFeesCents+_verifiedExit.feeCents)/count):null;
+      if(st.intentId)try{updateExecutionIntent(localStorage,st.intentId,{status:'exited',exitedAt:Date.now(),exitAtCents:exitVal,pnlCentsPerContract:_execPnlPerContract,realizedPnLDollars:_execPnlPerContract==null?null:_execPnlPerContract*count/100});}catch{}
        setAutoOrderState(prev=>Object.assign({},prev||{},{
          dir,ticker:st.ticker,dryRun,windowId:st.windowId||null,asset:st.asset||'BTC',
          filledCount:st.filledCount,filledAtCents:st.filledAtCents,
          status:'exited',exitReason:why,exitOrder:res.order,
-        exitAtCents:limitCents,
+         exitAtCents:exitVal,
         pnlCentsPerContract:_execPnlPerContract,
         at:Date.now(),
       }));
@@ -45536,7 +45278,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           // Closed early (trailing stop / take-profit / cut-loss / time
           //   exit) -- the real exit fill, not settlement math.
           _delta=_ledger.realizedPnLDollars;
-        }else if(_ledger&&_ledger.stakeDollars!=null&&_ledger.filledCount!=null){
+        }else if(_ledger&&_ledger.exitedAt==null&&_ledger.stakeDollars!=null&&_ledger.filledCount!=null&&_ledger.filledFeesCents!=null){
           // Held to natural settlement -- standard win/lose-max-payout math,
           //   on the REAL stake/count this window actually filled at (never
           //   the settings-based betAmt/maxPay fields, which are dead --
@@ -45553,7 +45295,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _ledgerWon=(_ledger.dir==='UP'||_ledger.dir==='DOWN')&&(e.outcomeDir==='UP'||e.outcomeDir==='DOWN')
             ?(_ledger.dir===e.outcomeDir)
             :(e.result==='WIN');
-          _delta=_ledgerWon?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars;
+          _delta=(_ledgerWon?(_maxPayout-_ledger.stakeDollars):-_ledger.stakeDollars)-_ledger.filledFeesCents/100;
         }else{
           // No ledger entry -- manual trade, a trade from before this
           //   version, or a reload between fill and settlement (the ledger
@@ -45596,7 +45338,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
     const check=()=>{
       if(stopped||_exitBusyRef.current)return;
-      const value=_exitValueCents(dir);
+      const value=_exitValueCents(dir,30000,st.ticker);
       if(value==null)return;                  // stale quote: hold, do not guess
 
       const secsLeft=(Number(timeState&&timeState.minsRemaining)||0)*60
@@ -52173,7 +51915,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.5</small>
+              <small>DECISION ENGINE · V14.7.6</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

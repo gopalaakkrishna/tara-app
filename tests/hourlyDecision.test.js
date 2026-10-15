@@ -119,6 +119,21 @@ test('a failed shared-record check cannot show or alert a phantom lock',async()=
   assert.equal(host.output.status.code,'record-read');
 });
 
+test('two independent actual panels race fresh confirmations through one shared CAS record',async()=>{
+  const sharedAdmission={row:null,revision:0},i=input();
+  const a=hourlyHarness({lad:i.lad,now:i.now,props:props(i),sharedAdmission});
+  const b=hourlyHarness({lad:i.lad,now:i.now,props:props(i),sharedAdmission});
+  for(const elapsed of [0,20000,40000]){
+    const next=input('UP',start+elapsed);
+    for(const host of [a,b]){host.setTime(next.now);host.setLadder(next.lad);host.render(props(next));}
+    await Promise.all([a.flush(),b.flush()]);
+  }
+  assert.equal(a.alerts.length+b.alerts.length,1);
+  assert.equal(sharedAdmission.row.data.pending.length,1);
+  assert.equal(a.record.pending.length+b.record.pending.length,1);
+  a.unmount();b.unmount();
+});
+
 test('the actual commit path rechecks a direction change and the hourly time boundary after an awaited record read',async()=>{
   for(const changed of ['direction','closed']){
     let resolve,reads=0,i=input();const host=hourlyHarness({lad:i.lad,now:i.now,props:props(i),readCloud:()=>++reads===1?Promise.resolve(null):new Promise(r=>resolve=r)});

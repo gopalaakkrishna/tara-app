@@ -4,8 +4,10 @@ import {app,compile} from './callDecisionHarness.js';
 import * as hourly from '../../src/hourlyDecision.js';
 import {normalizeHourlyRecord} from '../../src/hourlyRecordMath.js';
 import {capturePickLearning,capturePickSettlement} from '../../src/learningCapture.js';
+import {commitHourlyAdmission} from '../../src/hourlyAdmission.js';
 const traverse=traverseModule.default||traverseModule,ast=parse(app,{sourceType:'module',plugins:['jsx']});
 const declarations=new Map();
+const sharedAdmissions=new WeakMap();
 traverse(ast,{
   FunctionDeclaration(p){declarations.set(p.node.id.name,app.slice(p.node.start,p.node.end));},
   VariableDeclarator(p){if(p.node.id.type==='Identifier')declarations.set(p.node.id.name,'const '+app.slice(p.node.start,p.node.end)+';');},
@@ -15,7 +17,7 @@ export function actualHourlyModel(){const scope={};for(const name of ['TARA_HOUR
 
 // Minimal deterministic hook host runs the production component's effects and
 // record hook. Timers, storage, clock and remote services are isolated doubles.
-export function hourlyHarness({lad,now,props={},record={w:0,l:0,pending:[],history:[]},readCloud=async()=>null,model=actualHourlyModel(),realLadder=false,race,sharedStorage,fetchMock}={}) {
+export function hourlyHarness({lad={},now,props={},record={w:0,l:0,pending:[],history:[]},readCloud=async()=>null,model=actualHourlyModel(),realLadder=false,race,sharedStorage,fetchMock,sharedAdmission}={}) {
   let clock=now,cursor=0,dirty=false,latestProps=props,output,active=true;
   const hooks=[],effects=[],intervals=[],alerts=[],writes=[],storage=sharedStorage||new Map([['taraHourlyRecord_v1',JSON.stringify(record)]]);
   const React={
@@ -25,15 +27,22 @@ export function hourlyHarness({lad,now,props={},record={w:0,l:0,pending:[],histo
     useEffect(fn,deps){const i=cursor++,old=hooks[i];if(!old||!deps||deps.some((v,j)=>v!==old.deps?.[j])){effects.push(()=>{old?.cleanup?.();const cleanup=fn();hooks[i]={deps,cleanup};});}},
   };
   const FakeDate=class extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-  const scope={...hourly,normalizeHourlyRecord,capturePickLearning,capturePickSettlement,React,Date:FakeDate,encodeURIComponent,console:{info(){},warn(){}},
+  if(sharedStorage&&!sharedAdmissions.has(sharedStorage))sharedAdmissions.set(sharedStorage,{row:null,revision:0});
+  const admission=sharedAdmission||(sharedStorage?sharedAdmissions.get(sharedStorage):null)||{row:null,revision:0};
+  const scope={...hourly,normalizeHourlyRecord,capturePickLearning,capturePickSettlement,commitHourlyAdmission,React,Date:FakeDate,encodeURIComponent,console:{info(){},warn(){}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,v)=>storage.set(key,v)},
     _HR_KEY:'taraHourlyRecord_v1',_HR_HISTORY_CAP:500,_HR_PENDING_CAP:40,_HR_CLOUD_PATH:'memory/hourlyRecord',_hrIntervalActive:false,
     cloudSupabaseRead:(...args)=>readCloud(...args),cloudWriteDebounced:(...args)=>writes.push(structuredClone(args)),
     cloudWriteDebouncedRMW:(path,getData,merge,delay)=>writes.push([path,structuredClone(getData()),delay]),
     setInterval:(fn,ms)=>{const t={fn,ms};intervals.push(t);return t;},clearInterval(){},
     fetch:fetchMock|| (async()=>{throw new Error('Unexpected network fetch');}),TARA_BUILD_VERSION:'14.4.10-test',taraHourlyProb:model,
-    _K_PUB:'https://test.invalid',_kLadRace:race,
+    _K_PUB:'https://test.invalid',_kLadRace:race|| (async(urls,validate)=>{for(const url of urls){try{const r=await scope.fetch(url);if(r.ok){const data=await r.json();if(!validate||validate(data))return {ok:true,data};}}catch{}}return {ok:false,reason:'all paths failed'};}),
   };
+  scope._hrAdmissionTransport=()=>({
+    read:async()=>{const remote=await readCloud();return remote||admission.row?{data:scope._hrMerge(admission.row?.data||{},remote||{}),updated_at:String(admission.revision)}:null;},
+    compareAndSwap:async(row,data)=>{if(String(admission.revision)!==row.updated_at)return false;admission.row={data:structuredClone(data)};admission.revision++;writes.push(['memory/hourlyRecord',structuredClone(data),0]);return true;},
+    insert:async data=>{if(admission.row)return false;admission.row={data:structuredClone(data)};admission.revision++;writes.push(['memory/hourlyRecord',structuredClone(data),0]);return true;},
+  });
   for(const name of ['_hrLoad','_hrMerge','_hrSave','useHourlyRecord'])scope[name]=actual(name,scope);
   scope.useHourlyLadder=realLadder?actual('useHourlyLadder',scope):()=>lad;
   const component=actual('useHourlyEngine',scope);

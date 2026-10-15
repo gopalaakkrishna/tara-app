@@ -95,3 +95,15 @@ export function HourlyApprovalSummary({locks,candidate,status,samples,required})
     <RecordInspector entry={inspected} onClose={()=>setInspected(null)} title="Hourly approval"/>
   </div>;
 }
+
+export function PaperPerformanceSummary({stats,label='Paper performance'}){
+  const priced=Number.isInteger(stats?.priced_n)&&stats.priced_n>=0;
+  const pct=v=>typeof v==='number'&&Number.isFinite(v)?(100*v).toFixed(1)+'%':'unavailable';
+  const units=typeof stats?.units==='number'&&Number.isFinite(stats.units)?stats.units.toFixed(2)+'u':'unavailable';
+  return <section aria-label={label} data-testid="paper-price-matched" className="text-xs leading-relaxed">
+    <h4>{label}</h4><p>All binary outcomes: {stats?.wins??0}W · {stats?.losses??0}L. Separate paper lane; not actual account profit.</p>
+    {priced?<><p>Priced sample: {stats.priced_n} · Unpriced: {stats.unpriced_n??0} · Priced wins: {stats.priced_wins??0}.</p>
+      <p>Priced win rate {pct(stats.priced_win_rate)} · Estimated break-even {pct(stats.breakeven)} · Price-matched edge {pct(stats.edge)} · Estimated return {units}.</p></>:<p>Price-matched report unavailable in this cached snapshot. No executable edge is claimed.</p>}
+    <p>Original captured prices and estimated fees; flat one-contract calculation. Scalar/cancelled records excluded. Missing prices are not reconstructed.</p>
+  </section>;
+}

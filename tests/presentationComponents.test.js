@@ -11,8 +11,17 @@ import {finiteNumber} from '../src/callIntegrity.js';
 const source=fs.readFileSync(new URL('../src/TaraPresentation.jsx',import.meta.url),'utf8')
   .replace(/^import .*;\r?$/gm,'').replace(/export (const|function) /g,'$1 ');
 const compiled=transformSync(source,{loader:'jsx',format:'cjs'}).code;
-const {TaraStorageStatus,TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope}=new Function('React','capturedReason','recordVersion','evidenceCohort','finiteNumber',`${compiled};return {TaraStorageStatus,TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope};`)(React,capturedReason,recordVersion,evidenceCohort,finiteNumber);
+const {PaperPerformanceSummary,TaraStorageStatus,TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope}=new Function('React','capturedReason','recordVersion','evidenceCohort','finiteNumber',`${compiled};return {PaperPerformanceSummary,TaraStorageStatus,TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope};`)(React,capturedReason,recordVersion,evidenceCohort,finiteNumber);
 const render=(C,props)=>renderToStaticMarkup(React.createElement(C,props));
+
+test('Sports price-matched report labels its sample and missing prices without claiming actual profits',()=>{
+  const html=render(PaperPerformanceSummary,{stats:{wins:849,losses:954,priced_n:1485,unpriced_n:318,priced_wins:662,priced_win_rate:662/1485,breakeven:.516,edge:-.07075,units:-105.0681}});
+  assert.match(html,/Priced sample: 1485/);assert.match(html,/Unpriced: 318/);
+  assert.match(html,/-7.1%/);assert.match(html,/-105.07u/);assert.match(html,/not actual account profit/);
+  const old=render(PaperPerformanceSummary,{stats:{edge:.2}});assert.match(old,/unavailable/);assert.doesNotMatch(old,/20.0%/);
+  const missing=render(PaperPerformanceSummary,{stats:{priced_n:0,unpriced_n:4}});
+  assert.match(missing,/Estimated return unavailable/);assert.doesNotMatch(missing,/0.00u/);
+});
 test('forming Brain never claims a captured Call or converts missing evidence to confidence',()=>{
   const html=render(TaraBrainSummary,{lock:{committed:false},candidate:{blockedDecision:{reason:'Waiting for fresh quote'}}});
   assert.match(html,/Current candidate/);assert.match(html,/Waiting for fresh quote/);assert.match(html,/Not captured/);assert.doesNotMatch(html,/Original decision captured|50\.0/);
