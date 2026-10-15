@@ -8,7 +8,7 @@ import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import {HOURLY_POLL_MS,readHourlyPolicy,normalizeHourlyMarkets,assessHourlyPick,advanceHourlyConfirmation,
   hourlyProposal,revalidateHourlyProposal,hourlyRecordGuard,inspectHourlySettlement} from './hourlyDecision.js';
-import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
+import {loadSportsBoard,sportsSettlementStatus,sportsFreshnessStatus} from './sportsData.js';
 import {gradeWeatherPick,mergeWeatherRecords} from './weatherRecord.js';
 import {primaryShadowView} from './primaryShadow.js';
 import {persistCallCaches,updateIndexedRecord,mergeDurableCallArchive} from './callStorage.js';
@@ -5908,8 +5908,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.15-v14.7.3-site-integrity';
-const TARA_VERSION_DISPLAY='TARA 14.7.3';
+const TARA_BUILD_VERSION='2026.10.15-v14.7.4-sports-refresh';
+const TARA_VERSION_DISPLAY='TARA 14.7.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30249,6 +30249,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
 
   const rec=data&&data.record;
   const settlementStatus=sportsSettlementStatus(data,nowMs);
+  const freshnessWarning=data?sportsFreshnessStatus(data,nowMs).warning:null;
   // V13.4.258: was a raised card with a shadow and a corner stamp per tile.
   //   Now a hairline cell inside one joined panel -- the tiles read as one
   //   instrument rather than four competing boxes.
@@ -30287,6 +30288,7 @@ const src=tab==='record'?data.settled:(data.board||data.upcoming);
 
         {err&&<div role="alert" className="rounded-xl border p-4 text-[12px] mb-5" style={{borderColor:'rgba(232,69,94,0.3)',background:'rgba(232,69,94,0.06)',color:SPORTS_RED}}>Sports results are unavailable ({err}). Use Refresh results to retry.</div>}
         {sourceWarning&&<div role="status" className="rounded-xl border p-3 text-[12px] mb-3" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER}}>{sourceWarning}</div>}
+        {freshnessWarning&&<div role="status" data-testid="sports-freshness-warning" className="rounded-xl border p-3 text-[12px] mb-3" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER}}>{freshnessWarning}</div>}
         {!data&&!err&&<div className="text-[#EDEDED]/40 text-sm">Loading…</div>}
 
         {data&&(<div className="sports-data-stack">
@@ -52165,7 +52167,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.3</small>
+              <small>DECISION ENGINE · V14.7.4</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

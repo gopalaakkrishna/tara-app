@@ -1,4 +1,5 @@
 export const SPORTS_LIVE_URL = 'https://raw.githubusercontent.com/gopalaakkrishna/sports-model/main/public/sports.json';
+export const SPORTS_STALE_MS = 30*60*1000;
 
 function validBoard(data) {
   return data && Number.isFinite(Date.parse(data.generated)) &&
@@ -6,6 +7,18 @@ function validBoard(data) {
 }
 
 const snapshotTime=data=>Math.max(Date.parse(data.generated),Date.parse(data.record_updated)||0);
+
+// A successful HTTP download is not proof the upstream refresh actually ran.
+// Record-only updates must not make old forecasts/quotes look fresh.
+export function sportsFreshnessStatus(data,now=Date.now()) {
+  const generated=Date.parse(data?.generated),age=now-generated;
+  if(!Number.isFinite(generated))return {stale:true,ageMs:null,warning:'Sports source freshness is unavailable.'};
+  if(age < -120000)return {stale:true,ageMs:age,warning:'Sports source timestamp is ahead of the clock; freshness is unverified.'};
+  if(data?.refresh?.status==='degraded')return {stale:true,ageMs:Math.max(0,age),warning:'Sports refresh completed with source errors. Some prices or results may be delayed.'};
+  if(age>SPORTS_STALE_MS)return {stale:true,ageMs:age,
+    warning:`Sports refresh delayed: forecasts and quoted prices are ${Math.floor(age/60000)} minutes old. Refresh results checks the published source; it does not create fresh market quotes.`};
+  return {stale:false,ageMs:Math.max(0,age),warning:null};
+}
 
 export async function loadSportsBoard({previous=null, fetchImpl=fetch, now=Date.now(), timeoutMs=15000}={}) {
   const get=async(url)=>{
@@ -27,7 +40,9 @@ export async function loadSportsBoard({previous=null, fetchImpl=fetch, now=Date.
     if(validBoard(previous))return {data:previous,warning};
     next=await get('/sports.json');
   }
-  if(validBoard(previous)&&snapshotTime(previous)>snapshotTime(next)) {
+  const previousRecord=Date.parse(previous?.record_updated),nextRecord=Date.parse(next?.record_updated||next?.generated);
+  if(validBoard(previous)&&(snapshotTime(previous)>snapshotTime(next)||
+    (Number.isFinite(previousRecord)&&(!Number.isFinite(nextRecord)||previousRecord>nextRecord)))) {
     return {data:previous,warning:'The source returned an older Sports snapshot. Keeping the newer record while updates catch up.'};
   }
   return {data:next,warning};

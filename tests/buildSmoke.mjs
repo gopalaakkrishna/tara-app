@@ -9,6 +9,9 @@ import {pathToFileURL} from 'node:url';
 const {chromium}=await import(process.env.TARA_SMOKE_PLAYWRIGHT?pathToFileURL(process.env.TARA_SMOKE_PLAYWRIGHT).href:'playwright');
 const {version}=JSON.parse(await readFile('package.json','utf8'));
 const root=resolve('dist'),errors=[],blocked=[];
+const sportsFixtures=process.env.TARA_SMOKE_SPORTS==='1';
+let sportsMode='stale';
+const sportsBoard=sportsFixtures?JSON.parse(await readFile('public/sports.json','utf8')):null;
 const server=http.createServer(async(req,res)=>{
   const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
   const path=resolve(root,'.'+(pathname==='/'?'/index.html':pathname));
@@ -24,6 +27,12 @@ try{
   const origin=process.env.TARA_SMOKE_SITE?new URL(process.env.TARA_SMOKE_SITE).origin:`http://127.0.0.1:${server.address().port}`;
   await context.route('**/*',async route=>{
     const request=route.request(),url=new URL(request.url());
+    if(sportsFixtures&&url.hostname==='raw.githubusercontent.com'&&url.pathname==='/gopalaakkrishna/sports-model/main/public/sports.json'){
+      if(sportsMode==='offline')return route.fulfill({status:503,contentType:'application/json',body:'{"error":"isolated Sports outage"}'});
+      const data={...sportsBoard,generated:new Date(Date.now()-(sportsMode==='stale'?90*60000:0)).toISOString(),
+        refresh:{status:sportsMode==='degraded'?'degraded':'ok'}};
+      return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
+    }
     const staticPath=/^\/(assets|fonts)\//.test(url.pathname)||['/','/index.html','/sports.json','/manifest.json'].includes(url.pathname);
     if(url.origin===origin&&request.method()==='GET'&&staticPath)return route.continue();
     blocked.push({host:url.hostname,method:request.method()});
@@ -46,6 +55,23 @@ try{
     assert.deepEqual(duplicates,[],`${name}: duplicate DOM IDs`);
   }
   assert.equal(await page.locator('.tara-v145-hourly-panel').count(),1,'legacy placement cannot create another hourly panel');
+  if(sportsFixtures){
+    await page.getByRole('button',{name:'Sports',exact:true}).first().click();
+    await page.getByTestId('sports-freshness-warning').waitFor();
+    assert.match(await page.getByTestId('sports-freshness-warning').innerText(),/90 minutes old/);
+    sportsMode='fresh';await page.getByRole('button',{name:'Refresh results',exact:true}).click();
+    await page.getByTestId('sports-freshness-warning').waitFor({state:'hidden'});
+    sportsMode='offline';await page.getByRole('button',{name:'Refresh results',exact:true}).click();
+    await page.getByText(/Live Sports refresh failed/).waitFor();
+    assert.ok(await page.getByText('Settled record',{exact:true}).isVisible(),'an outage cannot blank saved results');
+    sportsMode='degraded';await page.getByRole('button',{name:'Refresh results',exact:true}).click();
+    await page.getByTestId('sports-freshness-warning').waitFor();
+    assert.match(await page.getByTestId('sports-freshness-warning').innerText(),/source errors/);
+    sportsMode='fresh';await page.getByRole('button',{name:'Refresh results',exact:true}).click();
+    await page.getByTestId('sports-freshness-warning').waitFor({state:'hidden'});
+    await page.getByText(/Live Sports refresh failed/).waitFor({state:'hidden'});
+    console.log('PASS actual Sports UI: stale HTTP200 -> fresh -> outage with record retained -> degraded -> recovered.');
+  }
   console.log(JSON.stringify({version,desktop:'rendered',visited,errors,blockedRequests:blocked.length}));
   await page.setViewportSize({width:390,height:844});
   await page.getByText(`DECISION ENGINE · V${version}`,{exact:true}).waitFor();

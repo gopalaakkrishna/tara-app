@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadSportsBoard,sportsSettlementStatus} from '../src/sportsData.js';
+import {loadSportsBoard,sportsSettlementStatus,sportsFreshnessStatus,SPORTS_STALE_MS} from '../src/sportsData.js';
 const board=(generated='2026-10-05T20:00:00Z')=>({generated,open:[],settled:[],record:{wins:81,losses:45}});
 const response=data=>({ok:true,json:async()=>data});
 test('Sports loads the live record',async()=>{
@@ -42,4 +42,28 @@ test('stalled settlement is visible even with a fresh generated timestamp',()=>{
   assert.equal(status.pending,2);assert.equal(status.overdue,1);
   assert.equal(status.lastSettled,Date.parse('2026-10-05T19:00:00Z'));
   assert.equal(status.nonBinary.length,1);
+});
+test('HTTP200 and a new record-only timestamp cannot hide delayed forecasts',async()=>{
+  const now=Date.parse('2026-10-15T17:30:00Z');
+  const old={...board('2026-10-15T16:00:00Z'),record_updated:new Date(now).toISOString()};
+  const result=await loadSportsBoard({now,fetchImpl:async()=>response(old)});
+  assert.match(sportsFreshnessStatus(result.data,now).warning,/90 minutes old/);
+  assert.equal(result.data.generated,old.generated);
+});
+test('freshness recovers only on a genuinely fresh board and flags partial pipeline failures',()=>{
+  const now=Date.parse('2026-10-15T17:30:00Z'),data=board(new Date(now).toISOString());
+  assert.equal(sportsFreshnessStatus(data,now+SPORTS_STALE_MS).stale,false);
+  assert.equal(sportsFreshnessStatus(data,now+SPORTS_STALE_MS+1).stale,true);
+  assert.equal(sportsFreshnessStatus(data,now).warning,null);
+  assert.match(sportsFreshnessStatus({...data,refresh:{status:'degraded'}},now).warning,/source errors/);
+  assert.equal(sportsFreshnessStatus(board('invalid'),now).stale,true);
+  assert.equal(sportsFreshnessStatus(board(new Date(now+180000).toISOString()),now).stale,true);
+});
+test('a newer forecast cannot roll the settled record back after a record-only refresh',async()=>{
+  const data={...board('2026-10-15T16:00:00Z'),record_updated:'2026-10-15T17:00:00Z'};
+  const incoming={...board('2026-10-15T17:15:00Z'),record_updated:'2026-10-15T16:30:00Z'};
+  const result=await loadSportsBoard({previous:data,fetchImpl:async()=>response(incoming)});
+  assert.equal(result.data,data);assert.ok(result.warning);
+  const fresh=board('2026-10-15T17:20:00Z');
+  assert.equal((await loadSportsBoard({previous:data,fetchImpl:async()=>response(fresh)})).data,fresh);
 });
