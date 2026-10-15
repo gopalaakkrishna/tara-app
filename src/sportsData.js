@@ -1,6 +1,18 @@
 export const SPORTS_LIVE_URL = 'https://raw.githubusercontent.com/gopalaakkrishna/sports-model/main/public/sports.json';
 export const SPORTS_STALE_MS = 30*60*1000;
 
+export function sportsPaperSettlementStatus(data) {
+  const lanes=['open','totals'].map(key=>data?.paper_settlement?.[key]).filter(Boolean);
+  const count=(x,k)=>Number.isSafeInteger(x?.[k])&&x[k]>=0?x[k]:0;
+  return {available:lanes.length>0,
+    pending:lanes.reduce((n,x)=>n+count(x,'pending'),0),
+    overdue:lanes.reduce((n,x)=>n+count(x,'past_date_pending'),0),
+    nonBinary:lanes.reduce((n,x)=>n+count(x,'non_binary_resolved'),0),
+    cancelled:lanes.reduce((n,x)=>n+count(x,'cancelled_resolved'),0),
+    sourceErrors:lanes.reduce((n,x)=>n+count(x,'source_errors'),0),
+    attention:lanes.flatMap(x=>Array.isArray(x.attention)?x.attention:[]).slice(0,25)};
+}
+
 function validBoard(data) {
   return data && Number.isFinite(Date.parse(data.generated)) &&
     Array.isArray(data.open) && Array.isArray(data.settled);

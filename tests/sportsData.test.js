@@ -1,8 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadSportsBoard,sportsSettlementStatus,sportsFreshnessStatus,SPORTS_STALE_MS} from '../src/sportsData.js';
+import {loadSportsBoard,sportsSettlementStatus,sportsFreshnessStatus,sportsPaperSettlementStatus,SPORTS_STALE_MS} from '../src/sportsData.js';
 const board=(generated='2026-10-05T20:00:00Z')=>({generated,open:[],settled:[],record:{wins:81,losses:45}});
 const response=data=>({ok:true,json:async()=>data});
+
+test('paper health keeps future pending separate from actual overdue and scalar/cancelled from W/L',()=>{
+  const data={...board(),paper_settlement:{open:{pending:559,past_date_pending:3,non_binary_resolved:19,cancelled_resolved:1,attention:[{id:1304,blocker:{code:'postponed',detail:'Rain'}}]},totals:{pending:0}}};
+  const h=sportsPaperSettlementStatus(data);
+  assert.equal(h.pending,559);assert.equal(h.overdue,3);assert.equal(h.nonBinary,19);assert.equal(h.cancelled,1);
+  assert.equal(h.attention[0].blocker.code,'postponed');assert.deepEqual(data.record,{wins:81,losses:45});
+  assert.equal(sportsPaperSettlementStatus(board()).available,false);
+});
+
+test('paper health rejects invalid counters without hiding exact reasons',()=>{
+  const h=sportsPaperSettlementStatus({paper_settlement:{open:{pending:-1,past_date_pending:NaN,non_binary_resolved:Infinity,source_errors:2,attention:'bad'}}});
+  assert.equal(h.pending,0);assert.equal(h.overdue,0);assert.equal(h.nonBinary,0);assert.equal(h.sourceErrors,2);assert.deepEqual(h.attention,[]);
+});
 test('Sports loads the live record',async()=>{
   const data=board();
   assert.deepEqual(await loadSportsBoard({fetchImpl:async()=>response(data)}),{data,warning:null});
