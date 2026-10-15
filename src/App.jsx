@@ -7,7 +7,7 @@ import {capturedReason,recordVersion,presentationRows} from './presentationEvide
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import {HOURLY_POLL_MS,readHourlyPolicy,normalizeHourlyMarkets,assessHourlyPick,advanceHourlyConfirmation,
-  hourlyProposal,revalidateHourlyProposal,hourlyRecordGuard} from './hourlyDecision.js';
+  hourlyProposal,revalidateHourlyProposal,hourlyRecordGuard,inspectHourlySettlement} from './hourlyDecision.js';
 import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
@@ -34,7 +34,8 @@ import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWi
 import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
 import {appendDecisionTrace,captureDecisionTrace} from './callDecisionTrace.js';
 import {sharedWindowId,matchesSharedWindow,restoredSnapshot,ledgerDecision,chooseSharedSnapshot,sharedSnapshotIdentity,restoredEngineLock,
-  readDecisionCache,cacheSharedDecision,publishSharedDecision} from './sharedDecision.js';
+  readDecisionCache,cacheSharedDecision,publishSharedDecision,activeCallSnapshot,finalizeClosedSitouts} from './sharedDecision.js';
+import {journalCapturedCall,recoverCapturedCalls,acknowledgeCapturedCalls} from './callCaptureJournal.js';
 // V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
 //   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
 //   may still be in package.json but is no longer imported or used at runtime.
@@ -906,12 +907,14 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
   if(!_sbClient||!path)return;
   // The large log flush has a bounded wait: fresh evidence updates the pending
   // payload but must not indefinitely restart its existing 60-second timer.
-  if(_sbWriteQueueRMW.has(path)&&path==='memory/taraCallLog'){
-    _sbWritePendingRMW.set(path,{getLocalData,mergeFn});
+  const dueAt=Date.now()+delayMs;
+  if(_sbWriteQueueRMW.has(path)&&['memory/taraCallLog','memory/hourlyRecord'].includes(path)&&
+    (_sbWritePendingRMW.get(path)?.dueAt??dueAt)<=dueAt){
+    _sbWritePendingRMW.set(path,{getLocalData,mergeFn,dueAt:_sbWritePendingRMW.get(path)?.dueAt??dueAt});
     return;
   }
   if(_sbWriteQueueRMW.has(path))clearTimeout(_sbWriteQueueRMW.get(path));
-  _sbWritePendingRMW.set(path,{getLocalData,mergeFn});
+  _sbWritePendingRMW.set(path,{getLocalData,mergeFn,dueAt});
   const tid=setTimeout(async()=>{
     const _pending=_sbWritePendingRMW.get(path);
     const _getLocalData=_pending?.getLocalData||getLocalData;
@@ -931,6 +934,8 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
     }
     // Optimistic RMW with retry. 5 attempts matches Firestore default.
     let _attempts=0;
+    let _completed=false;
+    try{
     while(_attempts<5){
       _attempts++;
       try{
@@ -955,7 +960,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         const _writtenSig=path==='memory/taraCallLog'?callLogSyncSignature(
           Array.isArray(_localData)?_localData:(_localData?.entries||[]),_stripEntryForCloud):null;
         const _merged=_mergeFn(_cloudData,_localData);
-        if(_merged==null)return; // mergeFn signaled "skip write"
+        if(_merged==null){_completed=true;return;} // mergeFn signaled "skip write"
         // Conditional upsert: succeed only if row's updated_at hasn't changed.
         //   For a brand-new row (no _cloudUpdatedAt), this is an INSERT and
         //   has no conflict to check. For an existing row, we use the eq()
@@ -982,6 +987,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
             continue;
           }
           if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
+          _completed=true;
           _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         } else {
@@ -1005,6 +1011,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
             return;
           }
           if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
+          _completed=true;
           _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         }
@@ -1013,6 +1020,10 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         _setCloudStatus({state:'error',lastError:{path,message:e?.message||'RMW threw',at:Date.now()}});
         return;
       }
+    }
+    }finally{
+      if(!_completed&&['memory/taraCallLog','memory/hourlyRecord'].includes(path)&&!_sbWriteQueueRMW.has(path))
+        cloudSupabaseWriteDebouncedRMW(path,_getLocalData,_mergeFn,60000);
     }
   },delayMs);
   _sbWriteQueueRMW.set(path,tid);
@@ -1027,6 +1038,13 @@ const _cloudSupabaseFlushAllRMW=()=>{
     const entry=_sbWritePendingRMW.get(path);
     if(entry){
       try{
+        if(['memory/taraCallLog','memory/hourlyRecord'].includes(path)){
+          // Unload is not permission for a blind overwrite of shared history.
+          // Keep CAS/merge semantics; local capture journals survive if the
+          // browser ends before this best-effort read/write can complete.
+          setTimeout(()=>cloudSupabaseWriteDebouncedRMW(path,entry.getLocalData,entry.mergeFn,0),0);
+          _flushed++;continue;
+        }
         const _localData=entry.getLocalData();
         const _merged=entry.mergeFn(null,_localData);
         if(_merged!=null)cloudSupabaseWrite(path,_merged);
@@ -1598,13 +1616,22 @@ let _lastLocalPersistAt=0; // V13.4.4: throttle gate for the expensive taraCallL
 // V8.1: Track latest pending data per path so we can synchronously flush on tab close.
 //   Map of path → most recent data, separate from the timeout map.
 const _writePending=new Map();
+const _writeLatest=new Map();
 const cloudWriteDebounced=(path,data,delayMs=300)=>{
+  const revision={};_writeLatest.set(path,revision);
+  const previous=_writePending.get(path),dueAt=Date.now()+delayMs;
+  if(_writeQueue.has(path)&&previous?.dueAt<=dueAt){
+    _writePending.set(path,{data,dueAt:previous.dueAt,revision});return;
+  }
   if(_writeQueue.has(path))clearTimeout(_writeQueue.get(path));
-  _writePending.set(path,data);
+  _writePending.set(path,{data,dueAt,revision});
   const tid=setTimeout(()=>{
-    cloudWrite(path,data);
+    const pending=_writePending.get(path),latest=pending?.data,flushedRevision=pending?.revision;
     _writeQueue.delete(path);
     _writePending.delete(path);
+    Promise.resolve(cloudWrite(path,latest)).then(ok=>{
+      if(ok===false&&_writeLatest.get(path)===flushedRevision&&!_writePending.has(path))cloudWriteDebounced(path,latest,10000);
+    }).catch(()=>{if(_writeLatest.get(path)===flushedRevision&&!_writePending.has(path))cloudWriteDebounced(path,latest,10000);});
   },delayMs);
   _writeQueue.set(path,tid);
 };
@@ -1615,7 +1642,7 @@ const cloudFlushAll=()=>{
   let flushed=0;
   for(const[path,tid]of _writeQueue.entries()){
     clearTimeout(tid);
-    const data=_writePending.get(path);
+    const data=_writePending.get(path)?.data;
     if(data!=null){
       // Fire-and-forget — no await. Modern browsers respect the in-flight fetch
       //   on pagehide for a brief grace period. Firestore writes use fetch internally.
@@ -1624,6 +1651,7 @@ const cloudFlushAll=()=>{
   }
   _writeQueue.clear();
   _writePending.clear();
+  _writeLatest.clear();
   return flushed;
 };
 // V8.1: Wire flush to tab visibility change events. Browsers fire pagehide reliably
@@ -1650,7 +1678,7 @@ const _writeQueueRMW=new Map();
 const _writePendingRMW=new Map();
 const cloudWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
   // Mirror into the queue maps so the tab-close flush has visibility.
-  if(_writeQueueRMW.has(path)&&path==='memory/taraCallLog'){
+  if(_writeQueueRMW.has(path)&&['memory/taraCallLog','memory/hourlyRecord'].includes(path)){
     _writePendingRMW.set(path,{getLocalData,mergeFn});
     try{cloudSupabaseWriteDebouncedRMW(path,getLocalData,mergeFn,delayMs);}catch(_){}
     return;
@@ -5876,8 +5904,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.14-v14.7.1-single-decision-authority';
-const TARA_VERSION_DISPLAY='TARA 14.7.1';
+const TARA_BUILD_VERSION='2026.10.15-v14.7.2-window-lifecycle';
+const TARA_VERSION_DISPLAY='TARA 14.7.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16555,17 +16583,23 @@ function useHourlyLadder(activeMins){
            'https://api.elections.kalshi.com/trade-api/v2/'+_evQ],
           (d)=>!!(d&&Array.isArray(d.events)));
         if(!_evRes.ok){if(alive)setState(s=>({...s,err:'events: '+_evRes.reason}));return;}
-        const evs=((_evRes.data&&_evRes.data.events)||[]).map(x=>x.event_ticker).filter(Boolean).sort();
+        const evs=[...new Set(((_evRes.data&&_evRes.data.events)||[]).map(x=>x.event_ticker).filter(x=>x?.startsWith('KXBTCD-')))].sort();
         if(!evs.length){if(alive)setState(s=>({...s,err:'no open KXBTCD event'}));return;}
-        const ev=evs[0];
-        const _mkQ='markets?event_ticker='+encodeURIComponent(ev)+'&limit=1000';
-        const _mkRes=await _kLadRace(
+        // The open-events endpoint can retain an expired event at the hour.
+        // Inspect the bounded event list until a genuinely future market exists.
+        for(const ev of evs){
+          if(!alive)return;
+          const _mkQ='markets?event_ticker='+encodeURIComponent(ev)+'&limit=1000';
+          const _mkRes=await _kLadRace(
           ['/api/kalshi-public/'+_mkQ,
            _K_PUB+'/'+_mkQ,
            'https://api.elections.kalshi.com/trade-api/v2/'+_mkQ],
           (d)=>!!(d&&Array.isArray(d.markets)));
-        if(!_mkRes.ok){if(alive)setState(s=>({...s,err:'markets: '+_mkRes.reason}));return;}
-        if(alive)setState(normalizeHourlyMarkets(_mkRes.data.markets,ev,requestedAt,Date.now(),fees));
+          if(!_mkRes.ok){if(alive)setState(s=>({...s,err:'markets: '+_mkRes.reason}));return;}
+          const normalized=normalizeHourlyMarkets(_mkRes.data.markets,ev,requestedAt,Date.now(),fees);
+          if(normalized.closeMs&&normalized.strikes.length){if(alive)setState(normalized);return;}
+        }
+        if(alive)setState({loading:false,err:'no active future hourly market with usable quotes',event:null,closeMs:null,strikes:[],requestedAt,receivedAt:Date.now()});
       }catch(e){
         // V13.4.205: keep the previous strikes on a transient error. Blanking the
         //   list remains visible for reference. Approval rejects an errored or
@@ -16620,27 +16654,9 @@ const _HR_PENDING_CAP=40;
 //   second, orphaned one impossible regardless of why a remount happened.
 let _hrIntervalActive=false;
 const _hrSave=(r,urgent)=>{
-  // V13.4.175 FIX: this used to be a blind pending.slice(-CAP) -- newest 40 kept,
-  //   oldest silently dropped. settle() retries forever on a failed/void market with
-  //   no upper bound on time, so a permanently-stuck lock (delisted ticker, dead
-  //   settlement endpoint) just sat in `pending` until enough newer locks pushed it
-  //   past the cap -- at which point it vanished with NO history entry ever written.
-  //   Not a win, not a loss: gone from the record entirely.
-  //   Fix: separate "genuinely stuck" (past 6h -- the settlement grace window is 45s,
-  //   so 6h is an enormous margin) from "still legitimately open," log the stuck ones
-  //   loudly instead of losing them silently, and only cap-evict from what's left --
-  //   which under normal load is never more than a handful of truly recent opens.
-  const _staleCutoff=Date.now()-6*3600000;
-  const _stuckPending=r.pending.filter(p=>p&&p.closeMs&&p.closeMs<_staleCutoff);
-  if(_stuckPending.length){
-    try{console.warn('[hourly] '+_stuckPending.length+' pending lock(s) never settled after 6h+ -- dropping from record (likely voided/delisted market):',_stuckPending.map(p=>p&&p.ticker));}catch(_e){}
-  }
-  const _openPending=r.pending.filter(p=>!(p&&p.closeMs&&p.closeMs<_staleCutoff));
-  const _cappedPending=_openPending.slice(-_HR_PENDING_CAP);
-  if(_cappedPending.length<_openPending.length){
-    try{console.warn('[hourly] pending cap ('+_HR_PENDING_CAP+') evicted '+(_openPending.length-_cappedPending.length)+' still-open lock(s) from the record.');}catch(_e){}
-  }
-  const _payload={w:r.w,l:r.l,pending:_cappedPending,history:r.history.slice(-_HR_HISTORY_CAP)};
+  // Age or queue size is not settlement evidence. Keep every unresolved pick;
+  // never erase it or infer a loss/void merely because a feed failed.
+  const _payload={w:r.w,l:r.l,pending:r.pending,history:r.history.slice(-_HR_HISTORY_CAP)};
   try{localStorage.setItem(_HR_KEY,JSON.stringify(_payload));}catch(_e){}
   // Cloud mirror. Debounced hard (60s, same as the 15m log) because settlement can
   //   resolve several pending locks in one burst and each would otherwise be a write.
@@ -16648,7 +16664,7 @@ const _hrSave=(r,urgent)=>{
     // V13.4.202: 60s for routine settlement bursts, but ~1.5s when a new lock was
     //   just taken -- that write is what stops another device taking the opposite
     //   side of the same strike.
-    if(typeof cloudWriteDebounced==='function')cloudWriteDebounced(_HR_CLOUD_PATH,_payload,urgent?1500:60000);
+    if(typeof cloudWriteDebouncedRMW==='function')cloudWriteDebouncedRMW(_HR_CLOUD_PATH,()=>_hrLoad(),(cloud,local)=>_hrMerge(cloud,local),urgent?1500:60000);
   }catch(_e){}
 };
 // V13.4.162: merge a cloud hourly doc into a local one. Union by ticker|side.
@@ -16661,7 +16677,9 @@ const _hrMerge=(a,b)=>{
   for(const src of [a,b]){
     for(const h of (src&&Array.isArray(src.history)?src.history:[])){
       if(!h||!h.ticker)continue;
-      byKey.set(_key(h),h); // later source wins; both are settled so either is fine
+      const existing=byKey.get(_key(h));
+      byKey.set(_key(h),{...existing,...h,approval:existing?.approval||h.approval,
+        learningCapture:existing?.learningCapture||h.learningCapture});
     }
   }
   const history=Array.from(byKey.values())
@@ -16673,13 +16691,15 @@ const _hrMerge=(a,b)=>{
     for(const p of (src&&Array.isArray(src.pending)?src.pending:[])){
       if(!p||!p.ticker)continue;
       if(settled.has(_key(p)))continue; // resolved beats pending
-      pend.set(_key(p),p);
+      const existing=pend.get(_key(p));
+      pend.set(_key(p),{...existing,...p,approval:existing?.approval||p.approval,
+        learningCapture:existing?.learningCapture||p.learningCapture});
     }
   }
   return{
     w:history.filter(h=>h.won).length,
     l:history.filter(h=>h.won===false).length,
-    pending:Array.from(pend.values()).slice(-_HR_PENDING_CAP),
+    pending:Array.from(pend.values()),
     history,
   };
 };
@@ -16788,9 +16808,11 @@ function useHourlyRecord(){
           if(!r.ok)continue;
           const j=await r.json();
           const res=j&&j.market&&j.market.result;
-          if(res!=='yes'&&res!=='no')continue;
-          const won=(x.side==='YES')?(res==='yes'):(res==='no');
-          hist.push({...x,result:res,won,netCents:won?(100-x.cost):-x.cost,settledAt:Date.now(),learningSettlement:capturePickSettlement(x,j.market)});
+          const verified=inspectHourlySettlement(x,j.market,Date.now());
+          if(!verified.ok)continue;
+          const won=verified.won;
+          hist.push({...x,result:res,won,netCents:won?(100-x.cost):-x.cost,settledAt:Date.now(),
+            officialSettlement:verified.officialSettlement,learningSettlement:capturePickSettlement(x,j.market)});
           const k=still.findIndex(y=>y.ticker===x.ticker&&y.side===x.side);
           if(k>=0)still.splice(k,1);
         }catch(_e){}
@@ -36125,6 +36147,7 @@ function TaraApp(){
           }
         }catch(_){}
       }
+      parsed=recoverCapturedCalls(parsed,localStorage);
       if(!parsed.length)return[];
       // V6.3.4: One-time sanitize pass on load. Drops corrupt entries from before the
       //   scoring fix:
@@ -36211,8 +36234,14 @@ function TaraApp(){
         try{console.info('[V6.5.3 cleanup] Resolved',resolved,'misclassified SITOUT → WIN/LOSS');}catch(_){}
       }
       return cleaned;
-    }catch(e){return[];}
+    }catch(e){return recoverCapturedCalls([],localStorage);}
   },()=>taraCallSnapshotRef.current);
+  useEffect(()=>{
+    // A queued React logger / recovered archive can arrive after rollover's
+    // first sweep. Finalize that same captured sit-out too, without waiting for
+    // another window, a quote or a reload. Never create a row for an empty gap.
+    setTaraCallLog(prev=>finalizeClosedSitouts(prev,{now:Date.now(),asset:currentAssetRef.current||'BTC',windowType}));
+  },[taraCallLog,timeState.nextWindowMs,windowType,currentAsset]);
   // V10.7.89: Register window-level Kalshi credentials getter for Memory modal reconcile
   React.useEffect(()=>{
     window._taraGetKalshiCreds=()=>({
@@ -36848,9 +36877,10 @@ function TaraApp(){
     // Write last 1000 full entries to localStorage as fast-read cache for instant first paint
     const _lsEntries=_mergedForStorage.slice(-1000); // V10.9.5: 500->1000
     let _saved=false;
-    for(let _cap=_lsEntries.length;_cap>=50;_cap=Math.floor(_cap*0.7)){
+    for(let _cap=_lsEntries.length;_cap>0;_cap=_cap>50?Math.max(50,Math.floor(_cap*0.7)):0){
       try{
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_lsEntries.slice(-_cap)));
+        acknowledgeCapturedCalls(localStorage,_lsEntries.slice(-_cap));
         _saved=true;
         if(_cap<_stripped.length){
           try{console.warn(`[V10.7.60] localStorage cap trimmed to ${_cap} entries to fit 5MB limit`);}catch(_){}
@@ -37982,6 +38012,9 @@ function TaraApp(){
       snapshot.learningPredictions=learningPredictions(snapshot.learningFeatures,{profile:`${snapshot.asset}_${snapshot.windowType}`,key:callKey(snapshot),at:snapshot._committedAt});
     }
     snapshot.originalDecision ||= captureOriginalDecision(snapshot);
+    if(!journalCapturedCall(localStorage,snapshot)){
+      try{console.warn('[Call journal] Capture is not durable locally; archive/cloud persistence will retry.');}catch(_){}
+    }
   };
   const _persistLock=()=>{
     if(!_cloudRestoreCompletedRef.current)return; // never publish before a successful shared read
@@ -38041,6 +38074,9 @@ function TaraApp(){
     const local=chooseSharedSnapshot(taraCallSnapshotRef.current,chooseSharedSnapshot(cached?.taraSnapshot,recorded,context),context);
     const winner=chooseSharedSnapshot(data?.taraSnapshot,local,context);
     let changed=false;
+    if(!winner&&taraCallSnapshotRef.current&&!activeCallSnapshot(taraCallSnapshotRef.current,context)){
+      taraCallSnapshotRef.current=null;changed=true;
+    }
     if(winner&&sharedSnapshotIdentity(winner)!==sharedSnapshotIdentity(taraCallSnapshotRef.current)){
       const previous=taraCallSnapshotRef.current;
       taraCallSnapshotRef.current=winner;changed=true;
@@ -38053,6 +38089,9 @@ function TaraApp(){
     let saved=null;try{saved=JSON.parse(localStorage.getItem('taraLockedTimeSeries_v1')||'null');}catch(_){}
     const engine=restoredEngineLock(data?.engineLock,context,lockedCallRef.current,saved);
     const localEngine=restoredEngineLock(lockedCallRef.current,context);
+    if(!engine&&!localEngine&&lockedCallRef.current){
+      lockedCallRef.current=null;engineLockedDirRef.current=null;taraAdviceRef.current='SEARCHING...';changed=true;
+    }
     if(engine&&(!localEngine||(Number(engine._committedAt)||Number(engine.lockedAt)||0)+1000<
       (Number(localEngine._committedAt)||Number(localEngine.lockedAt)||0))){
       lockedCallRef.current=engine;engineLockedDirRef.current=engine.dir;
@@ -39964,7 +40003,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const liveHistory=useMemo(()=>{if(history.length===0||!currentPrice)return history;const u=[...history];u[0]={...u[0],c:currentPrice,h:Math.max(u[0].h||currentPrice,currentPrice),l:Math.min(u[0].l||currentPrice,currentPrice)};return u;},[history,currentPrice]);
 
   // Time
-  useEffect(()=>{const u=()=>{const now=new Date();const ms=now.getTime();const iMs=(windowType==='15m'?15:5)*60*1000;const nMs=Math.ceil((ms+500)/iMs)*iMs;const nW=new Date(nMs);const sW=new Date(nMs-iMs);const diff=nW.getTime()-now.getTime();
+  useEffect(()=>{const u=()=>{const now=new Date();const ms=now.getTime();const iMs=(windowType==='15m'?15:5)*60*1000;const nMs=(Math.floor(ms/iMs)+1)*iMs;const nW=new Date(nMs);const sW=new Date(nMs-iMs);const diff=nW.getTime()-now.getTime();
     // V8.9.3: 3-way time format
     const tz=timeFormat==='utc'?{timeZone:'UTC'}:timeFormat==='est'?{timeZone:'America/New_York'}:undefined;
     let ct,sw,nw;try{ct=now.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});}catch(e){ct=now.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});}setTimeState({currentTime:String(ct),startWindow:String(sw),nextWindow:String(nw),nextWindowMs:nMs,minsRemaining:Math.floor(diff/60000),secsRemaining:Math.floor((diff%60000)/1000),currentHour:now.getHours()});};u();const t=setInterval(u,1000);return()=>clearInterval(t);},[windowType,timeFormat]);
@@ -41589,7 +41628,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     return()=>clearInterval(resolverIv);
   },[adaptiveWeights]);
   // Window rollover
-  useEffect(()=>{if(timeState.nextWindowMs&&timeState.nextWindowMs!==_lastWindowMsRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){
+  useEffect(()=>{if(timeState.nextWindowMs&&timeState.nextWindowMs!==_lastWindowMsRef.current){
+        // All clock, restoration, lifecycle and log identities use epoch windows.
+        // In particular, never retire a Call before its actual boundary.
+        const _intervalMs=windowType==='15m'?900000:300000;
+        if(timeState.nextWindowMs!==(Math.floor(Date.now()/_intervalMs)+1)*_intervalMs)return;
+        const _previousClose=_lastWindowMsRef.current;
+        const _closedWindowId=`${windowType}-${new Date((_previousClose>0?_previousClose:Math.floor(Date.now()/_intervalMs)*_intervalMs)-_intervalMs).toISOString()}`;
+        setTaraCallLog(prev=>finalizeClosedSitouts(prev,{now:Date.now(),asset:currentAssetRef.current||'BTC',windowType}));
+        if(currentPrice!==null){if(lastWindowRef.current!==''){
           let won=false,active=false;
           // V3.2.4: General scorecard no longer auto-updates. Per user: scoring is decoupled
           //   from general predictions. The user enters/closes positions for their own use,
@@ -41736,7 +41783,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // V10.7.45: Record rollover into lifecycle audit for the just-closed window.
         //   The just-closed window's id = lastWindowRef.current.
         try{
-          const _justClosedWid=lastWindowRef.current;
+          const _justClosedWid=_closedWindowId;
           const _rolloverAsset=currentAssetRef.current||currentAsset||'BTC';
           if(_justClosedWid)_lifecycleRecordRollover(_justClosedWid,_rolloverAsset);
         }catch(_){}
@@ -41771,8 +41818,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   THIS specific window and use its locked-in strike. The entry was tagged with its
         //   asset at lock time (V7.0.7 belt-and-suspenders) so we can identify the right one.
         const _winMs=windowType==='15m'?900000:300000;
-        const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
-        const _wid=`${windowType}-${new Date(_justClosedBucket).toISOString()}`;
+        const _wid=_closedWindowId;
         // Look up the entry that was logged for this exact window. It already has the strike.
         // Use ref to avoid stale closure — taraCallLog is not in this effect's dep array.
         // V10.7.87: filter by asset — both BTC and ETH share the same windowId format
@@ -41830,8 +41876,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             // V5.6.6: past-windows tracker — every window recorded regardless of Tara's call.
             if(_outcomeDir){
               const _winMs=_capturedWindowType==='15m'?900000:300000;
-              const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
-              const _pwid=`${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
+              const _pwid=_wid; // captured boundary, not a later retry's clock
               // V8.8.6: tag past-window snapshot with asset so BTC + ETH at the same
               //   window slot coexist in the past-windows pill / history. Without this,
               //   whichever asset closed first wrote the snapshot and the second was
@@ -41858,11 +41903,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               });
             }
             // Resolve call log entry by windowId match (V6.3.4).
-            const _capturedWindowId=_capturedSnap?.windowId||(()=>{
-              const _winMs=_capturedWindowType==='15m'?900000:300000;
-              const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
-              return `${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
-            })();
+            const _capturedWindowId=_wid;
             // V9.10.5: Capture timeSeries + releaseSignalsHistory from lockedCallRef NOW,
             //   before the rollover effect clears the ref. _logResult runs inside an 8s+
             //   setTimeout (via _trySettle), by which time lockedCallRef.current is null —
@@ -41890,9 +41931,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const _resolveAsset='BTC';
               setTaraCallLog(prev=>{
                 let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.windowId===_capturedWindowId&&e.result===null&&(e.dir!=='SIT_OUT'||resultStr==='SITOUT'));
-                if(!idx){
-                  idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.result===null&&e.windowType===_capturedWindowType&&(e.dir!=='SIT_OUT'||resultStr==='SITOUT'));
-                }
                 if(!idx)return prev;
                 if(idx.e.result!==null)return prev;
                 // V6.5.3: If we're about to log SITOUT but the entry actually has a directional
@@ -42265,34 +42303,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               return next;
             });
           } else if(!_capturedSnap||_capturedSnap.call==='SIT_OUT'){
-            // V13.4.338: a sit-out is already decided at commit time -- unlike
-            //   WIN/LOSS, it needs no price data to resolve. It used to fall
-            //   through to the SAME Kalshi-strike-dependent _trySettle poll
-            //   below (via _resolveScore's SIT_OUT branch, now dead code for
-            //   15m), meaning a sit-out could sit PENDING for the full 60s and
-            //   then stay stuck if Kalshi's strike feed was degraded that
-            //   night -- exactly the v336/v337 dependency it never actually
-            //   needed. Resolve it immediately here instead, mirroring the 5m
-            //   branch above (minus its 5m-specific "only if opened late"
-            //   ambiguity guard, which doesn't apply to a 15m commit made
-            //   with full context).
-            const _winMsImm=900000;
-            const _capturedWindowIdImm=_capturedSnap?.windowId||(()=>{
-              const _justClosedBucketImm=Math.floor(Date.now()/_winMsImm)*_winMsImm-_winMsImm;
-              return `15m-${new Date(_justClosedBucketImm).toISOString()}`;
-            })();
-            setTaraCallLog(prev=>{
-              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowIdImm&&e.result===null);
-              if(!idx){
-                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType);
-              }
-              if(!idx)return prev;
-              if(idx.e.result!==null)return prev;
-              const next=[...prev];
-              next[idx.i]={...idx.e,result:'SITOUT',resolvedAt:Date.now(),resolution:'immediate-no-kalshi-needed'};
-              setTimeout(()=>_recomputeLearningsFromLog(next),0);
-              return next;
-            });
+            // Closed captured sit-outs were finalized above, independent of
+            // price availability. A missing snapshot is NOT a new sit-out and
+            // must never grade the latest unrelated pending directional row.
           } else {
             // 15m windows: poll for Kalshi-derived close (= new window's strike from Kalshi).
             let _attempts=0;
@@ -46544,12 +46557,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   };
   // V4.3: Attach lifecycle data so the Tara's Call card can render phase/samples/snapshot.
   //   Refs read at render time — same data the lifecycle effect uses.
-  if(!startupReadiness.ready&&!taraCallSnapshotRef.current){
+  const _activeCallSnapshot=activeCallSnapshot(taraCallSnapshotRef.current,{windowId:computeWindowId(windowType),windowType,asset:currentAsset,now:Date.now()});
+  if(!startupReadiness.ready&&!_activeCallSnapshot){
     Object.assign(taraCall,{call:'SIT_OUT',direction:null,confidence:0,startupBlocked:true,reason:startupReadiness.reason});
   }
   taraCall.samples=taraCallSampleRef.current?.count||0;
-  taraCall.snapshot=taraCallSnapshotRef.current||null;
-  taraCall.blockedDecision=taraCallSnapshotRef.current?.blockedDecision||describeCallBlocker({call:taraCall,
+  taraCall.snapshot=_activeCallSnapshot;
+  taraCall.blockedDecision=_activeCallSnapshot?.blockedDecision||describeCallBlocker({call:taraCall,
     readiness:startupReadiness,hold:callCommitHoldRef.current,gateHold:callGateHoldRef.current,samples:taraCallSampleRef.current,
     quote:_kalshiQuote,windowId:computeWindowId(windowType),asset:currentAsset,now:Date.now()});
   currentCallBlockerRef.current=taraCall.blockedDecision;
@@ -46558,7 +46572,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     windowId:computeWindowId(windowType),windowType,asset:currentAsset,
     quote:_kalshiQuote,probabilityUpRaw:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove,
     probabilityUpCurrent:analysis?.rawProbAbove,probabilitySource:analysis?.rawPosteriorUncalibrated!=null?'rawPosteriorUncalibrated':'legacy-rawProbAbove-fallback',signalScore:taraCall.confidence,
-    currentDecision:taraCallSnapshotRef.current,referencePrice:analysis?.referencePrice,
+    currentDecision:_activeCallSnapshot,referencePrice:analysis?.referencePrice,
     spot:currentPrice,strike:kalshiStrike,atrBps:analysis?.atrBps,
     tape15:analysis?.tapeWindows?.w15?.buyPct,tape30:analysis?.tapeWindows?.w30?.buyPct,
     tape60:analysis?.tapeWindows?.w60?.buyPct,momentum:analysis?.rawSignalScores?.momentum,regime:analysis?.regime,
@@ -46737,7 +46751,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let _earlyLockFired=false;
     let _earlyLockTier=null;
     let _fastLockFired=false;
-    if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
+    if(activeCallSnapshot(taraCallSnapshotRef.current,{windowId:computeWindowId(windowType),windowType,asset:currentAssetRef.current||'BTC',now:Date.now()}))return;
+    taraCallSnapshotRef.current=null; // a previous window is not this window's decision
     const tc=taraCall;
     const isCall=tc.call==='UP'||tc.call==='DOWN';
     const _traceDecision=(code,reason,gate={})=>{
@@ -52439,7 +52454,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.1</small>
+              <small>DECISION ENGINE · V14.7.2</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -52975,10 +52990,10 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           setActiveView={setWorkspaceFocus}
         />
         {workspaceFocus==='overview'&&<><div className="tara-v14-page-lead"><div><h2>Your current window</h2><p>The locked Call, its record and the market in one place.</p></div><button className="tara-v145-settings-button" onClick={()=>setShowTradingSettings(true)}>Window settings</button></div><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/></>}
-        {workspaceFocus!=='overview'&&<TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length} snapshot={taraCallSnapshotRef.current||null}/>}
+        {workspaceFocus!=='overview'&&<TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length} snapshot={_activeCallSnapshot}/>}
         {workspaceFocus==='overview'&&<TaraPageBrief
           taraCall={taraCall}
-          snapshot={taraCallSnapshotRef.current||null}
+          snapshot={_activeCallSnapshot}
           autoExecSettings={autoExecSettings}
           autoOrderState={autoOrderState}
           userPosition={userPosition}
@@ -52993,7 +53008,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           onNavigate={_openWorkspace}
         />}
         {(workspaceFocus==='overview'||workspaceFocus==='execution')&&<TaraExecutionOverview
-          snapshot={taraCallSnapshotRef.current||null}
+          snapshot={_activeCallSnapshot}
           autoExecSettings={autoExecSettings}
           autoOrderState={autoOrderState}
           userPosition={userPosition}
@@ -53011,7 +53026,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           connected={!!(kalshiCreds.apiKeyId&&kalshiCreds.privateKeyPem)}/>}
         {workspaceFocus==='overview'&&windowType==='15m'&&<p className="text-[11px] text-[#EDEDED]/55 px-1 py-2" role="status">
           Automatic Calls close at 7:00 remaining.
-          {!taraCallSnapshotRef.current&&callCommitHoldRef.current?.windowId===computeWindowId(windowType)&&<> {callCommitHoldRef.current.reason}</>}
+          {!_activeCallSnapshot&&callCommitHoldRef.current?.windowId===computeWindowId(windowType)&&<> {callCommitHoldRef.current.reason}</>}
         </p>}
         {workspaceFocus==='overview'&&!expandedOverview&&<><TaraOverviewMarket
           compactRead asset={currentAsset} priceSource={priceSource} resolution={resolution} setResolution={setResolution}
@@ -53040,9 +53055,9 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           onOpenTheory={()=>setShowTheoryLab(true)}
         />}
         {workspaceFocus==='analytics'&&analyticsPageOpen&&<TaraAnalyticsPage embedded learning={learning} asset={currentAsset} windowType={windowType} taraCallLog={taraCallLog} taraMLModel={taraMLModel} lockResearch={lockResearch} onClose={()=>{setAnalyticsPageOpen(false);setWorkspaceFocus('overview');}} timeFormat={timeFormat}/>}
-        {workspaceFocus==='brain'&&showBrain&&<BrainView embedded learning={learning} snapshot={taraCallSnapshotRef.current||null} analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
+        {workspaceFocus==='brain'&&showBrain&&<BrainView embedded learning={learning} snapshot={_activeCallSnapshot} analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>{setShowBrain(false);setWorkspaceFocus('overview');}}/>}
         {workspaceFocus==='schedule'&&<TaraHourlyRecordSummary/>}
-        {workspaceFocus==='signals'&&<><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/><TaraSignalsSummary analysis={analysis} candidate={taraCall} lock={readLockState(taraCallSnapshotRef.current)} orderBook={orderBook} tapeWindows={tapeWindows} smartMoneySignals={_smartMoneySignals} qualityGate={qualityGate} deadline={callLockDeadline(windowType)}/></>}
+        {workspaceFocus==='signals'&&<><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/><TaraSignalsSummary analysis={analysis} candidate={taraCall} lock={readLockState(_activeCallSnapshot)} orderBook={orderBook} tapeWindows={tapeWindows} smartMoneySignals={_smartMoneySignals} qualityGate={qualityGate} deadline={callLockDeadline(windowType)}/></>}
         {/* V13.4.298: lg:auto-rows-fr + the grid default (stretch) forced every
             column to the height of the tallest one, showing as 400-600px of
             blank space under the shorter columns' last card once all 3 columns
@@ -53101,7 +53116,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           <summary>TRADE COACH · ORDER DETAILS · SCALPER CONTROLS</summary>
           <ThisTradeCard
             taraCall={taraCall}
-            snapshot={taraCallSnapshotRef.current||null}
+            snapshot={_activeCallSnapshot}
             analysis={analysis}
             timeState={timeState}
             windowType={windowType}
@@ -53153,12 +53168,12 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               onClearAutoOrder={()=>setAutoOrderState(null)}
               taraCallLog={taraCallLog}
               kalshiBalance={kalshiBalance}
-              taraSnapshotForTicket={taraCallSnapshotRef.current?{
-                call:taraCallSnapshotRef.current.call,
-                direction:taraCallSnapshotRef.current.direction,
-                tier:taraCallSnapshotRef.current.tier,
-                confidence:taraCallSnapshotRef.current.confidence,
-                caution:taraCallSnapshotRef.current.caution,
+              taraSnapshotForTicket={_activeCallSnapshot?{
+                call:_activeCallSnapshot.call,
+                direction:_activeCallSnapshot.direction,
+                tier:_activeCallSnapshot.tier,
+                confidence:_activeCallSnapshot.confidence,
+                caution:_activeCallSnapshot.caution,
               }:null}
             />
           </ThisTradeCard>
@@ -53243,8 +53258,8 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               const tc=taraCall;
               // V13.4.288: was "a snapshot exists and is not a sit-out". Same
               //   presence-is-commitment mistake; now asks the authority.
-              const isLocked=readLockState(taraCallSnapshotRef.current).tradeable;
-              const isSitOut=taraCallSnapshotRef.current?.call==='SIT_OUT'||(tc?.call==='SIT_OUT'&&analysis?.isSystemLocked);
+              const isLocked=readLockState(_activeCallSnapshot).tradeable;
+              const isSitOut=_activeCallSnapshot?.call==='SIT_OUT'||(tc?.call==='SIT_OUT'&&analysis?.isSystemLocked);
               const isCall=tc?.call==='UP'||tc?.call==='DOWN';
               const samplesLeft=Math.max(0,(tc?.needSamples||3)-(tc?.samples||0));
               // Window time-remaining
@@ -53260,7 +53275,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               //   based on internal lean.
               let label='SCANNING',accent=T2_GOLD,countdownText='gathering data';
               if(isLocked){
-                const _lockDir=taraCallSnapshotRef.current?.call;
+                const _lockDir=_activeCallSnapshot?.call;
                 label='LOCKED';
                 accent=_lockDir==='UP'?'rgba(52,211,153,0.7)':_lockDir==='DOWN'?'rgba(232,69,94,0.7)':T2_GOLD;
                 countdownText=remLabel;
@@ -53426,8 +53441,8 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
             liveCoachReversalRef={liveCoachReversalRef}
             reversalRisk={lockedCallRef.current?.reversalRisk||null}
-            lockedSnapshotDir={(taraCallSnapshotRef.current?.call==='UP'||taraCallSnapshotRef.current?.call==='DOWN')?taraCallSnapshotRef.current.call:null}
-            lockedSnapshot={taraCallSnapshotRef.current||null}
+            lockedSnapshotDir={isDirection(_activeCallSnapshot?.call)?_activeCallSnapshot.call:null}
+            lockedSnapshot={_activeCallSnapshot}
             onClearAutoOrder={()=>setAutoOrderState(null)}
           />
         {/* V13.4.293: relocated from a full-width stack above the grid, and
@@ -53920,7 +53935,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           }}/></div>
           </div>
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}
-            taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}
+            taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={_activeCallSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}
             onHourlyLock={_onHourlyLock}/>
           </div>
         </div>

@@ -29,6 +29,7 @@ export function hourlyHarness({lad,now,props={},record={w:0,l:0,pending:[],histo
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,v)=>storage.set(key,v)},
     _HR_KEY:'taraHourlyRecord_v1',_HR_HISTORY_CAP:500,_HR_PENDING_CAP:40,_HR_CLOUD_PATH:'memory/hourlyRecord',_hrIntervalActive:false,
     cloudSupabaseRead:(...args)=>readCloud(...args),cloudWriteDebounced:(...args)=>writes.push(structuredClone(args)),
+    cloudWriteDebouncedRMW:(path,getData,merge,delay)=>writes.push([path,structuredClone(getData()),delay]),
     setInterval:(fn,ms)=>{const t={fn,ms};intervals.push(t);return t;},clearInterval(){},
     fetch:fetchMock|| (async()=>{throw new Error('Unexpected network fetch');}),TARA_BUILD_VERSION:'14.4.10-test',taraHourlyProb:model,
     _K_PUB:'https://test.invalid',_kLadRace:race,

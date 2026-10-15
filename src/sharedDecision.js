@@ -12,7 +12,9 @@ export function matchesSharedWindow(doc,context) {
   return !!doc&&doc.windowId===context.windowId&&(!doc.asset||doc.asset===context.asset)&&
     (!doc.windowType||doc.windowType===context.windowType);
 }
-export function restoredSnapshot(snapshot,context) {
+// Read-time scope guard: refs can still contain the old window during the
+// render before rollover effects execute. Never display/use that as this Call.
+export function activeCallSnapshot(snapshot,context) {
   if(!snapshot?.locked)return null;
   const original=snapshot.originalDecision;
   const wid=original?.windowId||snapshot.windowId||snapshot.lockedWindowId||context.windowId;
@@ -25,12 +27,35 @@ export function restoredSnapshot(snapshot,context) {
   const call=direction(snapshot),at=committedAt(snapshot),close=windowCloseMs(wid);
   const start=close-(type==='15m'?900000:300000);
   if(!['UP','DOWN','SIT_OUT'].includes(call)||at===null||at<start||at>=close||at>context.now+2000)return null;
+  return snapshot;
+}
+export function restoredSnapshot(snapshot,context) {
+  if(!activeCallSnapshot(snapshot,context))return null;
+  const original=snapshot.originalDecision,call=direction(snapshot),at=committedAt(snapshot);
+  const wid=original?.windowId||snapshot.windowId||snapshot.lockedWindowId||context.windowId;
+  const asset=original?.asset||snapshot.asset||context.asset,type=original?.windowType||snapshot.windowType||context.windowType;
   return {...clone(snapshot),call,dir:call,direction:call,windowId:wid,windowType:type,asset,_committedAt:at,
     ...(original?{reason:original.reason??snapshot.reason,confidence:original.signalScore??snapshot.confidence??0,
       atPosterior:original.probabilityUpCurrent??snapshot.atPosterior,blockedDecision:clone(original.blockedDecision??snapshot.blockedDecision),
       kalshiAtLock:original.yesPrice??snapshot.kalshiAtLock,marketTicker:original.marketTicker??snapshot.marketTicker,
       marketCloseTime:original.marketCloseTime??snapshot.marketCloseTime,taraVersion:original.modelVersion??snapshot.taraVersion,
       decisionTrace:clone(original.decisionTrace??snapshot.decisionTrace)}:{})};
+}
+
+// A captured sit-out needs no spot/strike to finalize. Sweep closed captured
+// rows after a suspended tab wakes too; never invent rows for unobserved gaps,
+// or turn a directional Call into a sit-out because its ref went missing.
+export function finalizeClosedSitouts(entries,{now,asset,windowType}) {
+  let changed=false;
+  const next=entries.map(row=>{
+    if(!row||row.result!==null||(row.asset||'BTC')!==asset||row.windowType!==windowType||
+      row.dir!=='SIT_OUT'||(row.originalDecision?.direction&&row.originalDecision.direction!=='SIT_OUT'))return row;
+    const close=windowCloseMs(row.windowId);
+    if(!Number.isFinite(close)||close<=0||close>now||
+      (row.originalDecision?.windowId&&row.originalDecision.windowId!==row.windowId))return row;
+    changed=true;return {...row,result:'SITOUT',resolvedAt:now,resolution:'closed-captured-sitout'};
+  });
+  return changed?next:entries;
 }
 export function ledgerDecision(entries,context) {
   let winner=null;

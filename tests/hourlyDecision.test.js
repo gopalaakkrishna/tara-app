@@ -201,13 +201,58 @@ test('actual ladder polling carries request/receipt identity, rejects overlaps a
 });
 
 test('settlement preserves original hourly approval and cannot erase a new pending pick saved during the settlement read',async()=>{
-  const evidence={policyVersion:'14.4.10',samples:[{quoteId:'captured'}]},pending={ticker:'DUE',side:'YES',strike:80000,cost:50,closeMs:start-60000,ms:start-200000,approval:evidence};
+  const evidence={policyVersion:'14.4.10',samples:[{quoteId:'captured'}]},pending={ticker:'KXBTCD-26OCT1319-T80000',side:'YES',strike:80000,cost:50,closeMs:start-60000,ms:start-200000,approval:evidence};
   let resolve;const i=input(),host=hourlyHarness({lad:i.lad,now:i.now,props:props(i),record:{pending:[pending],history:[]},fetchMock:()=>new Promise(r=>resolve=r)});
   host.render();await new Promise(r=>setImmediate(r));
   const cur=host.record;cur.pending.push({ticker:'NEW',side:'YES',strike:83300,cost:50,closeMs:close,ms:start});host.storage.set('taraHourlyRecord_v1',JSON.stringify(cur));
-  resolve({ok:true,json:async()=>({market:{result:'yes'}})});await host.flush();
+  resolve({ok:true,json:async()=>({market:{ticker:pending.ticker,floor_strike:80000,close_time:new Date(pending.closeMs).toISOString(),status:'settled',result:'yes'}})});await host.flush();
   assert.equal(host.record.pending.length,1);assert.equal(host.record.pending[0].ticker,'NEW');
   assert.deepEqual(host.record.history[0].approval,evidence);assert.equal(host.record.history[0].won,true);
+});
+
+test('missing hourly market metadata reports unavailable market, never negative-epoch timing',()=>{
+  for(const closeMs of [null,undefined,NaN,0]){
+    const i=input();i.lad.closeMs=closeMs;
+    const result=h.assessHourlyPick(i,policy,model);
+    assert.equal(result.code,'market-unavailable');assert.doesNotMatch(result.reason,/-\d+m/);
+  }
+});
+
+test('actual hourly save and merge preserve unresolved picks beyond six hours and the former pending cap',async()=>{
+  const i=input(),pending=Array.from({length:45},(_,n)=>({ticker:`KXBTCD-OLD-T${n}`,side:'YES',strike:80000+n,cost:50,
+    closeMs:start-7*3600000,ms:start-8*3600000+n,approval:{samples:[{quoteId:'captured'+n}]}}));
+  const host=hourlyHarness({lad:i.lad,now:i.now,props:props(i),record:{pending,history:[]}});
+  const merged=host.scope._hrMerge({pending,history:[]},{pending:[],history:[]});
+  host.scope._hrSave(merged);assert.equal(host.record.pending.length,45);
+  assert.deepEqual(host.record.pending[0].approval,pending[0].approval);
+  assert.equal(host.writes.at(-1)[1].pending.length,45);
+});
+
+test('exact hourly ticker, close, strike, event and official result are required; unresolved records remain pending',()=>{
+  const pick={ticker:event+'-T83300',side:'NO',strike:83300,closeMs:close,approval:{quote:{event}}};
+  const market={ticker:pick.ticker,event_ticker:event,close_time:new Date(close).toISOString(),floor_strike:83300,status:'settled',result:'no',strike_type:'greater'};
+  assert.equal(h.inspectHourlySettlement(pick,market,close+60000).won,true);
+  for(const patch of [{ticker:event+'-OTHER'},{close_time:new Date(close+3600000).toISOString()},
+    {floor_strike:80000},{event_ticker:'other'},{result:''},{status:'active'},{strike_type:'between'}])
+    assert.equal(h.inspectHourlySettlement(pick,{...market,...patch},close+60000).ok,false);
+  assert.equal(h.inspectHourlySettlement(pick,market,close-1).ok,false);
+});
+
+test('actual hourly poll advances past the expired first event without carrying confirmation samples into the next hour',async()=>{
+  const i=input(),nextEvent='KXBTCD-26OCT1321',seen=[];
+  const race=async urls=>{
+    const url=urls[0];
+    if(url.includes('series/'))return {ok:true,data:{series:{ticker:'KXBTCD',fee_type:'quadratic',fee_multiplier:1}}};
+    if(url.includes('events?'))return {ok:true,data:{events:[{event_ticker:event},{event_ticker:nextEvent}]}};
+    const ev=url.includes(nextEvent)?nextEvent:event;seen.push(ev);
+    return {ok:true,data:{markets:[{ticker:ev+'-T83300',event_ticker:ev,status:'active',strike_type:'greater',floor_strike:83300,
+      close_time:new Date(ev===event?start-1000:close).toISOString(),volume_fp:'500',yes_bid_dollars:'0.49',yes_ask_dollars:'0.50'}]}};
+  };
+  const host=hourlyHarness({now:i.now,props:props(i),realLadder:true,race});host.render();await host.flush();
+  assert.deepEqual(seen,[event,nextEvent]);assert.equal(host.output.input.lad.event,nextEvent);
+  host.setTime(start+1);host.render(props(input('UP',start+1)));await host.flush();
+  assert.equal(host.output.confirmation.samples.length,1);assert.equal(host.record.pending.length,0);
+  host.unmount();
 });
 
 test('commit rechecks a newly discovered opposite lock and requires the existing doubled flip sample count',()=>{

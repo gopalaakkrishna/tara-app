@@ -1,12 +1,12 @@
 {
   "name": "tara",
-  "version": "14.7.1",
+  "version": "14.7.2",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm test && vite build",
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=2 tests/*.test.js",
     "learning:train": "node scripts/train-learning.mjs",
     "preview": "vite preview"
   },

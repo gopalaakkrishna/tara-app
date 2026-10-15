@@ -126,3 +126,47 @@ test('catch-up merge and heartbeat do not discard same-count finalization or blo
   assert.equal(combine({resolved:4,finalized:5,evidenceAt:3000},{resolved:3,finalized:6,evidenceAt:4000}).finalized,6);
   assert.equal(combine({evidenceAt:3000},{evidenceAt:4000}).evidenceAt,4000);
 });
+
+test('record write failures retry automatically even if no new Call or hourly pick is made',async()=>{
+  for(const failure of ['read','write']){
+    const h=harness({readError:failure==='read',writeError:failure==='write'});
+    h.send([{...base,result:'SITOUT',resolvedAt:2000}]);await h.flush();
+    assert.equal(h.timers.size,1,'failed evidence retains a bounded retry');
+    h.recover();await h.flush();assert.equal(h.cloud.entries[0].result,'SITOUT');
+    assert.equal(h.timers.size,0);assert.equal(h.synced.size,1);
+  }
+});
+
+test('hourly RMW has a fixed first deadline, urgent captures expedite it, and a peer pick survives sync',async()=>{
+  const body=app.slice(app.indexOf('const _hrMerge='),app.indexOf('function useHourlyRecord'));
+  const merge=new Function('_HR_HISTORY_CAP','_HR_PENDING_CAP',body+';return _hrMerge;')(500,40);
+  const peer={ticker:'KXBTCD-PEER',side:'NO',closeMs:10000,approval:{samples:[{quoteId:'original'}]}};
+  const own={ticker:'KXBTCD-OWN',side:'YES',closeMs:20000};
+  const h=harness({initial:{pending:[peer],history:[]}}),hourly='memory/hourlyRecord';
+  let local={pending:[own],history:[]};h.sync(hourly,()=>local,merge,60000);
+  const first=[...h.timers.keys()][0];
+  for(let n=0;n<20;n++){local={pending:[{...own,conf:n}],history:[]};h.sync(hourly,()=>local,merge,60000);}
+  assert.equal([...h.timers.keys()][0],first);
+  h.sync(hourly,()=>local,merge,1500);assert.equal(h.timers.size,1);assert.equal([...h.timers.values()][0].delay,1500);
+  await h.flush();assert.equal(h.cloud.pending.length,2);
+  assert.deepEqual(h.cloud.pending.find(p=>p.ticker===peer.ticker).approval,peer.approval);
+  assert.equal(h.cloud.pending.find(p=>p.ticker===own.ticker).conf,19);
+});
+
+test('plain debounced progress writes keep a bounded deadline, send latest evidence, expedite and retry failure',async()=>{
+  let now=0,seq=0,fail=false,slow=false,release;const timers=new Map(),queue=new Map(),pending=new Map(),writes=[];
+  const body=app.slice(app.indexOf('const cloudWriteDebounced='),app.indexOf('// V8.1: Synchronously fire all pending debounced writes'));
+  const send=new Function('_writeQueue','_writePending','_writeLatest','Date','setTimeout','clearTimeout','cloudWrite',body+';return cloudWriteDebounced;')(
+    queue,pending,new Map(),{now:()=>now},(fn,delay)=>{timers.set(++seq,{fn,at:now+delay,delay});return seq;},id=>timers.delete(id),
+    async(path,data)=>{writes.push({path,data});return slow?new Promise(r=>release=r):!fail;});
+  const flush=async()=>{const [id,t]=timers.entries().next().value;timers.delete(id);now=t.at;t.fn();await new Promise(r=>setImmediate(r));};
+  send('state/currentLock_BTC_15m',{n:1},300);const first=[...timers.keys()][0];
+  for(let n=2;n<=20;n++){now++;send('state/currentLock_BTC_15m',{n},300);}
+  assert.equal([...timers.keys()][0],first);await flush();assert.equal(writes[0].data.n,20);
+  fail=true;send('test',{n:21},60000);send('test',{n:22},1500);
+  assert.equal([...timers.values()][0].delay,1500);await flush();assert.equal(timers.size,1);
+  fail=false;await flush();assert.equal(writes.at(-1).data.n,22);assert.equal(timers.size,0);
+  slow=true;send('test',{n:23},300);await flush();
+  slow=false;send('test',{n:24},300);await flush();release(false);await new Promise(r=>setImmediate(r));
+  assert.equal(timers.size,0,'a late failed old write cannot retry over a newer successful payload');
+});

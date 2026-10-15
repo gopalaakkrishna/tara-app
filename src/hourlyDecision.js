@@ -1,6 +1,6 @@
 // Hourly advisory picks have their own market/horizon and evidence. Nothing in
 // this module changes the 5m/15m Call lifecycle or places an order.
-export const HOURLY_POLICY_VERSION='14.7.1';
+export const HOURLY_POLICY_VERSION='14.7.2';
 export const HOURLY_POLL_MS=20000;
 export const HOURLY_QUOTE_MAX_AGE_MS=45000;
 export const HOURLY_SPOT_MAX_AGE_MS=15000;
@@ -64,6 +64,8 @@ export function assessHourlyPick(input,policy,probability,fee=hourlyFeeCents) {
   if(!lad?.sampleId||number(lad.requestedAt)===null||number(lad.receivedAt)===null||
     lad.requestedAt>lad.receivedAt||lad.receivedAt>now+2000||now-lad.requestedAt>HOURLY_QUOTE_MAX_AGE_MS)
     return wait('quote-stale','Waiting for a fresh hourly market poll.');
+  if(!(number(lad.closeMs)>0)||!lad.event?.startsWith('KXBTCD-')||!lad.strikes?.length)
+    return wait('market-unavailable','Waiting for an active hourly market with a valid close time and quotes.');
   const minutes=(lad.closeMs-now)/60000;
   if(!Number.isFinite(minutes)||minutes<=1.5||minutes>policy.maxMinsLeft||
     (policy.deadHi>policy.deadLo&&minutes>=policy.deadLo&&minutes<policy.deadHi))
@@ -127,6 +129,22 @@ export function advanceHourlyConfirmation(previous,assessment,input) {
       netEdgeCents:pick.netEdgeCents,quote:{event:lad.event,ticker:pick.ticker,closeMs:pick.closeMs,
         bid:pick.bid,ask:pick.ask,requestedAt:lad.requestedAt,receivedAt:lad.receivedAt},
       requiredSamples:pick.needTicks,minimumSpanMs,spanMs,samples}:null};
+}
+
+export function inspectHourlySettlement(pick,market,now=Date.now()) {
+  const close=Date.parse(market?.close_time),strike=number(market?.floor_strike);
+  if(!pick?.ticker?.startsWith('KXBTCD-')||market?.ticker!==pick.ticker||
+    !Number.isFinite(close)||!(pick.closeMs>0)||Math.abs(close-pick.closeMs)>1000||
+    strike===null||!(pick.strike>0)||Math.abs(strike-pick.strike)>0.02||
+    (market.strike_type&&market.strike_type!=='greater')||
+    (pick.approval?.quote?.event&&market.event_ticker!==pick.approval.quote.event))
+    return wait('settlement-identity','Waiting for the exact captured hourly contract settlement.');
+  if(!['YES','NO'].includes(pick.side)||!['yes','no'].includes(market.result)||
+    !['settled','finalized'].includes(market.status)||now<close)
+    return wait('settlement-pending','The captured hourly market has not officially settled.');
+  return {ok:true,won:pick.side==='YES'?market.result==='yes':market.result==='no',
+    officialSettlement:{source:'kalshi-public-api',ticker:market.ticker,closeTime:market.close_time,
+      strike,outcome:market.result,verifiedAt:now}};
 }
 
 export function hourlyProposal(decision,input,version) {
