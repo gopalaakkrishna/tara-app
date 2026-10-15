@@ -5,6 +5,7 @@ import * as hourly from '../../src/hourlyDecision.js';
 import {normalizeHourlyRecord} from '../../src/hourlyRecordMath.js';
 import {capturePickLearning,capturePickSettlement} from '../../src/learningCapture.js';
 import {commitHourlyAdmission} from '../../src/hourlyAdmission.js';
+import {hourlyPublicPaths} from '../../src/hourlyPublic.js';
 const traverse=traverseModule.default||traverseModule,ast=parse(app,{sourceType:'module',plugins:['jsx']});
 const declarations=new Map();
 const sharedAdmissions=new WeakMap();
@@ -29,7 +30,7 @@ export function hourlyHarness({lad={},now,props={},record={w:0,l:0,pending:[],hi
   const FakeDate=class extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
   if(sharedStorage&&!sharedAdmissions.has(sharedStorage))sharedAdmissions.set(sharedStorage,{row:null,revision:0});
   const admission=sharedAdmission||(sharedStorage?sharedAdmissions.get(sharedStorage):null)||{row:null,revision:0};
-  const scope={...hourly,normalizeHourlyRecord,capturePickLearning,capturePickSettlement,commitHourlyAdmission,React,Date:FakeDate,encodeURIComponent,console:{info(){},warn(){}},
+  const scope={...hourly,normalizeHourlyRecord,capturePickLearning,capturePickSettlement,commitHourlyAdmission,hourlyPublicPaths,API_BASE:'',React,Date:FakeDate,encodeURIComponent,console:{info(){},warn(){}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,v)=>storage.set(key,v)},
     _HR_KEY:'taraHourlyRecord_v1',_HR_HISTORY_CAP:500,_HR_PENDING_CAP:40,_HR_CLOUD_PATH:'memory/hourlyRecord',_hrIntervalActive:false,
     cloudSupabaseRead:(...args)=>readCloud(...args),cloudWriteDebounced:(...args)=>writes.push(structuredClone(args)),

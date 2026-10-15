@@ -2,9 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {commitHourlyAdmission,supabaseHourlyTransport} from '../src/hourlyAdmission.js';
 import {hourlyRecordGuard} from '../src/hourlyDecision.js';
+import {hourlyPublicPaths} from '../src/hourlyPublic.js';
 import {hourlyHarness,actual} from './helpers/hourlyHarness.js';
 const policy={maxLocks:3,cooldownMs:180000},now=Date.parse('2026-10-15T23:20Z'),close=now+2400000;
 const merge=actual('_hrMerge',{_HR_HISTORY_CAP:500});
+
+test('all hourly public reads retain the configured host and Render fallback without an order route',()=>{
+  for(const path of ['series/KXBTCD','events?series_ticker=KXBTCD','markets?event_ticker=T','markets/T']){
+    const paths=hourlyPublicPaths(path,'https://configured.example/');
+    assert.equal(paths[0],'https://configured.example/kalshi-public/'+path);
+    assert.ok(paths.includes('https://tara-kalshi-proxy.onrender.com/kalshi-public/'+path));
+  }
+  assert.throws(()=>hourlyPublicPaths('portfolio/orders'));
+});
+
+test('actual hourly poll recovers fresh quotes through Render when Pages is429 and direct official fetch fails',async()=>{
+  const event='KXBTCD-26OCT1520',at=now;
+  const row={ticker:event+'-T83000',event_ticker:event,status:'active',strike_type:'greater',floor_strike:83000,
+    close_time:new Date(close).toISOString(),yes_bid_dollars:'.49',yes_ask_dollars:'.50',volume_fp:'500'};
+  const requests=[],host=hourlyHarness({now:at,realLadder:true,props:{spot:83200,spotAt:at,source:'coinbase',asset:'BTC',readiness:{ready:true},taraCall:{call:'UP',confidence:70}},
+    fetchMock:async url=>{requests.push(url);if(!url.startsWith('https://tara-kalshi-proxy.onrender.com/'))return {ok:false,status:429};
+      const data=url.includes('/series/')?{series:{ticker:'KXBTCD',fee_type:'quadratic',fee_multiplier:1}}:url.includes('/events?')?{events:[{event_ticker:event}]}:{markets:[row]};
+      return {ok:true,json:async()=>data};
+    }});
+  host.render();await host.flush();
+  assert.equal(host.output.input.lad.strikes.length,1);assert.equal(host.output.input.lad.err,null);
+  assert.equal(host.output.input.lad.requestedAt,at);assert.equal(host.output.input.lad.receivedAt,at);
+  assert.equal(requests.filter(u=>u.startsWith('https://tara-kalshi-proxy.onrender.com/')).length,3);
+  assert.equal(host.alerts.length,0);host.unmount();
+});
 function backend(){let row=null,rev=0;return {
   read:async()=>row?{data:structuredClone(row),updated_at:String(rev)}:null,
   compareAndSwap:async(r,data)=>{if(r.updated_at!==String(rev))return false;row=structuredClone(data);rev++;return true;},

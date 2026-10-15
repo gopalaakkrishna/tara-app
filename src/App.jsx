@@ -36,6 +36,8 @@ import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executio
 import {buildSafeEntry,buildSafeExit,normalizeExecutionOrder,runSafeEntryLadder,heldQuote,executionFeeCents,fetchAllExecutionPages,accountRiskSnapshot,affordableContracts,summarizeOrderFills} from './executionSafety.js';
 import {executionIntentId,stableExecutionId,reserveExecutionIntent,updateExecutionIntent,readExecutionState,writeExecutionState,restoreExecutionLedger} from './executionJournal.js';
 import {commitHourlyAdmission,supabaseHourlyTransport} from './hourlyAdmission.js';
+import {hourlyPublicPaths} from './hourlyPublic.js';
+import {API_BASE} from './apiBase.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
 import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
@@ -16309,16 +16311,13 @@ function useHourlyLadder(activeMins){
       try{
         if(!fees||requestedAt-feesAt>3600000){
           const q='series/KXBTCD';
-          const response=await _kLadRace(['/api/kalshi-public/'+q,_K_PUB+'/'+q,
-            'https://api.elections.kalshi.com/trade-api/v2/'+q],d=>d?.series?.ticker==='KXBTCD');
+          const response=await _kLadRace(hourlyPublicPaths(q,API_BASE),d=>d?.series?.ticker==='KXBTCD');
           if(!response.ok){if(alive)setState(s=>({...s,err:'fee schedule: '+response.reason}));return;}
           fees={type:response.data.series.fee_type,multiplier:response.data.series.fee_multiplier};feesAt=Date.now();
         }
         const _evQ='events?series_ticker=KXBTCD&status=open&limit=20';
         const _evRes=await _kLadRace(
-          ['/api/kalshi-public/'+_evQ,
-           _K_PUB+'/'+_evQ,
-           'https://api.elections.kalshi.com/trade-api/v2/'+_evQ],
+          hourlyPublicPaths(_evQ,API_BASE),
           (d)=>!!(d&&Array.isArray(d.events)));
         if(!_evRes.ok){if(alive)setState(s=>({...s,err:'events: '+_evRes.reason}));return;}
         const evs=[...new Set(((_evRes.data&&_evRes.data.events)||[]).map(x=>x.event_ticker).filter(x=>x?.startsWith('KXBTCD-')))].sort();
@@ -16329,9 +16328,7 @@ function useHourlyLadder(activeMins){
           if(!alive)return;
           const _mkQ='markets?event_ticker='+encodeURIComponent(ev)+'&limit=1000';
           const _mkRes=await _kLadRace(
-          ['/api/kalshi-public/'+_mkQ,
-           _K_PUB+'/'+_mkQ,
-           'https://api.elections.kalshi.com/trade-api/v2/'+_mkQ],
+          hourlyPublicPaths(_mkQ,API_BASE),
           (d)=>!!(d&&Array.isArray(d.markets)));
           if(!_mkRes.ok){if(alive)setState(s=>({...s,err:'markets: '+_mkRes.reason}));return;}
           const normalized=normalizeHourlyMarkets(_mkRes.data.markets,ev,requestedAt,Date.now(),fees);
@@ -16537,7 +16534,7 @@ function useHourlyRecord(){
       for(const x of due){
         try{
           const path='markets/'+encodeURIComponent(x.ticker);
-          const r=await _kLadRace(['/api/kalshi-public/'+path,_K_PUB+'/'+path,'https://tara-kalshi-proxy.onrender.com/kalshi-public/'+path],d=>d?.market?.ticker===x.ticker);
+          const r=await _kLadRace(hourlyPublicPaths(path,API_BASE),d=>d?.market?.ticker===x.ticker);
           if(!r.ok){failures.push({ticker:x.ticker,code:'settlement-read',reason:r.reason});continue;}
           const j=r.data;
           const res=j&&j.market&&j.market.result;
