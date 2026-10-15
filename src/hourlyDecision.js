@@ -1,6 +1,6 @@
 // Hourly advisory picks have their own market/horizon and evidence. Nothing in
 // this module changes the 5m/15m Call lifecycle or places an order.
-export const HOURLY_POLICY_VERSION='14.7.2';
+export const HOURLY_POLICY_VERSION='14.7.3';
 export const HOURLY_POLL_MS=20000;
 export const HOURLY_QUOTE_MAX_AGE_MS=45000;
 export const HOURLY_SPOT_MAX_AGE_MS=15000;
@@ -66,6 +66,10 @@ export function assessHourlyPick(input,policy,probability,fee=hourlyFeeCents) {
     return wait('quote-stale','Waiting for a fresh hourly market poll.');
   if(!(number(lad.closeMs)>0)||!lad.event?.startsWith('KXBTCD-')||!lad.strikes?.length)
     return wait('market-unavailable','Waiting for an active hourly market with a valid close time and quotes.');
+  const currentHourClose=(Math.floor(now/3600000)+1)*3600000;
+  if(lad.closeMs>currentHourClose+1000)
+    return wait('market-unavailable','No current-hour BTC market is available. Waiting for an active contract for this hour.',
+      {nextMarketCloseMs:lad.closeMs,nextEvent:lad.event});
   const minutes=(lad.closeMs-now)/60000;
   if(!Number.isFinite(minutes)||minutes<=1.5||minutes>policy.maxMinsLeft||
     (policy.deadHi>policy.deadLo&&minutes>=policy.deadLo&&minutes<policy.deadHi))

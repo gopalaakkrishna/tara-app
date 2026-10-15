@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {makeHarness,app,compile} from './helpers/callDecisionHarness.js';
 import {CALL_CAPTURE_JOURNAL,journalCapturedCall,recoverCapturedCalls,acknowledgeCapturedCalls} from '../src/callCaptureJournal.js';
+import {persistCallCaches} from '../src/callStorage.js';
 
 test('actual commit journals original Call before delayed persistence and reload restores precisely one canonical row',()=>{
   for(const directional of [true,false]){
@@ -32,11 +33,12 @@ test('journal tolerates broken storage, rejects uncaptured or conflicting identi
 });
 
 test('actual fast-cache writer persists the first record on a new device, not only logs of at least fifty rows',()=>{
-  const from=app.indexOf('    const _lsEntries=_mergedForStorage.slice(-1000);');
+  const from=app.indexOf('    const _cacheStatus=persistCallCaches(');
   const to=app.indexOf('    // Also persist to sessionStorage',from);
   const persist=compile(app.slice(from,to));
   const h=makeHarness();h.run();
-  persist({_mergedForStorage:h.logs,_stripped:h.logs,localStorage:h.scope.localStorage,acknowledgeCapturedCalls,console});
+  persist({_mergedForStorage:h.logs,_minifyEntry:e=>e,localStorage:h.scope.localStorage,acknowledgeCapturedCalls,persistCallCaches,
+    archived:{ok:true,value:h.logs},_persistCancelled:false,setCallStorageStatus(){},Date});
   assert.equal(JSON.parse(h.scope.localStorage.getItem('taraCallLog_v1')).length,1);
   assert.equal(JSON.parse(h.scope.localStorage.getItem(CALL_CAPTURE_JOURNAL)).length,0);
 });

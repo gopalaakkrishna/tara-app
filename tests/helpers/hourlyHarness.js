@@ -36,9 +36,7 @@ export function hourlyHarness({lad,now,props={},record={w:0,l:0,pending:[],histo
   };
   for(const name of ['_hrLoad','_hrMerge','_hrSave','useHourlyRecord'])scope[name]=actual(name,scope);
   scope.useHourlyLadder=realLadder?actual('useHourlyLadder',scope):()=>lad;
-  const panel=declarations.get('HourlyLadderPanel');
-  const component=compile(panel.slice(0,panel.indexOf('  if(!on)return null;'))+
-    'return {LOCKS,status:_hourlyStatus,confirmation:confirmationRef.current,input,assessment};}', 'return HourlyLadderPanel;')(scope);
+  const component=actual('useHourlyEngine',scope);
   const render=(next=latestProps)=>{latestProps=next;cursor=0;dirty=false;output=component({onHourlyLock:lk=>alerts.push(structuredClone(lk)),...latestProps});for(const effect of effects.splice(0))effect();return output;};
   return {scope,alerts,writes,storage,intervals,render,
     setTime:t=>{clock=t;},setLadder:l=>{lad=l;},get output(){return output;},

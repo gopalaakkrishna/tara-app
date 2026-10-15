@@ -88,7 +88,7 @@ test('every compact cache and cross-device merge retains the shared evidence fie
   assert.match(app,/CALL_EVIDENCE_FIELDS\.forEach\(k=>_MINI_KEEP\.add\(k\)\)/);
   assert.match(app,/_STICKY_TELEMETRY\.push\(\.\.\.CALL_EVIDENCE_FIELDS\)/);
   assert.match(app,/return normalizeCallLedger\(Array\.from\(byKey\.values\(\)\)/);
-  assert.match(app,/return\(\)=>clearTimeout\(_persistTimer\)/);
+  assert.equal(app.includes('clearTimeout(_persistTimer)'),true,'pending persistence timer is cancelled on cleanup');
   assert.match(app,/!_localHasMoreResolved&&!_evidenceChanged/);
 });
 

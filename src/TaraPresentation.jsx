@@ -5,6 +5,15 @@ const fmt=(v,unit='')=>finiteNumber(v)===null?'—':`${Number(v).toFixed(1)}${un
 const time=v=>Number(v)>0?new Date(Number(v)).toLocaleString():'Unavailable';
 const seconds=v=>finiteNumber(v)===null?'Unavailable':`${Math.floor(Number(v)/60)}:${String(Math.floor(Number(v)%60)).padStart(2,'0')}`;
 export const EvidenceMetrics=({items})=><div className="tara-v145-metrics">{items.map(([label,value,note,tone])=><div key={label}><label>{label}</label><strong className={tone||''}>{value}</strong><small>{note}</small></div>)}</div>;
+export function TaraStorageStatus({status}) {
+  if(!status||status.state==='checking')return <p role="status">Checking durable history storage…</p>;
+  return <div role="status" className="tara-v145-note" data-storage-state={status.state}>
+    <strong>{status.archiveSaved?'History archived':'History storage needs attention'}</strong>
+    <span> · {status.archiveRows??'Unknown'} archived · {status.deepRows} recovery-cache rows · {status.fastRows} quick-cache rows</span>
+    {status.error&&<p>{status.error} Original capture recovery and cloud retries remain enabled.</p>}
+    {!status.error&&<p>Quick caches are intentionally smaller; the durable archive keeps the full retained history and original evidence.</p>}
+  </div>;
+}
 // The wrapper is always mounted. Changing a visual tab must not remount the
 // original panels or reset their observation/confirmation effects.
 export function TaraDetailEnvelope({enabled,children,label='All signal panels, detectors & original controls'}) {

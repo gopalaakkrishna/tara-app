@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {callLogSyncSignature,callLogSyncStatus} from '../src/callLogSync.js';
 import {CALL_EVIDENCE_FIELDS,callKey,normalizeCallLedger} from '../src/callIntegrity.js';
+import {mergeWeatherRecords} from '../src/weatherRecord.js';
 
 const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
 const path='memory/taraCallLog';
@@ -55,14 +56,24 @@ function harness({initial={entries:[base]},readError=false,writeError=false,conf
   const sync=new Function('_sbClient','_sbWriteQueueRMW','_sbWritePendingRMW','_sbLastSyncSig','callLogSyncSignature','_stripEntryForCloud',
     '_setCloudStatus','_cloudSyncStatus','setTimeout','clearTimeout','console',body+';return cloudSupabaseWriteDebouncedRMW;')(
       client,queue,pending,synced,callLogSyncSignature,e=>e,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
-  const mergeBody=app.slice(app.indexOf('  const _mergeCallLogEntries='),app.indexOf('  useEffect(()=>{',app.indexOf('  const _mergeCallLogEntries=')));
+  const mergeBody=app.slice(app.indexOf('  const _mergeCallLogEntries='),app.indexOf('  const[callStorageStatus',app.indexOf('  const _mergeCallLogEntries=')));
   const merge=new Function('React','CALL_EVIDENCE_FIELDS','normalizeCallLedger','TARA_CALL_LOG_CAP','_auditLogEvent',mergeBody+';return _mergeCallLogEntries;')(
     {useCallback:fn=>fn},CALL_EVIDENCE_FIELDS,normalizeCallLedger,1000,()=>{});
   const send=entries=>sync(path,()=>entries,(current,local)=>({entries:merge(current?.entries||[],local)}),60000);
   const flush=async()=>{const [id,{fn}]=timers.entries().next().value;timers.delete(id);await fn();};
   return {send,sync,flush,timers,synced,health,get cloud(){return cloud;},get reads(){return reads;},get writes(){return writes;},
-    recover:()=>{failed=false;readFailed=false;}};
+    setCloud:value=>{cloud=value;},recover:()=>{failed=false;readFailed=false;}};
 }
+
+test('Weather conditional writer retries concurrent peer changes and retains both original captures',async()=>{
+  const a={ticker:'WX-A',side:'YES',dayKey:'2026-10-15',atMs:1,price:60,learningCapture:{original:'A'}},
+    b={ticker:'WX-B',side:'NO',dayKey:'2026-10-15',atMs:2,price:55,learningCapture:{original:'B'}};
+  const h=harness({initial:{picks:[]},conflicts:1,beforeWrite:async n=>{if(n===1)h.setCloud({picks:[b]});}});
+  h.sync('memory/weatherPicks',()=>({picks:[a]}),mergeWeatherRecords,4000);await h.flush();
+  assert.equal(h.writes,2);assert.equal(h.cloud.picks.length,2);
+  assert.deepEqual(h.cloud.picks.find(p=>p.ticker==='WX-A').learningCapture,a.learningCapture);
+  assert.deepEqual(h.cloud.picks.find(p=>p.ticker==='WX-B').learningCapture,b.learningCapture);
+});
 
 test('actual RMW flush persists a pending -> SITOUT update without a new window and preserves original evidence',async()=>{
   const h=harness();h.send([base]);await h.flush();

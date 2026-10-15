@@ -2,13 +2,17 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import taraDesignStyles from './tara-design.css?raw';
 import taraV14Styles from './tara-v14.css?raw';
 import taraV145Styles from './tara-v145.css?raw';
-import {EvidenceMetrics,RecordInspector,RecordVersionFilter,TaraEvidenceAnalytics,TaraBrainSummary,HourlyApprovalSummary,TaraSignalsSummary,TaraDetailEnvelope} from './TaraPresentation.jsx';
+import {TaraStorageStatus,EvidenceMetrics,RecordInspector,RecordVersionFilter,TaraEvidenceAnalytics,TaraBrainSummary,HourlyApprovalSummary,TaraSignalsSummary,TaraDetailEnvelope} from './TaraPresentation.jsx';
 import {capturedReason,recordVersion,presentationRows} from './presentationEvidence.js';
 import { normalizeKalshiPositionsPage } from './kalshiPositions.js';
 import { normalizeHourlyRecord } from './hourlyRecordMath.js';
 import {HOURLY_POLL_MS,readHourlyPolicy,normalizeHourlyMarkets,assessHourlyPick,advanceHourlyConfirmation,
   hourlyProposal,revalidateHourlyProposal,hourlyRecordGuard,inspectHourlySettlement} from './hourlyDecision.js';
 import {loadSportsBoard,sportsSettlementStatus} from './sportsData.js';
+import {gradeWeatherPick,mergeWeatherRecords} from './weatherRecord.js';
+import {primaryShadowView} from './primaryShadow.js';
+import {persistCallCaches,updateIndexedRecord,mergeDurableCallArchive} from './callStorage.js';
+import {lifecycleAuditState} from './lifecycleAudit.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
 import {callLogSyncSignature,callLogSyncStatus} from './callLogSync.js';
@@ -306,19 +310,10 @@ const _openIDB=()=>new Promise((resolve,reject)=>{
 });
 
 const _idbWrite=async(key,value)=>{
-  try{
-    const db=await _openIDB();
-    if(!db)return false;
-    return new Promise((resolve)=>{
-      try{
-        const tx=db.transaction(_IDB_STORE,'readwrite');
-        const store=tx.objectStore(_IDB_STORE);
-        const req=store.put({key,value,updatedAt:Date.now()});
-        req.onsuccess=()=>resolve(true);
-        req.onerror=(e)=>{console.warn('[IDB] write failed',key,e.target.error);resolve(false);};
-      }catch(e){resolve(false);}
-    });
-  }catch(e){return false;}
+  const result=await updateIndexedRecord(_openIDB,_IDB_STORE,key,previous=>
+    key==='taraCallLog'?mergeDurableCallArchive(previous,value):value);
+  if(!result.ok)console.warn('[IDB] write failed',key,result.error);
+  return result.ok;
 };
 
 const _idbRead=async(key)=>{
@@ -1495,12 +1490,16 @@ const _lifecycleRecordOpen=(wid,windowType,asset)=>{
 const _lifecycleRecordSnapshot=(wid,windowType,asset,snapshot,callSite)=>{
   try{
     const _rec=_lifecycleFindOrCreate(wid,windowType,asset);
+    const _commitAt=snapshot?.originalDecision?.lockedAt;
+    if(_commitAt&&_rec.snapshotSets.some(s=>s.commitAt===_commitAt&&s.committed===true))return;
     _rec.snapshotSets.push({
       callSite:callSite||'?',
       call:snapshot?.call||null,
       direction:snapshot?.direction||null,
       tier:snapshot?.tier||null,
       confidence:snapshot?.confidence||null,
+      committed:snapshot?.originalDecision?.provenance==='captured-at-lock'&&Number(snapshot?._committedAt)>0,
+      commitAt:_commitAt||null,
       at:Date.now(),
     });
     _persistLifecycle();
@@ -1540,25 +1539,30 @@ const _lifecycleRecordConfirmed=(wid,asset)=>{
     }
   }catch(_){}
 };
+let _lifecycleCanonicalLedger=[];
+const _lifecycleConfirmLedger=(entries)=>{
+  _lifecycleCanonicalLedger=Array.isArray(entries)?entries:[];
+  let changed=false;
+  for(const rec of _loadLifecycle()){
+    const state=lifecycleAuditState(rec,_lifecycleCanonicalLedger);
+    if(state.diagnosis==='ok'&&(rec.logConfirmedAt==null||rec.diagnosis!=='ok')){
+      Object.assign(rec,state);changed=true;
+    }
+  }
+  if(changed)_persistLifecycle();
+};
 const _lifecycleRecordRollover=(wid,asset)=>{
   try{
     const _buf=_loadLifecycle();
     const _rec=_buf.find(r=>r.wid===wid&&r.asset===asset);
     if(!_rec)return;
     _rec.rolloverAt=Date.now();
-    // Compute gap status
-    const _hadSnapshot=_rec.snapshotSets.length>0;
-    const _hadLogCall=_rec.logCalls.length>0;
-    const _wasConfirmed=_rec.logConfirmedAt!=null;
-    let _diagnosis=null;
-    if(!_hadSnapshot&&!_hadLogCall)_diagnosis='no-commit-attempted';
-    else if(_hadSnapshot&&!_hadLogCall)_diagnosis='snapshot-set-but-no-log-call';
-    else if(_hadLogCall&&!_wasConfirmed)_diagnosis='log-called-but-not-confirmed';
-    else if(_wasConfirmed)_diagnosis='ok';
-    _rec.diagnosis=_diagnosis;
+    const state=lifecycleAuditState(_rec,_lifecycleCanonicalLedger);
+    Object.assign(_rec,state);
+    const _diagnosis=state.diagnosis;
     _persistLifecycle();
     // Cross-stamp the audit log if there's a gap
-    if(_diagnosis&&_diagnosis!=='ok'&&_diagnosis!=='no-commit-attempted'){
+    if(['committed-snapshot-without-record','log-called-but-not-confirmed'].includes(_diagnosis)){
       _auditLogEvent('v10_7_45_window_gap_detected',{
         wid,asset,
         diagnosis:_diagnosis,
@@ -5904,8 +5908,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.15-v14.7.2-window-lifecycle';
-const TARA_VERSION_DISPLAY='TARA 14.7.2';
+const TARA_BUILD_VERSION='2026.10.15-v14.7.3-site-integrity';
+const TARA_VERSION_DISPLAY='TARA 14.7.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17372,8 +17376,7 @@ function HourlyMemoryModal({onClose,embedded=false}){
     </div>
   );
 }
-function HourlyLadderPanel({spot,spotAt,source,asset='BTC',readiness,taraCall,onHourlyLock}){
-  const[_hourlyMemOpen,_setHourlyMemOpen]=React.useState(false);
+function useHourlyEngine({spot,spotAt,source,asset='BTC',readiness,taraCall,onHourlyLock}){
   const[_hourlyStatus,setHourlyStatus]=React.useState({code:'starting',reason:'Waiting for fresh hourly observations.'});
   const confirmationRef=React.useRef(null),busyRef=React.useRef(false),mountedRef=React.useRef(false),commitHoldRef=React.useRef(null);
   React.useEffect(()=>{mountedRef.current=true;return()=>{mountedRef.current=false;};},[]);
@@ -17425,6 +17428,16 @@ function HourlyLadderPanel({spot,spotAt,source,asset='BTC',readiness,taraCall,on
       }finally{busyRef.current=false;}
     })();
   });
+  return {on,lad,rec,LOCKS,assessment,input,policy,minsLeft,CONFIRM_TICKS,s,dir,
+    confirmation:confirmationRef.current,status:_hourlyStatus};
+}
+
+// Presentation only: the single owner in TaraApp keeps confirming/settling
+// even while Sports, Weather or another workspace is visible.
+function HourlyLadderPanel({engine}){
+  const[_hourlyMemOpen,_setHourlyMemOpen]=React.useState(false);
+  const{on,lad,rec,LOCKS,assessment,minsLeft,CONFIRM_TICKS,s,dir,status:_hourlyStatus,confirmation}=engine;
+  const confirmationRef={current:confirmation};
   const rows=(lad.strikes||[]).map(k=>{
     const p=taraHourlyProb(s,k.strike,minsLeft);
     return {...k,modelPct:p==null?null:p*100,costYes:k.ask,costNo:100-k.bid};
@@ -26002,7 +26015,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
       {(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
         <>
           <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
-          <HourlyLadderPanel spot={currentPrice} {...hourlyContext} taraCall={taraCall} onHourlyLock={onHourlyLock}/>
+          <HourlyLadderPanel {...hourlyContext}/>
         </>
       )}
     </div>
@@ -29448,26 +29461,23 @@ const _wxLedgerClean=(l)=>({picks:(l&&Array.isArray(l.picks)?l.picks:[])
   })});
 const _wxLedgerLoad=()=>{
   try{const j=JSON.parse(localStorage.getItem(_WX_LEDGER_KEY)||'null');
-    if(j&&Array.isArray(j.picks))return _wxLedgerClean(j);}catch(_e){}
-  return{picks:[]};
+    if(j&&Array.isArray(j.picks))return _wxLedgerMerge(_wxLedgerClean(j),_wxMemoryLedger);}catch(_e){}
+  return _wxMemoryLedger||{picks:[]};
 };
-const _wxLedgerSave=(l)=>{
-  const payload={picks:(_wxLedgerClean(l).picks||[]).slice(-_WX_PICK_CAP)};
+let _wxMemoryLedger=null;
+const _wxLedgerSave=(l,{sync=true}={})=>{
+  const payload=_wxLedgerMerge(_wxLedgerLoad(),l);
+  _wxMemoryLedger=payload;
   try{localStorage.setItem(_WX_LEDGER_KEY,JSON.stringify(payload));}catch(_e){}
-  try{if(typeof cloudWriteDebounced==='function')cloudWriteDebounced(_WX_LEDGER_PATH,payload,4000);}catch(_e){}
+  try{if(sync&&typeof cloudWriteDebouncedRMW==='function')cloudWriteDebouncedRMW(
+    _WX_LEDGER_PATH,()=>_wxLedgerLoad(),(cloud,local)=>_wxLedgerMerge(cloud,local),4000);}catch(_e){}
   return payload;
 };
 // Union by ticker|side. A settled pick always beats an open one, and the totals
 //   are recounted from the merged list rather than summed -- adding two devices'
 //   counters is how you get a record that matches neither.
 const _wxLedgerMerge=(a,b)=>{
-  const by=new Map();
-  for(const src of [a,b]) for(const p of (src&&Array.isArray(src.picks)?src.picks:[])){
-    if(!p||!p.ticker)continue;
-    const k=_wxPickId(p), cur=by.get(k);
-    if(!cur||(p.result&&!cur.result))by.set(k,p);
-  }
-  return _wxLedgerClean({picks:Array.from(by.values()).sort((x,y)=>(x.atMs||0)-(y.atMs||0)).slice(-_WX_PICK_CAP)});
+  return mergeWeatherRecords(a,b,{cap:_WX_PICK_CAP,tickerDay:_wxTickerDay});
 };
 
 // Settle one open pick against Kalshi's own result. Deliberately NOT settled
@@ -29478,27 +29488,14 @@ const _wxLedgerMerge=(a,b)=>{
 const _wxSettleOne=async(pick)=>{
   const j=await _wxJson(`/api/kalshi/markets/${encodeURIComponent(pick.ticker)}`);
   const m=j.ok?(j.data&&j.data.market):null;
-  if(!m){
-    const d=await _wxJson(`https://api.elections.kalshi.com/trade-api/v2/markets/${encodeURIComponent(pick.ticker)}`);
-    if(!d.ok||!d.data||!d.data.market)return null;
-    return _wxGrade(pick,d.data.market);
-  }
-  return _wxGrade(pick,m);
+  const verified=m?_wxGrade(pick,m):null;
+  if(verified)return verified;
+  const d=await _wxJson(`https://api.elections.kalshi.com/trade-api/v2/markets/${encodeURIComponent(pick.ticker)}`);
+  if(!d.ok||!d.data||!d.data.market)return null;
+  return _wxGrade(pick,d.data.market);
 };
 const _wxGrade=(pick,m)=>{
-  const st=String(m.status||'').toLowerCase();
-  if(st!=='settled'&&st!=='finalized')return null;
-  const res=String(m.result||'').toLowerCase();
-  if(res!=='yes'&&res!=='no')return{...pick,result:'void',settledAt:Date.now(),settledResult:res||'none',pnl:0};
-  const won=(pick.side==='YES')?(res==='yes'):(res==='no');
-  // Kalshi pays 100c a contract. Taker fee is charged on entry only, and Kalshi
-  //   rounds it UP to the next cent per contract -- so 0.84c becomes 1c. Using the
-  //   unrounded figure flatters every result in the ledger by a fraction of a cent,
-  //   which is exactly the direction a record must never lean.
-  const fee=_wxFeeCents(pick.price);
-  const pnl=won?(100-pick.price-fee):(-pick.price-fee);
-  return{...pick,result:won?'win':'loss',settledAt:Date.now(),settledResult:res,learningSettlement:capturePickSettlement(pick,m),
-    pnl:Math.round(pnl*100)/100};
+  return gradeWeatherPick(pick,m);
 };
 
 const _wxTally=(picks,tier)=>{
@@ -29609,15 +29606,11 @@ function useWeatherPicks(){
   const[scanAt,setScanAt]=React.useState(null);
   const busy=React.useRef(false);
 
-  // hydrate from the cloud once, then merge rather than overwrite
-  React.useEffect(()=>{let alive=true;(async()=>{
-    try{
-      if(typeof cloudSupabaseRead!=='function')return;
-      const c=await cloudSupabaseRead(_WX_LEDGER_PATH);
-      if(!c||!alive)return;
-      setLedger(prev=>{const m=_wxLedgerMerge(prev,c);_wxLedgerSave(m);return m;});
-    }catch(_e){}
-  })();return()=>{alive=false;};},[]);
+  // Merge peer captures/settlements without echoing a complete stale document.
+  React.useEffect(()=>cloudWatch(_WX_LEDGER_PATH,(c,status)=>{
+    if(status!=='ok'||!c)return;
+    setLedger(prev=>_wxLedgerSave(_wxLedgerMerge(prev,c),{sync:false}));
+  }),[]);
 
   const sweep=React.useCallback(async()=>{
     if(busy.current)return; busy.current=true;
@@ -29650,8 +29643,7 @@ function useWeatherPicks(){
       if(settled.length||found.length){
         setLedger(prev=>{
           const next=_wxLedgerMerge(prev,{picks:settled.concat(found)});
-          _wxLedgerSave(next);
-          return next;
+          return _wxLedgerSave(next);
         });
       }
       setScanAt(Date.now());
@@ -36558,6 +36550,7 @@ function TaraApp(){
   },[taraCallLog]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
+  useEffect(()=>{_lifecycleConfirmLedger(taraCallLog);},[taraCallLog]);
   const _learningCloudSourceRef=useRef(null);
   // V13.4.347: arm the loss-streak cooldown when the two MOST RECENT settled
   //   (WIN/LOSS only -- SIT_OUT/NO_TRADE/pending entries are skipped, they
@@ -36589,7 +36582,7 @@ function TaraApp(){
   const _catchUpInFlightRef=useRef(false);
   // V8.3: Helper to merge two arrays of call log entries. Used by both RMW write
   //   and the BroadcastChannel handler. Mirrors the cloudWatch merge logic.
-  const _mergeCallLogEntries=React.useCallback((existing,incoming)=>{
+  const _mergeCallLogEntries=React.useCallback((existing,incoming,{cap=TARA_CALL_LOG_CAP}={})=>{
     // V8.8.6: asset in dedup key so BTC + ETH coexist for the same windowId
     const _key=(e)=>(e?.asset||'BTC')+'|'+(e?.windowId||'')+'|'+(e?.windowType||'');
     const _shouldReplace=(prev,inc)=>{
@@ -36657,8 +36650,9 @@ function TaraApp(){
       else if(_shouldReplace(ex,e))byKey.set(k,_coalesceSticky(e,ex));
       else byKey.set(k,_coalesceSticky(ex,e)); // V13.1: loser may carry telemetry winner lacks
     });
-    return normalizeCallLedger(Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP),existing||[]);
+    return normalizeCallLedger(Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-cap),existing||[]);
   },[]);
+  const[callStorageStatus,setCallStorageStatus]=useState({state:'checking'});
   useEffect(()=>{
     // V10.7.60 — ROBUST LOCALSTORAGE WRITE
     //   Prior code: try{localStorage.setItem(...JSON.stringify(full_log))}catch(e){}
@@ -36669,7 +36663,9 @@ function TaraApp(){
     //   Fix: strip verbose fields before localStorage write (same as cloud write).
     //     If still too large, progressively trim oldest entries until it fits.
     //     Surface persistent failures via a ref so the UI can warn the user.
-    const _persistLocal=()=>{ // Trailing flush: never discard a load/update inside the throttle interval.
+    let _persistCancelled=false;
+    let _archiveRetryTimer=null,_archiveRetryDelay=10000;
+    const _persistLocal=async()=>{ // Trailing flush: never discard a load/update inside the throttle interval.
     _lastLocalPersistAt=Date.now();
     const _stripForStorage=(e)=>{
       if(!e)return e;
@@ -36828,71 +36824,24 @@ function TaraApp(){
         }
       }
     }catch(_){_mergedForStorage=_stripped;}
-    // V10.7.95: Write full log to IndexedDB (no size limit) — primary store
-    // V13.4.80: DATA-LOSS FIX. This write used to blindly overwrite IndexedDB (the full
-    //   archive) with the in-memory log, whose read-modify-write base was only the
-    //   1000-entry taraCallLog_v1 fast cache. So any reload that hydrated a short log
-    //   permanently truncated IDB: the export went 4536 -> 3696 entries in a day and the
-    //   oldest record moved 05-20 -> 06-05. Now the RMW base is IDB ITSELF, so history is
-    //   preserved and a short in-memory log heals from the archive instead of destroying it.
-    //   Falls back to the old direct write only if the IDB read fails. ASCII-only.
-    (async()=>{
-      try{
-        const _prevIdb=await _idbRead('taraCallLog').catch(()=>null);
-        let _final=_mergedForStorage;
-        if(Array.isArray(_prevIdb)&&_prevIdb.length){
-          try{
-            _final=_mergeCallLogEntries(_prevIdb,_mergedForStorage)
-              .filter(e=>!e||(e.asset||'BTC')==='BTC')
-              .slice(-TARA_CALL_LOG_CAP)
-              .map(_stripForStorage);
-          }catch(_eM){_final=_mergedForStorage;}
-          try{
-            if(_final.length<_prevIdb.length){
-              console.warn('[V13.4.80] IDB write would shrink archive '+_prevIdb.length+' -> '+_final.length+'; keeping archive');
-              _final=_prevIdb;
-            }
-          }catch(_eW){}
-        }
-        await _idbWrite('taraCallLog',_final).catch(()=>{});
-      }catch(_eA){
-        _idbWrite('taraCallLog',_mergedForStorage).catch(()=>{});
-      }
-    })();
-    // V10.9.6: DEEP MINIFIED CACHE — up to TARA_CALL_LOG_CAP entries in localStorage.
-    //   This is the resilient base: if IndexedDB fails/empties/was truncated, the
-    //   full trade count still loads from here on reload instead of dropping to
-    //   the small fast-paint cache. Auto-shrinks on quota error.
-    try{
-      const _mini=_mergedForStorage.slice(-TARA_CALL_LOG_CAP).map(_minifyEntry);
-      let _miniSaved=false;
-      for(let _cap=_mini.length;_cap>=200;_cap=Math.floor(_cap*0.8)){
-        try{
-          localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_cap)));
-          _miniSaved=true;break;
-        }catch(_e){if(_cap<=200)break;}
-      }
-      if(_miniSaved)localStorage.setItem('taraCallLog_deepCount',String(Math.min(_mini.length,5000)));
-    }catch(_){}
-    // Write last 1000 full entries to localStorage as fast-read cache for instant first paint
-    const _lsEntries=_mergedForStorage.slice(-1000); // V10.9.5: 500->1000
-    let _saved=false;
-    for(let _cap=_lsEntries.length;_cap>0;_cap=_cap>50?Math.max(50,Math.floor(_cap*0.7)):0){
-      try{
-        localStorage.setItem('taraCallLog_v1',JSON.stringify(_lsEntries.slice(-_cap)));
-        acknowledgeCapturedCalls(localStorage,_lsEntries.slice(-_cap));
-        _saved=true;
-        if(_cap<_stripped.length){
-          try{console.warn(`[V10.7.60] localStorage cap trimmed to ${_cap} entries to fit 5MB limit`);}catch(_){}
-        }
-        break;
-      }catch(err){
-        // QuotaExceededError — try smaller slice
-        if(_cap<=100){
-          try{console.error('[V10.7.60] localStorage write failed even at 100 entries:',err?.message);}catch(_){}
-        }
-      }
+    // Serialize archive read/merge/write, and acknowledge only transaction completion.
+    // The durable archive is NOT the rolling UI/cloud window: never cap its history.
+    const archived=await updateIndexedRecord(_openIDB,_IDB_STORE,'taraCallLog',previous=>
+      _mergeCallLogEntries(Array.isArray(previous)?previous:[],_mergedForStorage,{cap:Infinity}).map(_stripForStorage));
+    const _cacheStatus=persistCallCaches(localStorage,_mergedForStorage,{project:_minifyEntry,archiveSaved:archived.ok});
+    _cacheStatus.archiveRows=archived.value?.length??null;
+    _cacheStatus.checkedAt=Date.now();
+    if(!archived.ok)_cacheStatus.error=archived.error||_cacheStatus.error;
+    if(!_persistCancelled)setCallStorageStatus(_cacheStatus);
+    if(_cacheStatus.state==='degraded'&&!_persistCancelled){
+      _archiveRetryTimer=setTimeout(()=>{if(!_persistCancelled)_persistLocal();},_archiveRetryDelay);
+      _archiveRetryDelay=Math.min(60000,_archiveRetryDelay*2);
+    }else{_archiveRetryDelay=10000;}
+    if(archived.ok)acknowledgeCapturedCalls(localStorage,archived.value);
+    else if(_cacheStatus.fastRows>0){
+      try{acknowledgeCapturedCalls(localStorage,JSON.parse(localStorage.getItem('taraCallLog_v1')||'[]'));}catch(_){}
     }
+    const _saved=_cacheStatus.fastRows>0;
     // Also persist to sessionStorage as a safety net (cleared on tab close but survives refresh)
     if(_saved){
       try{
@@ -36981,7 +36930,7 @@ function TaraApp(){
       // Pre-hydration but we have data → mark pending. Once cloudWatch fires we'll flush.
       _logWritePendingRef.current=true;
     }
-    return()=>clearTimeout(_persistTimer);
+    return()=>{_persistCancelled=true;clearTimeout(_persistTimer);clearTimeout(_archiveRetryTimer);};
   },[taraCallLog]);
   // V10.7.95: IndexedDB async load on mount.
   //   localStorage gives instant first paint. IDB then loads the full history
@@ -38012,6 +37961,7 @@ function TaraApp(){
       snapshot.learningPredictions=learningPredictions(snapshot.learningFeatures,{profile:`${snapshot.asset}_${snapshot.windowType}`,key:callKey(snapshot),at:snapshot._committedAt});
     }
     snapshot.originalDecision ||= captureOriginalDecision(snapshot);
+    try{_lifecycleRecordSnapshot(snapshot.windowId,snapshot.windowType,snapshot.asset,snapshot,'canonical-seal');}catch(_){}
     if(!journalCapturedCall(localStorage,snapshot)){
       try{console.warn('[Call journal] Capture is not durable locally; archive/cloud persistence will retry.');}catch(_){}
     }
@@ -39570,263 +39520,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     return()=>clearInterval(iv);
   },[]);
 
-  // V7.6: BACKGROUND PRICE FEED for the INACTIVE asset. Keeps the other asset's price
-  //   warm so when user switches tabs, there's no cold start. Stored in a per-asset map
-  //   ref accessible via `priceByAssetRef.current[asset]`. When user switches, the active-
-  //   asset feed effect above takes over.
-  //   V9.8.4: Source-aware — uses same priceSource as primary feed.
-  useEffect(()=>{
-    const _otherAsset='BTC';
-    const _otherCfg=ASSET_CONFIG[_otherAsset]||ASSET_CONFIG.BTC;
-    const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
-    let _lastTradeId=0; // V9.8.12: stale CDN guard, see live-ticker effect comment above
-    const f=async()=>{
-      try{
-        const _url=_src.url(_otherCfg,_otherAsset);
-        const r=await fetch(_url,{cache:'no-store'});
-        if(!r.ok)return;
-        const d=await r.json();
-        // V9.8.12: same stale-CDN-response check as the active ticker. The inactive
-        //   asset's price feeds priceByAssetRef which the shadow engine reads — a
-        //   stale flash here would propagate into shadow posteriors.
-        if(typeof _src.parseTradeId==='function'){
-          const _newId=_src.parseTradeId(d);
-          if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;
-          if(_newId)_lastTradeId=_newId;
-        }
-        const p=_src.parsePrice(d);
-        if(p&&Number.isFinite(p)){
-          if(!priceByAssetRef.current)priceByAssetRef.current={};
-          priceByAssetRef.current[_otherAsset]={price:p,time:Date.now()};
-        }
-      }catch(e){}
-    };
-    f();
-    const iv=setInterval(f,2000); // slightly slower cadence for the background asset
-    return()=>clearInterval(iv);
-  },[currentAsset,priceSource]);
-
-  // V7.7: SHADOW TARA — background analysis for the INACTIVE asset. User: "tara's decision
-  //   only happens when i open the tab. i want her to make the decision already in the
-  //   background by the time i open". Every 2s, fetches the inactive asset's candles +
-  //   Kalshi strike + computes a lightweight directional read using computeV99Posterior.
-  //   Stores in shadowTaraByAssetRef so the asset-switch handler can surface "Tara currently
-  //   leans UP 78%" immediately. NOT a full lock candidate — no sample formation, no
-  //   commitment, just her current posterior view. Once you switch tabs, real Tara takes
-  //   over with full lifecycle.
-  // V9.3.0: cadence tightened from 5s→2s. Now also captures the Kalshi market ticker,
-  //   close_time, and YES price — so the shadow output can power side-by-side UI and
-  //   eventually shadow auto-execution. Adds simple 2-sample directional commitment so
-  //   the shadow has a "soft lock" view distinct from raw lean.
-  useEffect(()=>{
-    const _shadowAsset='BTC';
-    const _cfg=ASSET_CONFIG[_shadowAsset]||ASSET_CONFIG.BTC;
-    let _cancelled=false;
-    // V9.6.1: shadow diagnostics — tracks last successful update, last error,
-    //   and tick counters per failure type so we can see WHY the shadow is stale
-    //   without dropping into devtools. Visible in DualAssetCallStrip on hover.
-    if(!shadowDiagRef.current[_shadowAsset]){
-      shadowDiagRef.current[_shadowAsset]={
-        ticksAttempted:0,ticksSucceeded:0,
-        candleFails:0,candleEmpty:0,priceMissing:0,kalshiFails:0,engineErrors:0,
-        lastError:null,lastSuccess:0,lastErrorAt:0,
-      };
-    }
-    const _diag=shadowDiagRef.current[_shadowAsset];
-    const _logErr=(reason)=>{_diag.lastError=reason;_diag.lastErrorAt=Date.now();};
-    // V9.7.5: periodic summary log so shadow failures aren't drowned in other console
-    //   noise (Binance 451s, Kalshi 403s, etc). Fires once every 60s while shadow is
-    //   stale. Shows attempts / successes / fail breakdown / last error string in a
-    //   clearly-prefixed line that's easy to grep for.
-    const _summaryIv=setInterval(()=>{
-      if(_cancelled)return;
-      const _staleMs=Date.now()-(_diag.lastSuccess||0);
-      // Only log if there's been activity (otherwise we'd spam blank diags on init)
-      if(_diag.ticksAttempted<3)return;
-      // Don't log if the shadow is healthy (recent success)
-      if(_diag.lastSuccess>0&&_staleMs<30000)return;
-      const _rate=_diag.ticksAttempted>0?Math.round(100*_diag.ticksSucceeded/_diag.ticksAttempted):0;
-      console.warn(
-        `[shadow ${_shadowAsset} SUMMARY] attempts=${_diag.ticksAttempted} `+
-        `succ=${_diag.ticksSucceeded} (${_rate}%) `+
-        `candleFail=${_diag.candleFails} candleEmpty=${_diag.candleEmpty} `+
-        `priceMissing=${_diag.priceMissing} kalshiFail=${_diag.kalshiFails} `+
-        `engineErr=${_diag.engineErrors} | lastErr="${_diag.lastError||'none'}"`
-      );
-    },60000);
-    const _runShadow=async()=>{
-      if(_cancelled)return;
-      _diag.ticksAttempted++;
-      try{
-        // Fetch candles for the shadow asset. Light cadence — every 5s.
-        // V7.10.2: 5s abort signal so a hung Coinbase request doesn't stall the loop.
-        // V9.5.1: heartbeat bumps to updatedAt on partial-failure paths so the UI
-        //   doesn't show "feed stale" just because one Coinbase tick failed. The shadow
-        //   posterior data carries forward; only the timestamp gets a heartbeat.
-        const _heartbeat=()=>{
-          if(_cancelled)return;
-          if(!shadowTaraByAssetRef.current)shadowTaraByAssetRef.current={};
-          const _prev=shadowTaraByAssetRef.current[_shadowAsset];
-          if(_prev)shadowTaraByAssetRef.current[_shadowAsset]={..._prev,updatedAt:Date.now()};
-        };
-        const _gran=windowType==='15m'?900:300;
-        // V9.8.5: source-aware candle fetch (was Coinbase only with corsproxy fallback).
-        //   When user is on Kraken or Bitstamp, those sources don't share Coinbase's rate
-        //   limit, so the corsproxy retry isn't needed. If active source fails, heartbeat
-        //   and let the next poll (2s later) try again — same effective resilience.
-        const _shadowSrc=PRICE_SOURCES[priceSource]?.virtual?PRICE_SOURCES.coinbase:(PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT]); // V10.7.59b: BRTI virtual fallback
-        const _candleUrl=_shadowSrc.candleUrl(_cfg,_shadowAsset,_gran);
-        let _candleResp=await fetch(_candleUrl,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] ${_shadowSrc.label} candles failed:`,e?.message||e);return null;});
-        if(!_candleResp){_diag.candleFails++;_logErr('candles null');_heartbeat();return;}
-        if(!_candleResp.ok){_diag.candleFails++;_logErr(`candles http ${_candleResp.status} (${_shadowSrc.label})`);console.warn(`[shadow ${_shadowAsset}] ${_shadowSrc.label} candles failed, status:`,_candleResp.status);_heartbeat();return;}
-        if(_cancelled){_heartbeat();return;}
-        const _candleData=await _candleResp.json();
-        const _parsedCandles=_shadowSrc.parseCandles(_candleData);
-        if(!Array.isArray(_parsedCandles)||_parsedCandles.length<5){_diag.candleEmpty++;_logErr(`candles empty (got ${_parsedCandles?.length||0} parsed from ${_shadowSrc.label})`);console.warn(`[shadow ${_shadowAsset}] empty candle response from ${_shadowSrc.label}`);_heartbeat();return;}
-        const _bars=_parsedCandles.slice(0,60);
-        const _shadowPrice=priceByAssetRef.current?.[_shadowAsset]?.price||_bars[0]?.c||0;
-        if(_shadowPrice<=0){_diag.priceMissing++;_logErr(`no price (priceByAssetRef=${priceByAssetRef.current?.[_shadowAsset]?.price||'null'}, bars[0].c=${_bars[0]?.c||'null'})`);console.warn(`[shadow ${_shadowAsset}] no price extractable`);_heartbeat();return;}
-        // Fetch the shadow asset's Kalshi strike. Reuse the events endpoint.
-        // V9.3.0: also capture market ticker, close_time, and YES price so the
-        //   shadow output can drive a side-by-side call card (and eventually
-        //   shadow-asset auto-execution).
-        let _shadowStrike=0;
-        let _shadowMarketTicker=null;
-        let _shadowMarketCloseTime=null;
-        let _shadowYesCents=null;
-        try{
-          const _kPath=`events?series_ticker=${_cfg.kalshiSeriesTicker}${windowType==='15m'?'15M':'5M'}&with_nested_markets=true&status=open&limit=20`;
-          const _kUrl=`https://api.elections.kalshi.com/trade-api/v2/${_kPath}`;
-          // V7.10.7: try Vercel rewrite first (no CORS, fast). On failure (local dev, or Vercel
-          //   route 404), fall through to corsproxy.io. Both wrapped in catch so the shadow
-          //   analysis continues with strike=0 if everything fails — non-fatal.
-          let _kr=await fetch(`/api/kalshi/${_kPath}`,{signal:AbortSignal.timeout(4000)}).catch(()=>null);
-          if(!_kr||!_kr.ok){
-            _kr=await fetch(`https://corsproxy.io/?url=${encodeURIComponent(_kUrl)}`,{signal:AbortSignal.timeout(5000)}).catch(()=>null);
-          }
-          if(_kr&&_kr.ok){
-            const _kd=await _kr.json();
-            const _events=_kd.events||[];
-            for(const _ev of _events){
-              const _markets=_ev.markets||[];
-              for(const _m of _markets){
-                if(_m.strike_type==='greater'&&_m.floor_strike){
-                  _shadowStrike=Number(_m.floor_strike);
-                  _shadowMarketTicker=_m.ticker||null;
-                  _shadowMarketCloseTime=_m.close_time||null;
-                  // Best-effort YES price: prefer last_price, fall back to mid of bid/ask
-                  if(_m.last_price!=null)_shadowYesCents=Number(_m.last_price);
-                  else if(_m.yes_bid!=null&&_m.yes_ask!=null)_shadowYesCents=Math.round((Number(_m.yes_bid)+Number(_m.yes_ask))/2);
-                  else if(_m.yes_ask!=null)_shadowYesCents=Number(_m.yes_ask);
-                  break;
-                }
-              }
-              if(_shadowStrike>0)break;
-            }
-          }
-        }catch(e){/* Kalshi fetch failure — non-fatal */}
-        if(_cancelled)return;
-        // Compute the shadow analysis. Pass minimal context — we don't have shadow orderBook
-        //   or shadow live history per-tick, so we use what we have. This gives a directional
-        //   read but not a full per-tick analysis.
-        const _shadowParams={
-          currentPrice:_shadowPrice,
-          liveHistory:_bars.slice(0,30),
-          targetMargin:_shadowStrike,
-          globalFlow:{imbalance:1.0}, // neutral — no orderbook for shadow
-          bloomberg:{},
-          velocityRef:{current:{v5sNum:0,drift1m:0}},
-          tickHistoryRef:{current:[]},
-          priceMemoryRef:{current:[]},
-          windowType,
-          timeFraction:1-((timeState.minsRemaining*60+timeState.secsRemaining)/(windowType==='15m'?900:300)),
-          clockSeconds:timeState.minsRemaining*60+timeState.secsRemaining,
-          is15m:windowType==='15m',
-          regimeMemory:regimeMemory,
-          adaptiveWeights:adaptiveWeightsByAssetRef.current?.[_shadowAsset]||adaptiveWeightsByAssetRef.current?.BTC,
-          calibration:{posteriorBuckets:{}},
-          windowOpenPrice:_bars[0]?.o||_shadowPrice,
-          depthFlash:0,
-          tfCandles:{},
-        };
-        let _shadowResult=null;
-        try{_shadowResult=computeV99Posterior(_shadowParams);}catch(e){/* engine error — leave null */}
-        if(_shadowResult&&!_cancelled){
-          const _post=Number(_shadowResult.rawProbAbove)||50;
-          const _leanDir=_post>=55?'UP':_post<=45?'DOWN':'NEUTRAL';
-          const _confNum=Math.round(_leanDir==='UP'?_post:_leanDir==='DOWN'?(100-_post):50);
-          // V9.3.0: SOFT LOCK — when 2 consecutive samples agree on direction with conviction
-          //   ≥10pt, mark as 'committed'. Cleared on direction flip or window roll.
-          if(!shadowTaraByAssetRef.current)shadowTaraByAssetRef.current={};
-          const _prev=shadowTaraByAssetRef.current[_shadowAsset]||{};
-          const _wid=computeWindowId(windowType);
-          let _committedDir=null,_sampleCount=1,_committedAt=null;
-          const _conviction=Math.abs(_post-50);
-          if(_prev.windowId===_wid&&_prev.leanDir===_leanDir&&_leanDir!=='NEUTRAL'&&_conviction>=10){
-            _sampleCount=(_prev.sampleCount||1)+1;
-            if(_sampleCount>=2){
-              _committedDir=_leanDir;
-              _committedAt=_prev.committedAt||Date.now();
-            }
-          } else if(_prev.windowId===_wid&&_prev.committedDir&&_prev.leanDir===_leanDir){
-            // direction unchanged; preserve commitment
-            _committedDir=_prev.committedDir;
-            _committedAt=_prev.committedAt;
-            _sampleCount=_prev.sampleCount||2;
-          } else {
-            // direction flipped or new window — reset
-            _sampleCount=1;
-          }
-          shadowTaraByAssetRef.current[_shadowAsset]={
-            leanDir:_leanDir,
-            confidence:_confNum,
-            posterior:_post,
-            strike:_shadowStrike,
-            currentPrice:_shadowPrice,
-            regime:_shadowResult.regime||'',
-            // V9.3.0 NEW
-            kalshiYesCents:_shadowYesCents,
-            marketTicker:_shadowMarketTicker,
-            marketCloseTime:_shadowMarketCloseTime,
-            windowId:_wid,
-            sampleCount:_sampleCount,
-            committedDir:_committedDir,
-            committedAt:_committedDir?_committedAt:null,
-            conviction:_conviction,
-            atrBps:_shadowResult.atrBps||0,
-            updatedAt:Date.now(),
-          };
-          // V9.6.1: mark success in diagnostics
-          _diag.ticksSucceeded++;_diag.lastSuccess=Date.now();
-          // V9.3.0: also feed _otherAssetRef so the PRIMARY engine's cross-asset signal
-          //   (otherAssetData param to computeV99Posterior) gets fresh data without
-          //   needing a second tab open. Previously this only updated via BroadcastChannel
-          //   from a different tab; now single-tab usage gets cross-asset correlation too.
-          const _otherPrevRef=_otherAssetRef.current;
-          const _other5m=(_otherPrevRef.asset===_shadowAsset&&_otherPrevRef.price>0&&(Date.now()-_otherPrevRef.lastUpdate)>4000)?_otherPrevRef.price:(_bars[0]?.o||_shadowPrice);
-          const _otherDelta=_other5m>0?((_shadowPrice-_other5m)/_other5m)*10000:0;
-          _otherAssetRef.current={asset:_shadowAsset,price:_shadowPrice,price5mAgo:_other5m,deltaBps:_otherDelta,lastUpdate:Date.now()};
-        }
-      }catch(e){
-        // V9.6.1: capture engine errors instead of swallowing silently
-        _diag.engineErrors++;
-        _logErr('engine threw: '+(e?.message||String(e)));
-      }
-    };
-    _runShadow();
-    const _iv=setInterval(_runShadow,2000);
-    return()=>{_cancelled=true;clearInterval(_iv);clearInterval(_summaryIv);};
-  // V9.5.1: REMOVED timeState.minsRemaining and timeState.secsRemaining from deps.
-  //   With those in the array, the effect was tearing down 1× per second — the
-  //   2s setInterval literally never fired, and the immediate fetch call got
-  //   cancelled mid-flight on slow networks. Result: "feed stale" almost any
-  //   time the network was anything less than instant.
-  //   The shadow loop reads windowType+regimeMemory (which are the only
-  //   things it actually depends on) and gets time-of-day fresh on each tick
-  //   from Date.now() inside _runShadow. The tick itself is the cadence, not
-  //   the effect re-run.
-  //   V9.8.5: priceSource added so shadow follows the active source toggle.
-  },[currentAsset,windowType,regimeMemory,priceSource]);
+  // BTC has one primary price/analysis owner; advisory mirrors follow readiness.
 
   // Heavy data — V9.8.6: candles AND order book follow active source
   //   Both endpoints normalize to a common shape via parseCandles/parseBook so the
@@ -44240,6 +43934,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     spot:currentPrice,spotAt:_startupSpotAt,analysis,intervalSeconds:windowType==='15m'?900:300,
     minimumUntil:_startupUserHold,now:_startupNow});
   const _hourlyObservation={spot:currentPrice,spotAt:_startupSpotAt,source:priceSource,asset:currentAsset,readiness:startupReadiness};
+  useEffect(()=>{
+    if(currentAsset!=='BTC')return;
+    const previous=shadowDiagRef.current.BTC;
+    const diag=previous?.mode==='primary-mirror'?previous:{mode:'primary-mirror',ticksAttempted:0,
+      ticksSucceeded:0,lastSuccess:0,lastError:null,candleFails:0,candleEmpty:0,priceMissing:0,kalshiFails:0,engineErrors:0};
+    shadowDiagRef.current.BTC=diag;diag.ticksAttempted++;
+    const view=primaryShadowView({analysis,asset:currentAsset,price:currentPrice,strike:targetMargin,
+      ticker:kalshiActiveMarket?.ticker,closeTime:kalshiActiveMarket?.close_time,
+      windowId:computeWindowId(windowType),ready:startupReadiness.ready,spotAt:_startupSpotAt});
+    if(view){priceByAssetRef.current.BTC={price:currentPrice,time:_startupSpotAt};shadowTaraByAssetRef.current.BTC=view;diag.ticksSucceeded++;diag.lastSuccess=view.updatedAt;diag.lastError=null;}
+    else{diag.lastError=!startupReadiness.ready?startupReadiness.reason:analysis?.prediction==='ERROR'?(analysis.reasoning?.[0]||'Primary analysis unavailable.'):'Waiting for valid primary analysis.';
+      diag.lastErrorAt=Date.now();if(analysis?.prediction==='ERROR')diag.engineErrors++;
+      if(shadowTaraByAssetRef.current.BTC)shadowTaraByAssetRef.current.BTC={...shadowTaraByAssetRef.current.BTC,updatedAt:0};}
+  },[analysis,currentAsset,currentPrice,targetMargin,windowType,kalshiActiveMarket?.ticker,startupReadiness.ready,_startupSpotAt]);
 
   // V3.2.4: TARA'S CALL — a separate, higher-conviction decision layer.
   //   The "general prediction" (analysis.prediction / posterior) tells you the most likely
@@ -51784,6 +51492,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     );}catch(_e){}
   },[]);
 
+  const _hourlyEngine=useHourlyEngine({..._hourlyObservation,taraCall,onHourlyLock:_onHourlyLock});
+  const _hourlyOnLeft=(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch{return false;}})();
+
   const handleManualSync=(dir,opts)=>{
     // V9.3.0: opts={autoExec, force}. autoExec=true tags the resulting trade entry so
     // the auto-exec daily-P&L and loss-streak cooldown can attribute it. force=true
@@ -52454,7 +52165,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.2</small>
+              <small>DECISION ENGINE · V14.7.3</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -52991,6 +52702,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
         />
         {workspaceFocus==='overview'&&<><div className="tara-v14-page-lead"><div><h2>Your current window</h2><p>The locked Call, its record and the market in one place.</p></div><button className="tara-v145-settings-button" onClick={()=>setShowTradingSettings(true)}>Window settings</button></div><TaraLiveMarketMetrics asset={currentAsset} priceSource={priceSource} currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource} activeTicker={kalshiActiveMarket?.ticker||null} timeState={timeState} windowType={windowType} quote={_kalshiQuote} windowId={computeWindowId(windowType)}/></>}
         {workspaceFocus!=='overview'&&<TaraWorkspaceHeading view={workspaceFocus} analysis={analysis} qualityGate={qualityGate} newsSentiment={newsSentiment} pendingKalshiCount={tradeLog.filter(t=>t.result==='PENDING-VERIFY').length} snapshot={_activeCallSnapshot}/>}
+        {workspaceFocus!=='memory'&&callStorageStatus.state==='degraded'&&<TaraStorageStatus status={callStorageStatus}/>}
         {workspaceFocus==='overview'&&<TaraPageBrief
           taraCall={taraCall}
           snapshot={_activeCallSnapshot}
@@ -53797,7 +53509,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           settings={tradingSettings}
         />
 
-          <ProjectionsCard hourlyContext={_hourlyObservation} analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+          <ProjectionsCard hourlyContext={{engine:_hourlyEngine}} analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
             //   Direction edit recomputes the result automatically if we have closing price + strike,
@@ -53899,7 +53611,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               duplicated rather than hoisted to a shared handler, matching this
               file's existing convention of per-call-site inline edit/delete
               closures (the mobile TaraCallCard call site has its own copy too). */}
-          <div className="tara-memory-stack"><TaraMemoryStrip fullPage={workspaceFocus==='memory'} taraCallLog={displayedCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={(entryId,newValue,field)=>{
+          <div className="tara-memory-stack">{workspaceFocus==='memory'&&<TaraStorageStatus status={callStorageStatus}/>}<TaraMemoryStrip fullPage={workspaceFocus==='memory'} taraCallLog={displayedCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={(entryId,newValue,field)=>{
             const _field=field||'result';
             setTaraCallLog(prev=>{
               const next=prev.map(e=>{
@@ -53947,7 +53659,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             so both are visible together on desktop; single column on mobile,
             same convention as the main grid above. */}
         <div className="tara-hourly-row grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0 min-w-0" id="tara-schedule-surface">
-          <HourlyLadderPanel {..._hourlyObservation} taraCall={taraCall} onHourlyLock={_onHourlyLock}/>
+          {!_hourlyOnLeft&&<HourlyLadderPanel engine={_hourlyEngine}/>}
           <TaraDetailEnvelope enabled={workspaceFocus==='schedule'} label="Hourly schedule & session performance">
           <ScheduleBySessionCard taraCallLog={taraCallLog}/>
           <div className="tara-trade-schedule min-w-0">

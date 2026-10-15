@@ -11,7 +11,7 @@ import {finiteNumber} from '../src/callIntegrity.js';
 const source=fs.readFileSync(new URL('../src/TaraPresentation.jsx',import.meta.url),'utf8')
   .replace(/^import .*;\r?$/gm,'').replace(/export (const|function) /g,'$1 ');
 const compiled=transformSync(source,{loader:'jsx',format:'cjs'}).code;
-const {TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope}=new Function('React','capturedReason','recordVersion','evidenceCohort','finiteNumber',`${compiled};return {TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope};`)(React,capturedReason,recordVersion,evidenceCohort,finiteNumber);
+const {TaraStorageStatus,TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope}=new Function('React','capturedReason','recordVersion','evidenceCohort','finiteNumber',`${compiled};return {TaraStorageStatus,TaraBrainSummary,TaraEvidenceAnalytics,HourlyApprovalSummary,RecordInspector,TaraSignalsSummary,TaraDetailEnvelope};`)(React,capturedReason,recordVersion,evidenceCohort,finiteNumber);
 const render=(C,props)=>renderToStaticMarkup(React.createElement(C,props));
 test('forming Brain never claims a captured Call or converts missing evidence to confidence',()=>{
   const html=render(TaraBrainSummary,{lock:{committed:false},candidate:{blockedDecision:{reason:'Waiting for fresh quote'}}});
@@ -40,4 +40,10 @@ test('disclosure does not conditionally remove its original panels',()=>{
   const children=React.createElement('div',null,'Original control');
   assert.match(render(TaraDetailEnvelope,{enabled:true,children}),/Original control/);
   assert.match(render(TaraDetailEnvelope,{enabled:false,children}),/Original control/);
+});
+test('history status distinguishes verified archive from small paint caches and real write failures',()=>{
+  const good=render(TaraStorageStatus,{status:{state:'ok',archiveSaved:true,archiveRows:1200,deepRows:100,fastRows:10}});
+  assert.match(good,/1200 archived/);assert.match(good,/History archived/);assert.doesNotMatch(good,/needs attention/);
+  const bad=render(TaraStorageStatus,{status:{state:'degraded',archiveSaved:false,error:'History transaction aborted.',deepRows:0,fastRows:0}});
+  assert.match(bad,/needs attention/);assert.match(bad,/History transaction aborted/);assert.doesNotMatch(bad,/History archived/);
 });
