@@ -36,7 +36,7 @@ import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executio
 import {buildSafeEntry,buildSafeExit,normalizeExecutionOrder,runSafeEntryLadder,heldQuote,executionFeeCents,fetchAllExecutionPages,accountRiskSnapshot,affordableContracts,summarizeOrderFills} from './executionSafety.js';
 import {executionIntentId,stableExecutionId,reserveExecutionIntent,updateExecutionIntent,readExecutionState,writeExecutionState,restoreExecutionLedger} from './executionJournal.js';
 import {commitHourlyAdmission,supabaseHourlyTransport} from './hourlyAdmission.js';
-import {hourlyPublicPaths} from './hourlyPublic.js';
+import {hourlyPublicPaths,readHourlyPublic} from './hourlyPublic.js';
 import {API_BASE} from './apiBase.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
@@ -16276,16 +16276,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
 //   parsing (so an error page is named rather than surfacing as a JSON parse
 //   error), then check the payload actually has the shape we asked for.
 const _kLadFetch=async(url,validate,timeoutMs=6000)=>{
-  try{
-    const r=await fetch(url,{signal:AbortSignal.timeout(timeoutMs),cache:'no-store'});
-    if(!r.ok)return{ok:false,reason:'http '+r.status};
-    const t=await r.text();
-    if(!t||t.trimStart().startsWith('<'))return{ok:false,reason:'HTML not JSON'};
-    let d;
-    try{d=JSON.parse(t);}catch(_e){return{ok:false,reason:'invalid JSON'};}
-    if(validate&&!validate(d))return{ok:false,reason:'unexpected payload'};
-    return{ok:true,data:d};
-  }catch(e){return{ok:false,reason:(e&&e.message||'fetch failed').slice(0,48)};}
+  return readHourlyPublic(url,{validate,timeoutMs});
 };
 // V13.4.205: race several paths instead of trusting one. The first-party
 //   rewrite is normally fastest; the two official public bases exist

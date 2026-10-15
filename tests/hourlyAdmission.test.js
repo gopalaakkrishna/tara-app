@@ -2,10 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {commitHourlyAdmission,supabaseHourlyTransport} from '../src/hourlyAdmission.js';
 import {hourlyRecordGuard} from '../src/hourlyDecision.js';
-import {hourlyPublicPaths} from '../src/hourlyPublic.js';
+import {hourlyPublicPaths,readHourlyPublic} from '../src/hourlyPublic.js';
 import {hourlyHarness,actual} from './helpers/hourlyHarness.js';
 const policy={maxLocks:3,cooldownMs:180000},now=Date.parse('2026-10-15T23:20Z'),close=now+2400000;
 const merge=actual('_hrMerge',{_HR_HISTORY_CAP:500});
+
+test('public hourly reader retries a transient429 once, and only genuine new JSON can succeed',async()=>{
+  let calls=0;const sleeps=[];
+  const result=await readHourlyPublic('https://test.invalid',{sleep:async ms=>sleeps.push(ms),validate:x=>Array.isArray(x.events),
+    fetchImpl:async()=>++calls===1?{ok:false,status:429,headers:new Headers()}:{ok:true,text:async()=>JSON.stringify({events:[{event_ticker:'new'}]})}});
+  assert.equal(result.ok,true);assert.equal(calls,2);assert.deepEqual(sleeps,[750]);assert.equal(result.data.events[0].event_ticker,'new');
+});
+
+test('public hourly retries are bounded and long Retry-After, HTML and malformed payloads stay unavailable',async()=>{
+  for(const response of [{ok:false,status:429,headers:new Headers({'retry-after':'60'})},{ok:true,text:async()=>'<html>error</html>'},{ok:true,text:async()=>'bad'},{ok:true,text:async()=>JSON.stringify({old:'wrong shape'})}]){
+    let calls=0;const result=await readHourlyPublic('https://test.invalid',{fetchImpl:async()=>{calls++;return response;},sleep:async()=>{},validate:x=>Array.isArray(x.events)});
+    assert.equal(result.ok,false);assert.equal(calls,1);
+  }
+  let calls=0;const failure=await readHourlyPublic('https://test.invalid',{fetchImpl:async()=>{calls++;throw Error('offline');},sleep:async()=>{}});
+  assert.equal(failure.ok,false);assert.equal(calls,2);
+});
 
 test('all hourly public reads retain the configured host and Render fallback without an order route',()=>{
   for(const path of ['series/KXBTCD','events?series_ticker=KXBTCD','markets?event_ticker=T','markets/T']){
