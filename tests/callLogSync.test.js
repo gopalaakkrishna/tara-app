@@ -6,6 +6,7 @@ import {cloudWriteRetryDelay,boundedCloudWriteQuery} from '../src/cloudWriteReco
 import {CALL_EVIDENCE_FIELDS,callKey,normalizeCallLedger} from '../src/callIntegrity.js';
 import {mergeWeatherRecords} from '../src/weatherRecord.js';
 import {supabaseHourlyTransport} from '../src/hourlyAdmission.js';
+import {createClient} from '@supabase/supabase-js';
 
 const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
 const path='memory/taraCallLog';
@@ -44,7 +45,7 @@ test('peer status includes sit-out finalization and blocker/correction timestamp
   assert.equal(behind(finished,finished),false);
 });
 
-function harness({initial={entries:[base]},readError=false,writeError=false,conflicts=0,beforeWrite,failThenCommit=false}={}) {
+function harness({initial={entries:[base]},readError=false,writeError=false,conflicts=0,beforeWrite,failThenCommit=false,clientOverride,boundQuery=q=>q}={}) {
   const timers=new Map(),queue=new Map(),pending=new Map(),synced=new Map(),health=[];
   let sequence=0,cloud=initial,reads=0,writes=0,failed=writeError,readFailed=readError,active=0,maxActive=0;
   const timer=(fn,delay)=>{if(delay<1000){queueMicrotask(fn);return ++sequence;}timers.set(++sequence,{fn,delay});return sequence;};
@@ -57,7 +58,7 @@ function harness({initial={entries:[base]},readError=false,writeError=false,conf
   const body=app.slice(app.indexOf('const cloudSupabaseWriteDebouncedRMW='),app.indexOf('// Force-flush all pending Supabase RMW writes'));
   const sync=new Function('supabaseHourlyTransport','_sbClient','_sbWriteQueueRMW','_sbWritePendingRMW','_sbLastSyncSig','callLogSyncSignature','_stripEntryForCloud','_sbWriteInFlightRMW','_sbWriteFailuresRMW','cloudWriteRetryDelay','boundedCloudWriteQuery',
     '_setCloudStatus','_cloudSyncStatus','setTimeout','clearTimeout','console',body+';return cloudSupabaseWriteDebouncedRMW;')(
-      supabaseHourlyTransport,client,queue,pending,synced,callLogSyncSignature,e=>e,new Set(),new Map(),cloudWriteRetryDelay,q=>q,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
+      supabaseHourlyTransport,clientOverride||client,queue,pending,synced,callLogSyncSignature,e=>e,new Set(),new Map(),cloudWriteRetryDelay,boundQuery,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
   const mergeBody=app.slice(app.indexOf('  const _mergeCallLogEntries='),app.indexOf('  const[callStorageStatus',app.indexOf('  const _mergeCallLogEntries=')));
   const merge=new Function('React','CALL_EVIDENCE_FIELDS','normalizeCallLedger','TARA_CALL_LOG_CAP','_auditLogEvent',mergeBody+';return _mergeCallLogEntries;')(
     {useCallback:fn=>fn},CALL_EVIDENCE_FIELDS,normalizeCallLedger,1000,()=>{});
@@ -270,4 +271,18 @@ test('a timeout retry re-merges a peer capture rather than replaying the old ful
   h.recover();await h.flush();assert.equal(h.cloud.entries.length,2);
   assert.deepEqual(h.cloud.entries.find(e=>e.id===peer.id).originalDecision,peer.originalDecision);
   assert.equal(h.cloud.entries.find(e=>e.id===base.id).result,'SITOUT');
+});
+
+test('installed Supabase SDK executes real fluent GET/PATCH/CAS with abort signals and recovers a 57014 response',async()=>{
+  let cloud={entries:[base]},gets=0,patches=0,bounded=0;
+  const client=createClient('https://isolated.invalid','test-public-config',{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false},global:{fetch:async(url,init)=>{
+    assert.equal(new URL(url).hostname,'isolated.invalid');assert.ok(init.signal instanceof AbortSignal);
+    if(init.method==='GET'){gets++;return new Response(JSON.stringify([{data:cloud,updated_at:'2026-10-16T00:00:00Z'}]),{status:200,headers:{'content-type':'application/json'}});}
+    assert.equal(init.method,'PATCH');assert.match(String(url),/updated_at=eq\./);patches++;
+    if(patches===1)return new Response(JSON.stringify({code:'57014',message:'canceling statement due to statement timeout'}),{status:500,headers:{'content-type':'application/json'}});
+    cloud=JSON.parse(init.body).data;return new Response(null,{status:204,headers:{'content-range':'0-0/1'}});
+  }}});
+  const h=harness({clientOverride:client,boundQuery:q=>{bounded++;return boundedCloudWriteQuery(q);}});
+  h.sendExact([{...base,result:'SITOUT',resolvedAt:9000}]);await h.flush();assert.equal(h.synced.size,0);assert.equal([...h.timers.values()][0].delay,1500);
+  await h.flush();assert.equal(gets,2);assert.equal(patches,2);assert.equal(bounded,4);assert.equal(cloud.entries[0].result,'SITOUT');assert.deepEqual(cloud.entries[0].originalDecision,base.originalDecision);assert.equal(h.synced.size,1);
 });
