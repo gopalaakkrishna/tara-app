@@ -15,7 +15,8 @@ import {persistCallCaches,updateIndexedRecord,mergeDurableCallArchive} from './c
 import {lifecycleAuditState} from './lifecycleAudit.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
-import {callLogSyncSignature,callLogSyncStatus} from './callLogSync.js';
+import {callLogSyncSignature,callLogSyncStatus,callLogCloudPayload} from './callLogSync.js';
+import {cloudWriteRetryDelay,boundedCloudWriteQuery} from './cloudWriteRecovery.js';
 import {postProcessLegacyCall,readCallCostBand} from './callCandidateRules.js';
 import {readCapturedCallSettlement} from './callSettlement.js';
 import {coinbaseCandleRange} from './candleRequests.js';
@@ -892,11 +893,19 @@ const cloudSupabaseDelete=async(path)=>{
 const _sbWriteQueueRMW=new Map();
 const _sbWritePendingRMW=new Map();
 const _sbLastSyncSig=new Map(); // V10.9.29: path -> last successfully-synced signature
+const _sbWriteInFlightRMW=new Set();
+const _sbWriteFailuresRMW=new Map();
 const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
   if(!_sbClient||!path)return;
   // The large log flush has a bounded wait: fresh evidence updates the pending
   // payload but must not indefinitely restart its existing 60-second timer.
   const dueAt=Date.now()+delayMs;
+  if(_sbWriteInFlightRMW.has(path)){
+    // Keep one latest follow-up while this path owns its read/merge/CAS cycle.
+    // Starting a second full-blob PATCH only creates local contention.
+    _sbWritePendingRMW.set(path,{getLocalData,mergeFn,dueAt:Math.min(dueAt,_sbWritePendingRMW.get(path)?.dueAt??dueAt)});
+    return;
+  }
   if(_sbWriteQueueRMW.has(path)&&['memory/taraCallLog','memory/hourlyRecord'].includes(path)&&
     (_sbWritePendingRMW.get(path)?.dueAt??dueAt)<=dueAt){
     _sbWritePendingRMW.set(path,{getLocalData,mergeFn,dueAt:_sbWritePendingRMW.get(path)?.dueAt??dueAt});
@@ -911,6 +920,10 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
     _sbWriteQueueRMW.delete(path);
     _sbWritePendingRMW.delete(path);
     if(!_sbClient)return;
+    _sbWriteInFlightRMW.add(path);
+    let _completed=false,_failure=null;
+    const _bounded=query=>path==='memory/taraCallLog'?boundedCloudWriteQuery(query):query;
+    try{
     // V14.4.5: pending -> SITOUT and blocker-only updates have unchanged counts
     // and ids. Compare the actual stripped evidence, retaining the egress gate.
     if(path==='memory/taraCallLog'){
@@ -918,20 +931,19 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         const _ld=_getLocalData();
         const _arr=Array.isArray(_ld)?_ld:(Array.isArray(_ld&&_ld.entries)?_ld.entries:[]);
         const _sig=callLogSyncSignature(_arr,_stripEntryForCloud);
-        if(_sbLastSyncSig.get(path)===_sig)return; // nothing material changed
+        if(_sbLastSyncSig.get(path)===_sig){_completed=true;return;} // nothing material changed
       }catch(_){}
     }
     // Optimistic RMW with retry. 5 attempts matches Firestore default.
     let _attempts=0;
-    let _completed=false;
-    try{
     while(_attempts<5){
       _attempts++;
       try{
         // Read current state
-        const {data:_cur,error:_readErr}=await _sbClient.from('tara_state')
-          .select('data,updated_at').eq('doc_path',path).maybeSingle();
+        const {data:_cur,error:_readErr}=await _bounded(_sbClient.from('tara_state')
+          .select('data,updated_at').eq('doc_path',path).maybeSingle());
         if(_readErr&&_readErr.code!=='PGRST116'){
+          _failure=_readErr;
           console.warn('[Supabase] RMW read failed',path,_readErr.message);
           // V13.4.176 FIX: RMW is the write path for the highest-value data (call
           //   log, weights, learnings) and every failure branch here used to be
@@ -949,7 +961,14 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         const _writtenSig=path==='memory/taraCallLog'?callLogSyncSignature(
           Array.isArray(_localData)?_localData:(_localData?.entries||[]),_stripEntryForCloud):null;
         const _merged=_mergeFn(_cloudData,_localData);
-        if(_merged==null){_completed=true;return;} // mergeFn signaled "skip write"
+        if(_merged==null){
+          // A prior timed-out response may have committed, or a peer already
+          // published the same evidence. The fresh merge proved it is present.
+          if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
+          _completed=true;
+          _setCloudStatus({state:'ok',lastOk:Date.now()});
+          return;
+        }
         if(path==='memory/hourlyRecord'){
           // Settlement/hydration writers share the admission revision protocol:
           // even same-millisecond writes cannot erase an accepted approval.
@@ -967,11 +986,12 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         //   filter on updated_at to enforce optimistic concurrency.
         if(_cloudUpdatedAt){
           // Update with concurrency check
-          const {error:_updateErr,count}=await _sbClient.from('tara_state')
+          const {error:_updateErr,count}=await _bounded(_sbClient.from('tara_state')
             .update({data:_merged,updated_at:new Date().toISOString()},{count:'exact'})
             .eq('doc_path',path)
-            .eq('updated_at',_cloudUpdatedAt);
+            .eq('updated_at',_cloudUpdatedAt));
           if(_updateErr){
+            _failure=_updateErr;
             console.warn('[Supabase] RMW update failed',path,_updateErr.message);
             _setCloudStatus({state:'error',lastError:{path,message:_updateErr.message,at:Date.now()}});
             return;
@@ -979,6 +999,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           if(count===0){
             // Conflict — someone else wrote. Retry from the top.
             if(_attempts>=5){
+              _failure={code:'40001',message:'Repeated write conflicts'};
               console.warn('[Supabase] RMW gave up after 5 attempts',path);
               _setCloudStatus({state:'error',lastError:{path,message:'RMW gave up after 5 attempts (repeated write conflicts)',at:Date.now()}});
               return;
@@ -993,8 +1014,8 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
         } else {
           // No existing row — plain insert. If it conflicts (race with another
           //   first-time inserter), retry from the top.
-          const {error:_insertErr}=await _sbClient.from('tara_state')
-            .insert({doc_path:path,data:_merged,updated_at:new Date().toISOString()});
+          const {error:_insertErr}=await _bounded(_sbClient.from('tara_state')
+            .insert({doc_path:path,data:_merged,updated_at:new Date().toISOString()}));
           if(_insertErr){
             // 23505 = unique violation = someone else inserted first. Retry.
             if(_insertErr.code==='23505'){
@@ -1007,6 +1028,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
               continue;
             }
             console.warn('[Supabase] RMW insert failed',path,_insertErr.message);
+            _failure=_insertErr;
             _setCloudStatus({state:'error',lastError:{path,message:_insertErr.message,at:Date.now()}});
             return;
           }
@@ -1016,14 +1038,29 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           return; // success
         }
       } catch(e){
+        _failure=e;
         console.warn('[Supabase] RMW threw',path,e?.message);
         _setCloudStatus({state:'error',lastError:{path,message:e?.message||'RMW threw',at:Date.now()}});
         return;
       }
     }
     }finally{
-      if(!_completed&&['memory/taraCallLog','memory/hourlyRecord'].includes(path)&&!_sbWriteQueueRMW.has(path))
-        cloudSupabaseWriteDebouncedRMW(path,_getLocalData,_mergeFn,60000);
+      _sbWriteInFlightRMW.delete(path);
+      const _latest=_sbWritePendingRMW.get(path);
+      const _recordPath=['memory/taraCallLog','memory/hourlyRecord'].includes(path);
+      let _retryDelay=60000;
+      if(_completed)_sbWriteFailuresRMW.delete(path);
+      else if(_recordPath){
+        const _failures=(_sbWriteFailuresRMW.get(path)||0)+1;
+        _sbWriteFailuresRMW.set(path,_failures);
+        _retryDelay=cloudWriteRetryDelay(_failure,_failures);
+      }
+      if((_latest||(!_completed&&_recordPath))&&!_sbWriteQueueRMW.has(path)){
+        _sbWritePendingRMW.delete(path);
+        const _remaining=_latest?Math.max(0,_latest.dueAt-Date.now()):_retryDelay;
+        const _delay=_completed?_remaining:(_recordPath?_retryDelay:_remaining);
+        cloudSupabaseWriteDebouncedRMW(path,_latest?.getLocalData||_getLocalData,_latest?.mergeFn||_mergeFn,_delay);
+      }
     }
   },delayMs);
   _sbWriteQueueRMW.set(path,tid);
@@ -1032,29 +1069,25 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
 // Force-flush all pending Supabase RMW writes (called on tab close).
 //   Best-effort, since async network calls may not complete before unload.
 const _cloudSupabaseFlushAllRMW=()=>{
-  let _flushed=0;
-  for(const[path,tid]of _sbWriteQueueRMW.entries()){
-    clearTimeout(tid);
-    const entry=_sbWritePendingRMW.get(path);
-    if(entry){
-      try{
-        if(['memory/taraCallLog','memory/hourlyRecord'].includes(path)){
-          // Unload is not permission for a blind overwrite of shared history.
-          // Keep CAS/merge semantics; local capture journals survive if the
-          // browser ends before this best-effort read/write can complete.
-          setTimeout(()=>cloudSupabaseWriteDebouncedRMW(path,entry.getLocalData,entry.mergeFn,0),0);
-          _flushed++;continue;
-        }
-        const _localData=entry.getLocalData();
-        const _merged=entry.mergeFn(null,_localData);
-        if(_merged!=null)cloudSupabaseWrite(path,_merged);
-        _flushed++;
-      }catch(_){}
-    }
-  }
+  // Snapshot pending work, including a latest payload queued behind an active
+  // write. Clear timers before rescheduling; the per-path owner remains intact.
+  const pending=[..._sbWritePendingRMW.entries()];
+  for(const tid of _sbWriteQueueRMW.values())clearTimeout(tid);
   _sbWriteQueueRMW.clear();
   _sbWritePendingRMW.clear();
-  return _flushed;
+  let flushed=0;
+  for(const[path,entry]of pending){
+    try{
+      if(['memory/taraCallLog','memory/hourlyRecord'].includes(path)){
+        cloudSupabaseWriteDebouncedRMW(path,entry.getLocalData,entry.mergeFn,0);
+      }else{
+        const merged=entry.mergeFn(null,entry.getLocalData());
+        if(merged!=null)cloudSupabaseWrite(path,merged);
+      }
+      flushed++;
+    }catch(_){}
+  }
+  return flushed;
 };
 
 // V10.2.0: stubbed. Firestore retired; `doc()` from firebase/firestore is no longer
@@ -5645,8 +5678,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.15-v14.7.8-paper-expiry-journal';
-const TARA_VERSION_DISPLAY='TARA 14.7.8';
+const TARA_BUILD_VERSION='2026.10.16-v14.7.9-bounded-sync-recovery';
+const TARA_VERSION_DISPLAY='TARA 14.7.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -36577,43 +36610,7 @@ function TaraApp(){
         ()=>taraCallLogRef.current.slice(-TARA_CALL_LOG_CAP),
         (cloudData,localEntries)=>{
           const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
-          const merged=_mergeCallLogEntries(cloudEntries,localEntries);
-          // V10.7.58 EGRESS FIX: tighter skip logic.
-          //   Prior: only skipped when length AND all keys matched.
-          //   Problem: PENDING→WIN/LOSS changes same key (windowId|type) but different result
-          //   field → skip never fired → full 3MB write every trade resolution.
-          //   Now: skip when all NEW entries (not in cloud) are resolved versions of
-          //   existing pending cloud entries — those only change the result field locally.
-          //   We still write when genuinely new windows appear or cloud is behind.
-          // V13.2: compute the capped cloud slice (what we will actually write) and run
-          //   the skip-logic against IT, not the full local merge. Comparing full local
-          //   vs the capped cloud would keep _hasNewWindows/_localHasMoreResolved
-          //   permanently true and write every 60s. Full history stays in local IDB.
-          const _cloudSlice=merged.slice(-_TARA_CLOUD_LOG_CAP);
-          const _mergedIds=new Set(_cloudSlice.map(e=>e?.windowId||''));
-          const _cloudIds=new Set(cloudEntries.map(e=>e?.windowId||''));
-          const _hasNewWindows=_cloudSlice.some(e=>e?.windowId&&!_cloudIds.has(e.windowId));
-          const _cloudHasUnresolved=cloudEntries.some(e=>!e?.result||e.result==='PENDING');
-          const _localHasMoreResolved=_cloudSlice.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length>
-                                      cloudEntries.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length;
-          const _cloudEvidence=new Map(cloudEntries.filter(Boolean).map(e=>[callKey(e),callEvidenceSignature(e)]));
-          const _evidenceChanged=_cloudSlice.some(e=>e&&_cloudEvidence.get(callKey(e))!==callEvidenceSignature(e));
-          // Skip if: no new windows AND cloud isn't stale AND no newly resolved trades
-          if(!_hasNewWindows&&!_cloudHasUnresolved&&!_localHasMoreResolved&&!_evidenceChanged){
-            return null; // skip write
-          }
-          // V10.7.58 — EGRESS REDUCTION: strip signal score raw fields from synced entries.
-          //   signalScoresAtLock contains ~25 fields per entry. That's ~1KB extra per entry.
-          //   These fields are only needed for local analysis — strip them from the cloud
-          //   payload to keep the synced doc small. On import, missing fields are OK because
-          //   analysis reads from local taraCallLog which has the full data.
-          //   Also strip verbose reasoning arrays (up to 40 strings per entry).
-          //   This alone cuts per-entry size from ~3KB → ~0.8KB → 2.5x smaller payload.
-          const _stripForCloud=(e)=>{
-            if(!e)return e;
-            return _stripEntryForCloud(e); // V13.4.187: single shared definition
-          };
-          return{entries:_cloudSlice.map(_stripForCloud),_strippedAt:Date.now()};
+          return callLogCloudPayload(cloudEntries,localEntries,_mergeCallLogEntries,_stripEntryForCloud,_TARA_CLOUD_LOG_CAP);
         },
         // V10.7.85: throttle callLog cloud writes from 300ms to 60s.
         //   callLog is large (3MB) and changes on every trade. At 300ms debounce it
@@ -51954,7 +51951,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.8</small>
+              <small>DECISION ENGINE · V14.7.9</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

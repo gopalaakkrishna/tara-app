@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {callLogSyncSignature,callLogSyncStatus} from '../src/callLogSync.js';
+import {callLogSyncSignature,callLogSyncStatus,callLogCloudPayload} from '../src/callLogSync.js';
+import {cloudWriteRetryDelay,boundedCloudWriteQuery} from '../src/cloudWriteRecovery.js';
 import {CALL_EVIDENCE_FIELDS,callKey,normalizeCallLedger} from '../src/callIntegrity.js';
 import {mergeWeatherRecords} from '../src/weatherRecord.js';
 import {supabaseHourlyTransport} from '../src/hourlyAdmission.js';
@@ -43,26 +44,30 @@ test('peer status includes sit-out finalization and blocker/correction timestamp
   assert.equal(behind(finished,finished),false);
 });
 
-function harness({initial={entries:[base]},readError=false,writeError=false,conflicts=0,beforeWrite}={}) {
+function harness({initial={entries:[base]},readError=false,writeError=false,conflicts=0,beforeWrite,failThenCommit=false}={}) {
   const timers=new Map(),queue=new Map(),pending=new Map(),synced=new Map(),health=[];
-  let sequence=0,cloud=initial,reads=0,writes=0,failed=writeError,readFailed=readError;
+  let sequence=0,cloud=initial,reads=0,writes=0,failed=writeError,readFailed=readError,active=0,maxActive=0;
   const timer=(fn,delay)=>{if(delay<1000){queueMicrotask(fn);return ++sequence;}timers.set(++sequence,{fn,delay});return sequence;};
   const client={from:()=>({
-    select:()=>({eq:()=>({maybeSingle:async()=>{reads++;return {data:cloud?{data:cloud,updated_at:'version'}:null,error:readFailed?{message:'read failure'}:null};}})}),
-    update:payload=>{const q={eq:()=>q,is:()=>q,then(resolve){return (async()=>{writes++;if(beforeWrite)await beforeWrite(writes);if(failed)return{error:{message:'write failure'},count:0};
-      if(conflicts-->0)return{error:null,count:0};cloud=payload.data;return{error:null,count:1};})().then(resolve);}};return q;},
+    select:()=>({eq:()=>({maybeSingle:async()=>{reads++;return {data:cloud?{data:cloud,updated_at:'version'}:null,error:readFailed?(typeof readFailed==='object'?readFailed:{message:'read failure'}):null};}})}),
+    update:payload=>{const q={eq:()=>q,is:()=>q,then(resolve){return (async()=>{writes++;active++;maxActive=Math.max(maxActive,active);try{if(beforeWrite)await beforeWrite(writes);if(failed){if(failThenCommit)cloud=payload.data;return{error:typeof failed==='object'?failed:{message:'write failure'},count:0};}
+      if(conflicts-->0)return{error:null,count:0};cloud=payload.data;return{error:null,count:1};}finally{active--;}})().then(resolve);}};return q;},
     insert:async payload=>{writes++;if(failed)return{error:{message:'insert failure'}};cloud=payload.data;return{error:null};}
   })};
   const body=app.slice(app.indexOf('const cloudSupabaseWriteDebouncedRMW='),app.indexOf('// Force-flush all pending Supabase RMW writes'));
-  const sync=new Function('supabaseHourlyTransport','_sbClient','_sbWriteQueueRMW','_sbWritePendingRMW','_sbLastSyncSig','callLogSyncSignature','_stripEntryForCloud',
+  const sync=new Function('supabaseHourlyTransport','_sbClient','_sbWriteQueueRMW','_sbWritePendingRMW','_sbLastSyncSig','callLogSyncSignature','_stripEntryForCloud','_sbWriteInFlightRMW','_sbWriteFailuresRMW','cloudWriteRetryDelay','boundedCloudWriteQuery',
     '_setCloudStatus','_cloudSyncStatus','setTimeout','clearTimeout','console',body+';return cloudSupabaseWriteDebouncedRMW;')(
-      supabaseHourlyTransport,client,queue,pending,synced,callLogSyncSignature,e=>e,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
+      supabaseHourlyTransport,client,queue,pending,synced,callLogSyncSignature,e=>e,new Set(),new Map(),cloudWriteRetryDelay,q=>q,s=>health.push(s),{writes:0},timer,id=>timers.delete(id),{warn:()=>{}});
   const mergeBody=app.slice(app.indexOf('  const _mergeCallLogEntries='),app.indexOf('  const[callStorageStatus',app.indexOf('  const _mergeCallLogEntries=')));
   const merge=new Function('React','CALL_EVIDENCE_FIELDS','normalizeCallLedger','TARA_CALL_LOG_CAP','_auditLogEvent',mergeBody+';return _mergeCallLogEntries;')(
     {useCallback:fn=>fn},CALL_EVIDENCE_FIELDS,normalizeCallLedger,1000,()=>{});
   const send=entries=>sync(path,()=>entries,(current,local)=>({entries:merge(current?.entries||[],local)}),60000);
+  const sendExact=entries=>sync(path,()=>entries,(current,local)=>callLogCloudPayload(current?.entries||[],local,merge,e=>e,1000),60000);
+  const flushBody=app.slice(app.indexOf('const _cloudSupabaseFlushAllRMW='),app.indexOf('// V10.2.0: stubbed.'));
+  const flushAll=new Function('_sbWriteQueueRMW','_sbWritePendingRMW','clearTimeout','cloudSupabaseWriteDebouncedRMW','cloudSupabaseWrite',flushBody+';return _cloudSupabaseFlushAllRMW;')(
+    queue,pending,id=>timers.delete(id),sync,()=>{throw Error('No blind record write allowed');});
   const flush=async()=>{const [id,{fn}]=timers.entries().next().value;timers.delete(id);await fn();};
-  return {send,sync,flush,timers,synced,health,get cloud(){return cloud;},get reads(){return reads;},get writes(){return writes;},
+  return {send,sendExact,sync,flush,flushAll,timers,synced,health,get cloud(){return cloud;},get reads(){return reads;},get writes(){return writes;},get maxActive(){return maxActive;},
     setCloud:value=>{cloud=value;},recover:()=>{failed=false;readFailed=false;}};
 }
 
@@ -181,4 +186,88 @@ test('plain debounced progress writes keep a bounded deadline, send latest evide
   slow=true;send('test',{n:23},300);await flush();
   slow=false;send('test',{n:24},300);await flush();release(false);await new Promise(r=>setImmediate(r));
   assert.equal(timers.size,0,'a late failed old write cannot retry over a newer successful payload');
+});
+
+test('unchanged pending 1000-row evidence does not rewrite the full document; finalization still does',async()=>{
+  const rows=Array.from({length:1000},(_,i)=>({...base,id:1000+i,windowId:'15m-'+new Date(Date.parse(base.windowId.slice(4))+i*900000).toISOString(),originalDecision:{direction:'SIT_OUT',capturedAt:1000+i,trace:'x'.repeat(5000)}}));
+  const merge=(_cloud,local)=>local;
+  assert.ok(JSON.stringify(rows).length>5000000);
+  assert.equal(callLogCloudPayload(rows,rows,merge,e=>e,1000),null);
+  const final=rows.map((r,i)=>i===999?{...r,result:'SITOUT',resolvedAt:8000}:r);
+  const payload=callLogCloudPayload(rows,final,merge,e=>e,1000,9000);
+  assert.equal(payload.entries[999].result,'SITOUT');assert.equal(payload._strippedAt,9000);
+  assert.deepEqual(payload.entries[999].originalDecision,rows[999].originalDecision);
+  assert.equal(callLogCloudPayload(final,[...final].reverse(),(_c,l)=>[...l].reverse(),e=>e,1000),null);
+  assert.match(app,/return callLogCloudPayload\(cloudEntries,localEntries,_mergeCallLogEntries,_stripEntryForCloud,_TARA_CLOUD_LOG_CAP\)/);
+});
+
+test('statement-timeout recovery is bounded, backs off, and never retries permissions at the fast cadence',async()=>{
+  assert.deepEqual([1,2,3,4,5].map(n=>cloudWriteRetryDelay({code:'57014',message:'canceling statement due to statement timeout'},n)),[1500,5000,15000,60000,60000]);
+  assert.equal(cloudWriteRetryDelay({code:'42501',message:'permission denied'},1),60000);
+  for(const failure of ['read','write']){
+    const error={code:'57014',message:'canceling statement due to statement timeout'};
+    const h=harness({readError:failure==='read'?error:false,writeError:failure==='write'?error:false});
+    h.sendExact([{...base,result:'SITOUT'}]);
+    for(const delay of [1500,5000,15000,60000]){await h.flush();assert.equal(h.synced.size,0);assert.equal([...h.timers.values()][0].delay,delay);}
+    h.recover();await h.flush();assert.equal(h.cloud.entries[0].result,'SITOUT');assert.equal(h.synced.size,1);assert.equal(h.health.at(-1).state,'ok');
+  }
+});
+
+test('a cloud deadline cancels the underlying request and TimeoutError uses bounded recovery',async()=>{
+  const controller=new AbortController();let attached;
+  const query={abortSignal(signal){attached=signal;return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}};
+  const request=boundedCloudWriteQuery(query,controller.signal);assert.equal(attached,controller.signal);
+  controller.abort(new DOMException('signal timed out','TimeoutError'));
+  await assert.rejects(request,{name:'TimeoutError'});
+  assert.equal(cloudWriteRetryDelay(controller.signal.reason,1),1500);
+  const signal=boundedCloudWriteQuery({abortSignal:s=>s});assert.equal(signal instanceof AbortSignal,true);
+});
+
+test('a timeout after commit is proven by a fresh read and no duplicate PATCH or premature acknowledgement',async()=>{
+  const h=harness({writeError:{code:'57014',message:'statement timeout'},failThenCommit:true});
+  h.sendExact([{...base,result:'SITOUT',resolvedAt:3000}]);await h.flush();
+  assert.equal(h.synced.size,0);assert.equal(h.writes,1);assert.equal(h.health.at(-1).state,'error');
+  h.recover();await h.flush();assert.equal(h.reads,2);assert.equal(h.writes,1);
+  assert.equal(h.cloud.entries.length,1);assert.equal(h.cloud.entries[0].result,'SITOUT');assert.equal(h.synced.size,1);assert.equal(h.health.at(-1).state,'ok');
+});
+
+test('one in-flight CAS coalesces 100 new payloads, then writes the latest without overlapping',async()=>{
+  let release;const barrier=new Promise(resolve=>release=resolve);
+  const h=harness({beforeWrite:n=>n===1?barrier:null});
+  h.send([base]);const first=h.flush();for(let n=0;n<10&&h.writes===0;n++)await Promise.resolve();
+  for(let n=0;n<100;n++)h.send([{...base,result:'SITOUT',resolvedAt:3000+n}]);
+  assert.equal(h.reads,1);assert.equal(h.writes,1);assert.equal(h.timers.size,0);
+  release();await first;assert.equal(h.timers.size,1);await h.flush();
+  assert.equal(h.maxActive,1);assert.equal(h.writes,2);assert.equal(h.cloud.entries[0].resolvedAt,3099);
+});
+
+test('settlement arriving during a failed PATCH is retained for the faster fresh-read retry',async()=>{
+  let release;const barrier=new Promise(resolve=>release=resolve);
+  const h=harness({writeError:{code:'57014',message:'statement timeout'},beforeWrite:n=>n===1?barrier:null});
+  h.sendExact([base]); // no-op read is acknowledged, so start with new evidence
+  h.sendExact([{...base,reason:'fresh captured blocker'}]);const first=h.flush();
+  for(let n=0;n<10&&h.writes===0;n++)await Promise.resolve();
+  const final={...base,reason:'fresh captured blocker',result:'SITOUT',resolvedAt:5000};h.sendExact([final]);
+  release();await first;assert.equal(h.synced.size,0);assert.equal([...h.timers.values()][0].delay,1500);
+  h.recover();await h.flush();assert.equal(h.cloud.entries[0].result,'SITOUT');assert.equal(h.cloud.entries[0].resolvedAt,5000);
+  assert.deepEqual(h.cloud.entries[0].originalDecision,base.originalDecision);assert.equal(h.maxActive,1);
+});
+
+test('urgent flush keeps a latest payload behind an active writer without a blind overwrite or dropped follow-up',async()=>{
+  let release;const barrier=new Promise(resolve=>release=resolve),h=harness({beforeWrite:n=>n===1?barrier:null});
+  h.send([base]);const first=h.flush();for(let n=0;n<10&&h.writes===0;n++)await Promise.resolve();
+  h.send([{...base,result:'SITOUT',resolvedAt:7000}]);assert.equal(h.flushAll(),1);assert.equal(h.writes,1);
+  release();await first;
+  // An urgent timer is queued as a microtask by this isolated timer host.
+  for(let n=0;n<12;n++)await new Promise(r=>setImmediate(r));
+  assert.equal(h.cloud.entries[0].result,'SITOUT');assert.equal(h.cloud.entries[0].resolvedAt,7000);assert.equal(h.maxActive,1);
+});
+
+test('a timeout retry re-merges a peer capture rather than replaying the old full payload',async()=>{
+  const peer={...base,id:2000,windowId:'15m-2026-10-12T18:45:00.000Z',originalDecision:{direction:'UP',capturedAt:2000}};
+  const h=harness({writeError:{code:'57014',message:'statement timeout'},beforeWrite:n=>{if(n===1)h.setCloud({entries:[peer]});}});
+  h.sendExact([{...base,result:'SITOUT',resolvedAt:6000}]);await h.flush();assert.equal(h.synced.size,0);
+  h.recover();await h.flush();assert.equal(h.cloud.entries.length,2);
+  assert.deepEqual(h.cloud.entries.find(e=>e.id===peer.id).originalDecision,peer.originalDecision);
+  assert.equal(h.cloud.entries.find(e=>e.id===base.id).result,'SITOUT');
 });

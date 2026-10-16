@@ -89,7 +89,7 @@ test('every compact cache and cross-device merge retains the shared evidence fie
   assert.match(app,/_STICKY_TELEMETRY\.push\(\.\.\.CALL_EVIDENCE_FIELDS\)/);
   assert.match(app,/return normalizeCallLedger\(Array\.from\(byKey\.values\(\)\)/);
   assert.equal(app.includes('clearTimeout(_persistTimer)'),true,'pending persistence timer is cancelled on cleanup');
-  assert.match(app,/!_localHasMoreResolved&&!_evidenceChanged/);
+  assert.equal(app.includes('return callLogCloudPayload(cloudEntries,localEntries,_mergeCallLogEntries,_stripEntryForCloud,_TARA_CLOUD_LOG_CAP)'),true,'sync skips exact pending payloads, not only W/L counts');
 });
 
 test('sync signatures detect corrections and original evidence without a new window',()=>{

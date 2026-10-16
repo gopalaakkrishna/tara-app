@@ -71,3 +71,46 @@ test('actual entry freezes original paper identity before an awaited fill respon
   assert.equal((await actual('_runEntry',s)()).ok,true);const saved=journal.readExecutionJournal(h.storage).intents[h.state.intentId];
   assert.equal(saved.paperMarketIdentity.ticker,ticker);assert.equal(saved.paperMarketIdentity.strike,strike);assert.equal(saved.paperMarketIdentity.callId,7);
 });
+
+test('actual BTC paper entry -> fee/slippage-aware early exit -> reload preserves economics and never resettles',async()=>{
+  for(const dir of ['UP','DOWN'])for(const slip of [0,1,2,5]){
+    const h=host(dir),s=h.scope,place=s.kalshiPlaceOrder;
+    // Controlled execution-cost stress in the isolated transport only. No
+    // settings/thresholds are edited and these fixtures are not performance.
+    s.kalshiPlaceOrder=args=>place({...args,limitCents:args.limitCents+(dir==='UP'?slip:-slip)});
+    s.kalshiRunEntryLadder=actual('kalshiRunEntryLadder',s);
+    assert.equal((await actual('_runEntry',s)()).ok,true);
+    const id=h.state.intentId,before=structuredClone(journal.readExecutionJournal(h.storage).intents[id]);
+    assert.equal(before.filledAtCents,60+slip);assert.equal(before.filledCount,1);
+    s._exitYesLimitCents=()=>dir==='UP'?70-slip:30+slip;
+    h.setClock(close-600000);
+    assert.equal((await actual('_runExit',s)()).ok,true);
+    const saved=journal.readExecutionJournal(h.storage).intents[id];
+    const expected=(70-slip-(60+slip)-safety.executionFeeCents(60+slip,1)-safety.executionFeeCents(70-slip,1))/100;
+    assert.equal(saved.status,'exited');assert.equal(saved.exitAtCents,70-slip);
+    assert.ok(Math.abs(saved.realizedPnLDollars-expected)<1e-9);
+    assert.equal(journal.restoreExecutionLedger(h.storage)['BTC|'+wid].realizedPnLDollars,saved.realizedPnLDollars);
+    for(const k of ['id','asset','windowId','at','dryRun','reservedDollars','ticker','dir','filledCount','filledAtCents','filledFeesCents','paperMarketIdentity'])assert.deepEqual(saved[k],before[k],k);
+    assert.equal(journal.readExecutionState(h.storage).status,'exited');
+    const bytes=h.values.get('taraExecutionJournal_v1');
+    await paper.recoverExpiredPaperExecutions({storage:h.storage,now:close+60000,withLock:async(_n,fn)=>fn(),readMarket:()=>{throw Error('Early exit is final');}});
+    assert.equal(h.values.get('taraExecutionJournal_v1'),bytes);
+    s.setAutoOrderState(null);s._entryFiredForRef.current=null;
+    s._kalshiQuote.at=close-600000;
+    assert.equal((await actual('_runEntry',s)()).reason,'intent-already-recorded');
+    assert.equal(h.network,0);assert.deepEqual(s.autoExecSettings,settings);
+    assert.ok(h.writes.every(k=>['taraExecutionJournal_v1','taraExecutionState_v1'].includes(k)));
+  }
+});
+
+test('actual paper controller refuses the consumed six-dollar budget without changing it or creating an order',async()=>{
+  const h=host('UP'),s=h.scope,now=close-840000;
+  for(let n=0;n<6;n++){
+    const id='existing-'+n;
+    assert.equal((await journal.reserveExecutionIntent({storage:h.storage,id,windowId:'15m-'+new Date(now-(n+1)*900000).toISOString(),asset:'BTC',stake:1,settings,dryRun:true,now,withLock:async(_n,fn)=>fn()})).ok,true);
+    journal.updateExecutionIntent(h.storage,id,{status:'exited'});
+  }
+  const before=h.values.get('taraExecutionJournal_v1');
+  assert.equal((await actual('_runEntry',s)()).reason,'daily-loss-and-exposure-cap');
+  assert.equal(h.values.get('taraExecutionJournal_v1'),before);assert.equal(h.state,null);assert.equal(h.network,0);assert.deepEqual(s.autoExecSettings,settings);
+});

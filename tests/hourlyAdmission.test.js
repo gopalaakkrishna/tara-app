@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {cloudWriteRetryDelay,boundedCloudWriteQuery} from '../src/cloudWriteRecovery.js';
 import assert from 'node:assert/strict';
 import {commitHourlyAdmission,supabaseHourlyTransport} from '../src/hourlyAdmission.js';
 import {hourlyRecordGuard} from '../src/hourlyDecision.js';
@@ -83,7 +84,7 @@ test('actual delayed hourly mirror retries its CAS conflict and retains an appro
   let timer,row={data:{pending:[],history:[]},updated_at:'same'},tries=0;
   const approved={ticker:'T',side:'YES',ms:now,approval:{samples:[{quoteId:'immutable'}]}};
   const scope={Date,crypto,console,_sbClient:{from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:structuredClone(row),error:null})})})})},
-    _sbWriteQueueRMW:new Map(),_sbWritePendingRMW:new Map(),_sbLastSyncSig:new Map(),
+    _sbWriteQueueRMW:new Map(),_sbWritePendingRMW:new Map(),_sbLastSyncSig:new Map(),_sbWriteInFlightRMW:new Set(),_sbWriteFailuresRMW:new Map(),cloudWriteRetryDelay,boundedCloudWriteQuery,
     setTimeout:fn=>{timer=fn;return 1;},clearTimeout(){},_setCloudStatus(){},_cloudSyncStatus:{writes:0},
     supabaseHourlyTransport:()=>({compareAndSwap:async(old,data)=>{
       if(!tries++){row={data:{pending:[approved],history:[],_admissionRevision:'new-approval'},updated_at:'same'};return false;}
