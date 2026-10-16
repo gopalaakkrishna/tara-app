@@ -15,7 +15,8 @@ import {persistCallCaches,updateIndexedRecord,mergeDurableCallArchive} from './c
 import {lifecycleAuditState} from './lifecycleAudit.js';
 import {useStartupReadiness} from './startupReadiness.js';
 import {describeCallBlocker} from './callBlocker.js';
-import {callLogSyncSignature,callLogSyncStatus,callLogCloudPayload} from './callLogSync.js';
+import {callLogSyncSignature,callLogSyncStatus,callLogCloudPayload,callLogPublicationKey} from './callLogSync.js';
+import {cloudSyncHealth} from './cloudSyncHealth.js';
 import {cloudWriteRetryDelay,boundedCloudWriteQuery} from './cloudWriteRecovery.js';
 import {postProcessLegacyCall,readCallCostBand} from './callCandidateRules.js';
 import {readCapturedCallSettlement} from './callSettlement.js';
@@ -966,7 +967,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           // published the same evidence. The fresh merge proved it is present.
           if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
           _completed=true;
-          _setCloudStatus({state:'ok',lastOk:Date.now()});
+          _setCloudStatus({state:'ok',path,lastOk:Date.now()});
           return;
         }
         if(path==='memory/hourlyRecord'){
@@ -977,7 +978,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           const saved=_cur?await transport.compareAndSwap(_cur,_merged):await transport.insert(_merged);
           if(!saved)continue;
           _completed=true;
-          _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+          _setCloudStatus({state:'ok',path,lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return;
         }
         // Conditional upsert: succeed only if row's updated_at hasn't changed.
@@ -1009,7 +1010,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           }
           if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
           _completed=true;
-          _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+          _setCloudStatus({state:'ok',path,lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         } else {
           // No existing row — plain insert. If it conflicts (race with another
@@ -1034,7 +1035,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           }
           if(_writtenSig!==null)_sbLastSyncSig.set(path,_writtenSig);
           _completed=true;
-          _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+          _setCloudStatus({state:'ok',path,lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         }
       } catch(e){
@@ -1103,7 +1104,7 @@ const _fbDoc=(_path)=>null;
 const _cloudSyncListeners=new Set();
 // V10.2.0: tracks Supabase health (was Firestore). State terminology unchanged so UI components don't need updating.
 let _cloudSyncStatus={state:_SB_PAUSED?'paused':(_sbClient?'idle':'disabled'),lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
-const _setCloudStatus=(patch)=>{_cloudSyncStatus={..._cloudSyncStatus,...patch};_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
+const _setCloudStatus=(patch)=>{_cloudSyncStatus=cloudSyncHealth(_cloudSyncStatus,patch);_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
 const subscribeCloudStatus=(fn)=>{_cloudSyncListeners.add(fn);fn(_cloudSyncStatus);return()=>_cloudSyncListeners.delete(fn);};
 // V8.8.7: Active-write counter. Each cloudWrite / cloudWriteDebouncedRMW transaction
 //   increments on start, decrements on completion (success or failure). State stays
@@ -5678,8 +5679,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.16-v14.7.9-bounded-sync-recovery';
-const TARA_VERSION_DISPLAY='TARA 14.7.9';
+const TARA_BUILD_VERSION='2026.10.16-v14.7.10-durable-sync-monitoring';
+const TARA_VERSION_DISPLAY='TARA 14.7.10';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -22598,7 +22599,7 @@ const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
   let _health,_color,_bg,_border,_label,_dotPulse=false;
   if(status.state==='disabled'){
     _health='disabled';_color='rgba(237,237,237,0.4)';_bg='rgba(237,237,237,0.03)';_border='rgba(237,237,237,0.10)';_label='SYNC OFF';
-  } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000&&displayError){
+  } else if(status.state==='error'&&status.lastError&&(Object.keys(status.recordWriteErrors||{}).length>0||(_now-status.lastError.at)<30000)&&displayError){
     _health='error';_color='rgb(232,69,94)';_bg='rgba(232,69,94,0.06)';_border='rgba(232,69,94,0.30)';_label='SYNC ERR';_dotPulse=true;
   } else if(status.state==='writing'&&displayWriting){
     _health='writing';_color='#23B981';_bg='rgba(35,185,129,0.06)';_border='rgba(35,185,129,0.25)';_label='SYNCING';_dotPulse=true;
@@ -36299,6 +36300,7 @@ function TaraApp(){
     setTaraCallLog(cleaned);
   },[taraCallLog]);
   const taraCallLogRef=useRef(taraCallLog);
+  const _callLogPublicationKeyRef=useRef(null);
   taraCallLogRef.current=taraCallLog;
   useEffect(()=>{_lifecycleConfirmLedger(taraCallLog);},[taraCallLog]);
   const _learningCloudSourceRef=useRef(null);
@@ -36602,6 +36604,9 @@ function TaraApp(){
     };
     const _persistTimer=setTimeout(_persistLocal,Math.max(0,2500-(Date.now()-_lastLocalPersistAt)));
     if(_callLogHydratedRef.current){
+      const _publicationKey=callLogPublicationKey(taraCallLogRef.current.slice(-TARA_CALL_LOG_CAP));
+      const _criticalChange=_callLogPublicationKeyRef.current!==_publicationKey;
+      _callLogPublicationKeyRef.current=_publicationKey;
       // V8.3: Switch from simple cloudWriteDebounced to RMW. Reads current cloud first,
       //   merges with local, writes union — protects against last-write-wins clobbering
       //   when multiple tabs (BTC + ETH) write to the same memory/taraCallLog doc.
@@ -36612,11 +36617,9 @@ function TaraApp(){
           const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
           return callLogCloudPayload(cloudEntries,localEntries,_mergeCallLogEntries,_stripEntryForCloud,_TARA_CLOUD_LOG_CAP);
         },
-        // V10.7.85: throttle callLog cloud writes from 300ms to 60s.
-        //   callLog is large (3MB) and changes on every trade. At 300ms debounce it
-        //   fires constantly, burning through Supabase realtime messages. 60s is plenty
-        //   for cross-device sync — lock state (small, fast) handles real-time awareness.
-        60000,
+        // New originals / settlement evidence bypass the ordinary telemetry batch.
+        // Existing per-document owner, CAS, exact no-op gate and retry stay intact.
+        _criticalChange?1500:60000,
       );
       // V12.8: bump the tiny realtime heartbeat with this device's post-write signature.
       //   RMW so the doc only ever moves UP (element-wise max). A device that is behind
@@ -51951,7 +51954,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.9</small>
+              <small>DECISION ENGINE · V14.7.10</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the

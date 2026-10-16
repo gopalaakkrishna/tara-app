@@ -24,6 +24,18 @@ export function callLogCloudPayload(cloudEntries, localEntries, merge, project, 
   return {entries,_strippedAt:now};
 }
 
+// Captures and same-row settlement/correction evidence deserve a short queue.
+// Tick-by-tick chart telemetry still uses the ordinary 60s batch. This is only
+// publication scheduling: it never changes a Call or an execution setting.
+export function callLogPublicationKey(entries) {
+  return callLogSyncSignature(entries, e=>({
+    originalDecision:e.originalDecision,result:e.result,resolvedAt:e.resolvedAt,
+    officialSettlement:e.officialSettlement,blockedDecision:e.blockedDecision,
+    recordRevisions:e.recordRevisions,manualEditedAt:e.manualEditedAt,
+    dir:e.dir,resolution:e.resolution,
+  }));
+}
+
 // Keep the legacy axes for older peers; add sit-out finalization and evidence
 // timestamps so a same-window update can wake a catch-up reader too.
 export function callLogSyncStatus(entries) {
