@@ -35,6 +35,7 @@ import {assessSpotResponse, freshOkxResults, freshFeedStatus, observedFundingPai
 import {buildExchangeAudit, callWindowCoverage, checkEntryMode} from './executionIntegrity.js';
 import {buildSafeEntry,buildSafeExit,normalizeExecutionOrder,runSafeEntryLadder,heldQuote,executionFeeCents,fetchAllExecutionPages,accountRiskSnapshot,affordableContracts,summarizeOrderFills} from './executionSafety.js';
 import {executionIntentId,stableExecutionId,reserveExecutionIntent,updateExecutionIntent,readExecutionState,writeExecutionState,restoreExecutionLedger} from './executionJournal.js';
+import {capturePaperMarketIdentity,isUnresolvedPaperFill,recoverExpiredPaperExecutions} from './paperExpiry.js';
 import {commitHourlyAdmission,supabaseHourlyTransport} from './hourlyAdmission.js';
 import {hourlyPublicPaths,readHourlyPublic} from './hourlyPublic.js';
 import {API_BASE} from './apiBase.js';
@@ -5644,8 +5645,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.15-v14.7.7-sports-refresh-verification';
-const TARA_VERSION_DISPLAY='TARA 14.7.7';
+const TARA_BUILD_VERSION='2026.10.15-v14.7.8-paper-expiry-journal';
+const TARA_VERSION_DISPLAY='TARA 14.7.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10261,6 +10262,7 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
   </section>;
   return <section className={'tara-exec-overview '+stateTone} aria-label="AutoTrade execution and exchange position">
     <p className="tara-v145-reason"><b>New live entries remain paused.</b> Existing position reconciliation and exit controls remain available. Execution never revises Tara’s captured Call.</p>
+    {autoOrderState?.dryRun===true&&autoOrderState.paperSettlementPending&&<p className="tara-v145-reason">Paper fill awaiting its original market’s official settlement. This is not a live position or a new order.</p>}
     <EvidenceMetrics items={[
       ['Input Call',lock.tradeable?`${lock.dir} · locked`:lock.satOut?'Sit out':'No lock','Original Call record',lock.dir==='UP'?'is-up':lock.dir==='DOWN'?'is-down':''],
       ['Order state',order.status?order.status.replaceAll('_',' ').replaceAll('-',' '):'No order',order.dryRun?'Simulated order only':'Local order state; fill evidence below'],
@@ -41787,6 +41789,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           setAutoOrderState(prev=>prev&&prev.ticker===_rollAos.ticker
             ?{...prev,rolloverPending:true,rolloverAt:Date.now()}
             :prev);
+        }else if(isUnresolvedPaperFill(_rollAos)){
+          // Keep a held paper fill visible until its ORIGINAL contract has an
+          // official result. The private expiry worker also recovers old fills
+          // whose UI state was already cleared by an earlier build.
+          setAutoOrderState(prev=>prev&&prev.ticker===_rollAos.ticker&&prev.intentId===_rollAos.intentId
+            ?{...prev,rolloverPending:true,paperSettlementPending:true,rolloverAt:Date.now()}
+            :prev);
         }else{
           setAutoOrderState(null);
         }
@@ -44599,6 +44608,42 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   settlement effect treats as an honest gap (mission.bankrollDataGaps),
   //   never a silently wrong number.
   const _execSettlementLedgerRef=useRef(restoreExecutionLedger(localStorage));
+  const _paperExpiryHealthRef=useRef({at:0,settled:0,failures:[]});
+  useEffect(()=>{
+    let stopped=false,busy=false,nextRead=0,cloudCalls=null,cloudCallsAt=0;
+    const tick=async()=>{
+      if(stopped||busy||Date.now()<nextRead)return;
+      busy=true;
+      try{
+        const result=await recoverExpiredPaperExecutions({storage:localStorage,now:Date.now(),
+          readState:()=>autoOrderStateRef.current,
+          withLock:typeof navigator!=='undefined'&&navigator.locks?(name,fn)=>navigator.locks.request('tara-execution:'+name,fn):null,
+          readOriginalCalls:async()=>{
+            const local=taraCallLogRef.current||[];
+            if(cloudCalls===null||Date.now()-cloudCallsAt>30*60000){
+              try{const d=await cloudSupabaseRead('memory/taraCallLog',{throwOnError:true});cloudCalls=Array.isArray(d)?d:d?.entries||[];cloudCallsAt=Date.now();}
+              catch{if(local.length)return local;throw Error('Original Call record unavailable');}
+            }
+            return [...local,...cloudCalls];
+          },
+          readMarket:async ticker=>{
+            for(const path of hourlyPublicPaths('markets/'+encodeURIComponent(ticker),API_BASE)){
+              const r=await readHourlyPublic(path,{validate:d=>!!d?.market});if(r.ok)return r.data.market;
+            }
+            throw Error('Original paper market unavailable');
+          },
+          onSettled:(entry,state)=>{
+            _execSettlementLedgerRef.current[(entry.asset||'BTC')+'|'+entry.windowId]={...entry,enteredAt:entry.at};
+            if(!stopped&&state)setAutoOrderState(prev=>prev?.dryRun===true&&prev.intentId===entry.id&&prev.ticker===entry.ticker&&['filled','settlement-pending'].includes(prev.status)?state:prev);
+          },
+        });
+        _paperExpiryHealthRef.current={at:Date.now(),settled:result.settled.length,failures:result.failures};
+        if(result.failures.length)nextRead=Date.now()+60000;
+      }catch{_paperExpiryHealthRef.current={at:Date.now(),settled:0,failures:[{reason:'paper-settlement-unavailable'}]};nextRead=Date.now()+60000;}
+      finally{busy=false;}
+    };
+    tick();const timer=setInterval(tick,20000);return()=>{stopped=true;clearInterval(timer);};
+  },[]);
   const _executionControlRef=useRef(null);
   _executionControlRef.current={enabled:autoExecSettings?.enabled,kill:killSwitchEngaged,windowId:computeWindowId(windowType)};
 
@@ -44745,6 +44790,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }catch(_){}
     const ticker=_kalshiQuote&&_kalshiQuote.ticker;
     if(!ticker)return blocked('no-ticker',{dir});
+    // Freeze paper identity before any awaited entry work; a later rollover
+    // must not attach the next contract's strike to this fill.
+    const _paperOriginal=taraCallSnapshotRef.current;
+    const _paperIdentity=dryRun&&_paperOriginal?.windowId===lock.windowId&&_paperOriginal.originalDecision?.marketTicker===ticker
+      ?capturePaperMarketIdentity({ticker,windowId:lock.windowId,asset:'BTC',strike:_paperOriginal.originalDecision.strike,callId:_paperOriginal.id}):null;
 
     const stake=_resolveStakeDollars(s,costCents);
     if(!(stake>0))return blocked('no-stake',{dir,ticker});
@@ -44909,7 +44959,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
       const filledAt=res.normalized?.fillPriceCents??null;
       const _execFilledCount=(res.normalized&&res.normalized.filledCount)||Number(res.order&&res.order.count)||0;
-      updateExecutionIntent(localStorage,intentId,{status:'filled',filled:true,dir,ticker,orderId:res.order?.order_id,filledCount:_execFilledCount,filledAtCents:filledAt,filledFeesCents:res.normalized?.feeCents??null});
+      updateExecutionIntent(localStorage,intentId,{status:'filled',filled:true,dir,ticker,orderId:res.order?.order_id,filledCount:_execFilledCount,filledAtCents:filledAt,filledFeesCents:res.normalized?.feeCents??null,
+        ...(dryRun?{paperMarketIdentity:_paperIdentity}:{})});
       _autoExecLogPush({type:'filled',asset:'BTC',windowId:lock.windowId,dir,ticker,
         dryRun,manual:!!manual,orderId:res.order?.order_id||null,
         clientOrderId:res.order?.client_order_id||null,
@@ -51903,7 +51954,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.7</small>
+              <small>DECISION ENGINE · V14.7.8</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
