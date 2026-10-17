@@ -11,6 +11,7 @@ import {postProcessLegacyCall,readCallCostBand} from '../../src/callCandidateRul
 import * as forecasts from '../../src/forecastTiming.js';
 import * as tracing from '../../src/callDecisionTrace.js';
 import * as authority from '../../src/decisionAuthority.js';
+import * as earlyCalls from '../../src/earlyCallConfirmation.js';
 import {activeCallSnapshot} from '../../src/sharedDecision.js';
 import {journalCapturedCall} from '../../src/callCaptureJournal.js';
 const traverse=traverseModule.default||traverseModule;
@@ -50,7 +51,7 @@ export function makeHarness({probabilityUp=77.25,confidence,yesPrice=74,secondsL
   const logs=[],errors=[],audit=[],cloud=[],timers=[],storage=new Map();
   const ref=current=>({current});
   const FakeDate=class extends Date {constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}};
-  const scope={...integrity,...policy,...forecasts,...tracing,...authority,activeCallSnapshot,journalCapturedCall,learningPredictions,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
+  const scope={...integrity,...policy,...forecasts,...tracing,...authority,...earlyCalls,activeCallSnapshot,journalCapturedCall,learningPredictions,describeCallBlocker,postProcessLegacyCall,readCallCostBand,Date:FakeDate,
     captureOriginalDecision:(entry,options={})=>integrity.captureOriginalDecision(entry,{now:clock,...options}),
     console:{info(){},warn(){},error(...args){errors.push(args.map(String).join(' '));}},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},

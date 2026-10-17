@@ -66,7 +66,7 @@ function liveHarness({confidence=58,direction='DOWN',secondsLeft=600,price=78,ma
   const clock=close-secondsLeft*1000,tc={call:direction,confidence},current={current:null},holds={current:null},delay={current:null};
   const samples={current:{dir:'UP',count:405.9}},liveQuote={...quote,at:clock};
   const noteBody=app.slice(app.indexOf('    const _noteGateHold='),app.indexOf('    // Read the shared window first',app.indexOf('    const _noteGateHold=')));
-  const commitHold={current:null};
+  const commitHold={current:null},flatGapWatch={current:{earlyConfirmation:{observations:1}}};
   const note=new Function('computeWindowId','windowType','currentAssetRef','Date','callGateHoldRef','isDirection','tc',
     'currentCallBlockerRef','describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','callCommitHoldRef','_traceDecision',noteBody+';return _noteGateHold;')(
       ()=>windowId,'15m',{current:'BTC'},{now:()=>clock},holds,isDirection,tc,current,describeCallBlocker,
@@ -75,11 +75,11 @@ function liveHarness({confidence=58,direction='DOWN',secondsLeft=600,price=78,ma
   const timing=new Function('windowType','_secsLeft','_convNow','_kForDir','getEntryMaxCost','_hasTimeToWait',
     'tc','_v112Live','_v1364_oppRef','computeWindowId','_v104_1_delayStateRef','currentAssetRef','currentAsset',
     '_lifecycleRecordSnapshot','Date','_noteGateHold','callLockDeadline','callCommitHoldRef','currentCallBlockerRef',
-    'describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','_dirNow','callGateHoldRef','readCallCostBand','localStorage','_traceDecision',timingBody+';return "progress";');
+    'describeCallBlocker','startupReadiness','taraCallSampleRef','_kalshiQuote','_dirNow','callGateHoldRef','readCallCostBand','localStorage','_traceDecision','_flatGapWatchRef',timingBody+';return "progress";');
   const run=()=>timing('15m',secondsLeft,confidence,price,()=>maxPrice,secondsLeft>180,tc,{},
     {current:null},()=>windowId,delay,{current:'BTC'},'BTC',()=>{},{now:()=>clock},note,callLockDeadline,
-    commitHold,current,describeCallBlocker,baseline.readiness,samples,liveQuote,direction,holds,readCallCostBand,{getItem:()=> 'off'},()=>{});
-  return {run,note,tc,holds,commitHold,current,clock};
+    commitHold,current,describeCallBlocker,baseline.readiness,samples,liveQuote,direction,holds,readCallCostBand,{getItem:()=> 'off'},()=>{},flatGapWatch);
+  return {run,note,tc,holds,commitHold,current,clock,flatGapWatch};
 }
 
 test('real timing controller stamps the held confidence and unchanged threshold before returning',()=>{
@@ -89,6 +89,7 @@ test('real timing controller stamps the held confidence and unchanged threshold 
     assert.equal(h.current.current.gate.requiredConfidence,65);assert.equal(h.current.current.gate.maxDirectionalPrice,100);
     assert.match(h.current.current.reason,/Patient:/);assert.equal(h.tc.confidence,confidence);assert.equal(h.tc.call,'DOWN');
     assert.equal(h.commitHold.current,null,'diagnostic waits do not alter the commit/persistence control ref');
+    assert.equal(h.flatGapWatch.current.earlyConfirmation,null,'a timing wait resets the new early proof');
   }
   const allowed=liveHarness({confidence:65});assert.equal(allowed.run(),'progress');assert.equal(allowed.holds.current,null);
 });

@@ -44,6 +44,7 @@ import {API_BASE} from './apiBase.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
 import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
+import {observeEarlyFlatGap,earlyFlatGapReady} from './earlyCallConfirmation.js';
 import {appendDecisionTrace,captureDecisionTrace} from './callDecisionTrace.js';
 import {sharedWindowId,matchesSharedWindow,restoredSnapshot,ledgerDecision,chooseSharedSnapshot,sharedSnapshotIdentity,restoredEngineLock,
   readDecisionCache,cacheSharedDecision,publishSharedDecision,activeCallSnapshot,finalizeClosedSitouts} from './sharedDecision.js';
@@ -5679,8 +5680,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.16-v14.7.10-durable-sync-monitoring';
-const TARA_VERSION_DISPLAY='TARA 14.7.10';
+const TARA_BUILD_VERSION='2026.10.17-v14.7.11-early-call-confirmation';
+const TARA_VERSION_DISPLAY='TARA 14.7.11';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -46295,7 +46296,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       return;
     }
 
-    if(!startupReadiness.ready&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000))return;
+    if(!startupReadiness.ready&&!(hardForceRef.current>0&&Date.now()-hardForceRef.current<5000)){
+      if(_flatGapWatchRef.current)_flatGapWatchRef.current.earlyConfirmation=null;
+      return;
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // V10.4.1 MODULE A — EV-AWARE DELAY GATE
@@ -46451,6 +46455,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       }catch(_){}
       if(_v112Wait){
+        if(_flatGapWatchRef.current)_flatGapWatchRef.current.earlyConfirmation=null;
         _noteGateHold(_convNow<(_isLate112?62:65)?'timing-confidence':!_oddsOk112?'timing-price':'timing-wait',_v112Why,
           {controller:'v112',timing:_v112Timing,phase:_isEarly112?'early':_isLate112?'late':'mid',
             confidence:_convNow,requiredConfidence:_isLate112?62:65,
@@ -46803,6 +46808,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // Track sample stability — if direction flips, reset count
     let ref=taraCallSampleRef.current;
     if(!isCall){
+      if(_flatGapWatchRef.current)_flatGapWatchRef.current.earlyConfirmation=null;
       _noteGateHold(tc.signalBlocker?.code||'signal',tc.reason||'Waiting for a qualifying signal.',tc.signalBlocker?.details||{});
       // V5.6.11 FIX: DO NOT reset accumulated samples on every gate-dip. Previously this
       //   wiped progress whenever conviction dipped below floor for even one tick — meaning
@@ -47039,6 +47045,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       spotAt:lastPriceSourceRef.current?.time,quote:_kalshiQuote,probabilityUp:analysis?.rawProbAbove,now:Date.now()});
     taraCallSampleRef.current=_formation.state;
     if(!_formation.fresh){
+      const _earlySpotAt=Number(lastPriceSourceRef.current?.time);
+      if(_flatGapWatchRef.current&&(!inspectDecisionQuote(_kalshiQuote,{windowId:computeWindowId(windowType),asset:currentAssetRef.current||'BTC',now:Date.now()}).ok||
+        !Number.isFinite(_earlySpotAt)||Date.now()-_earlySpotAt>15000||_earlySpotAt>Date.now()+2000)){
+        _flatGapWatchRef.current.earlyConfirmation=null;
+      }
       _noteGateHold('sample-freshness',_formation.reason,{samples:_formation.state.count,scope:'window'});
       return;
     }
@@ -48179,6 +48190,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let _noGoReason=null;
     let _noGoTier=null;
     let _noGoEdgeThreshold=null; // V10.7.87: hoisted so snapshot can stamp it
+    let _earlyFlatGapProof=null;
     // V7.10.3: gated on _cloudRestoreCompletedRef.current to prevent commit-before-cloud-restore.
     if(taraCallSnapshotRef.current===null&&_postKnown&&_commitDir&&_cloudRestoreCompletedRef.current){
       // V10.3.0 — MID-RANGE SIT-OUT: in healthy RANGE-CHOP, if price is mid-range
@@ -48392,10 +48404,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _noGoReason=`Flat gap watched ${_watchAge}s — never developed (${_gapScore.toFixed(0)}pt at close)`;
             _noGoTier='no-go-edge';
           } else {
-            // Still watching — return without locking, check next tick
-            _noteGateHold('flat-gap-signal',`Waiting for a directional gap: ${_gapScore.toFixed(1)}pt, need 8pt or external signal ≥8pt.`,
-              {gapScore:_gapScore,requiredGap:8,externalSignal:_extSignal,requiredExternalSignal:8,secondsLeft:_secsLeft});
-            return;
+            // Strong, cheap early views may continue to the NORMAL tier/sample
+            // checks using separate fresh confirmations. This never creates a
+            // direction, reuses an old signal, or forces a timer-based Call.
+            const _earlyBand=readCallCostBand(localStorage);
+            const _early=observeEarlyFlatGap(_flatGapWatchRef.current.earlyConfirmation,{
+              asset:currentAssetRef.current||'BTC',windowType,windowId:_curWid,now:Date.now(),
+              direction:tc.call,source:priceSourceRef.current,ready:startupReadiness.ready,
+              score:tc.confidence,probabilityUp:analysis?.rawProbAbove,mtfAlignment:analysis?.mtfAlignment,
+              tapeWindows,quote:_kalshiQuote,spotAt:lastPriceSourceRef.current?.time,
+              referencePrice:analysis?.referencePrice??currentPrice,strike:targetMargin,
+              minCost:_earlyBand.minCost,maxCost:_earlyBand.maxCost,
+              candidateQualified:isCall&&!tc.startupBlocked&&!tc.isNoGo&&!tc.wasOverriddenNoTrade});
+            _flatGapWatchRef.current.earlyConfirmation=_early.state;
+            if(_early.eligible&&_early.fresh){
+              _earlyFlatGapProof=_early;
+            }else{
+              _noteGateHold('flat-gap-signal',`Waiting for a directional gap: ${_gapScore.toFixed(1)}pt, need 8pt or external signal ≥8pt.`,
+                {gapScore:_gapScore,requiredGap:8,externalSignal:_extSignal,requiredExternalSignal:8,secondsLeft:_secsLeft,
+                  earlyConfirmation:_early.reason});
+              return;
+            }
           }
         } else if(_flatGapWatchRef.current?.windowId===_curWid){
           _flatGapWatchRef.current=null;
@@ -49329,6 +49358,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(_tapeOpposesClaim&&!_fgtAgreesClaim){
         // Conditions inverted strongly. Release claim + reset samples to re-form.
         taraCallSampleRef.current={dir:null,count:0};
+        if(_flatGapWatchRef.current)_flatGapWatchRef.current.earlyConfirmation=null;
         _noteGateHold('formation-tape-release',`Releasing provisional ${claimedDir}: tape ${_curBuyPct}% opposes it and FGT ${_fgtVal} does not confirm.`,
           {previousDirection:claimedDir,previousSamples:samples,tapeBuyPct:_curBuyPct,fgt:_fgtVal});
         try{console.info('[V6.5.7] claimedDir',claimedDir,'released — tape',_curBuyPct,'% opposes, FGT',_fgtVal);}catch(_){}
@@ -49344,11 +49374,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   _instantForceReady (hard user-force) bypasses this — if the user is
     //   manually forcing a lock, they've made the call.
     if(feedFrozenRef.current&&!_instantForceReady){
+      if(_flatGapWatchRef.current)_flatGapWatchRef.current.earlyConfirmation=null;
       _noteGateHold('feed-frozen','Live tick feed is frozen; refusing a new Call.',{samples,requiredSamples:needSamples});
       // Don't fire lock. Engine continues running so user sees what it would do,
       // but no entry is created and no sound fires. UI shows the FEED FROZEN
       // banner; the call card will show a stale-feed footer note.
       return;
+    }
+    if(_earlyFlatGapProof){
+      const _earlyRequired=Math.max(3,needSamples);
+      if(!earlyFlatGapReady(_earlyFlatGapProof,_earlyRequired,Date.now())){
+        _noteGateHold('early-flat-gap-confirmation',`Confirming early ${tc.call}: ${_earlyFlatGapProof.evidence.samples.toFixed(1)}/${_earlyRequired} fresh stability samples.`,
+          {..._earlyFlatGapProof.evidence,requiredSamples:_earlyRequired});
+        return;
+      }
+      _traceDecision('early-flat-gap-confirmed',`Fresh early ${tc.call} confirmation at ${_earlyFlatGapProof.evidence.entryCost}c; normal commit checks remain.`,
+        {..._earlyFlatGapProof.evidence,requiredSamples:_earlyRequired});
     }
     // V12.5: QUALITY-TRIGGERED EARLY LOCK
     // Root cause of the late-entry / 90c+ problem: needSamples counts ticks, not
@@ -51954,7 +51995,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.10</small>
+              <small>DECISION ENGINE · V14.7.11</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
