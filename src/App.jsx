@@ -44,6 +44,7 @@ import {API_BASE} from './apiBase.js';
 import {useDiscordCalls} from './useDiscordCalls.js';
 import DiscordDeliveryPanel from './DiscordDeliveryPanel.jsx';
 import {discordDestination,verifyDiscordDestination} from './discordDelivery.js';
+import {coachCondition} from './discordAdvisories.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
 import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
@@ -5683,8 +5684,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.19-v14.7.12-btc-call-delivery';
-const TARA_VERSION_DISPLAY='TARA 14.7.12';
+const TARA_BUILD_VERSION='2026.10.19-v14.7.13-limited-btc-context';
+const TARA_VERSION_DISPLAY='TARA 14.7.13';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19819,10 +19820,6 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
   const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0,valPeak:-1,valArmed:false});
   // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
   const _lastCoachBeepRef=React.useRef({key:'',at:0});
-  // V9.8.16: Discord broadcast tracking — separate dedup ref with longer throttle (90s)
-  //   so we don't spam Discord on the same condition. Sound beep can fire every 10s
-  //   for the same key (audio fade is short); Discord shouldn't.
-  const _lastDiscordAlertRef=React.useRef({key:'',at:0});
   // V13.4.241: cards that stand for the entire trade (reversal risk, trailing
   //   exit) must not re-fire on the time-based throttles below. Namespaced per
   //   channel so a beep does not consume the Discord page. Cleared on position
@@ -20172,31 +20169,14 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       }
     }
 
-    // V9.8.16: Discord broadcast — mirror of the sound-beep dedup above but with a 90s
-    //   throttle (sound beeps are fine more often, Discord is for substantive alerts).
-    //   Fires only on urgent cards. Bridges the in-trade coach detection to Discord
-    //   so phone-monitoring users get warned when a locked trade starts going wrong
-    //   — the gap that the 2026-05-08 screenshot exposed (DOWN locked, price ran up,
-    //   dashboard coach screamed reversal, Discord stayed silent).
-    if(cards.length>0&&cards[0].tone==='urgent'&&typeof onUrgentCoachAlert==='function'){
-      const _cardKey=cards[0].title;
-      const _nowD=Date.now();
-      if((_cardKey!==_lastDiscordAlertRef.current.key||_nowD-_lastDiscordAlertRef.current.at>90000)&&_onceOk(cards[0],'discord')){
-        _lastDiscordAlertRef.current={key:_cardKey,at:_nowD};
-        try{
-          onUrgentCoachAlert({
-            title:cards[0].title,
-            body:cards[0].body,
-            tone:cards[0].tone,
-            position:userPosition,
-            gap:_favoredGap,
-            posterior:_taraConf,
-            price:Number(currentPrice)||null,
-            strike:Number(targetMargin)||null,
-            clock:`${timeState?.minsRemaining||0}m ${timeState?.secsRemaining||0}s`,
-          });
-        }catch(_){}
-      }
+    // Notification observation only; durable semantic dedup/caps live in the
+    // sender. Numeric peak/title changes cannot bypass its cooldown. Do not
+    // mirror the old imperative body or consume dashboard/sound once markers.
+    const _discordCard=cards.find(c=>c.tone==='urgent'&&coachCondition(c.title));
+    if(_discordCard&&typeof onUrgentCoachAlert==='function'){
+      try{onUrgentCoachAlert({title:_discordCard.title,position:userPosition,
+        gap:_favoredGap,peak:_peak,price:Number(currentPrice)||null,
+        strike:Number(targetMargin)||null,observedAt:_now,trackingStartedAt:_peakBpsRef.current.openTime});}catch(_){}
     }
 
     // Color schemes per tone
@@ -50390,8 +50370,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   },[]);
 
   const _hourlyEngine=useHourlyEngine({..._hourlyObservation,taraCall,onHourlyLock:_onHourlyLock});
+  const discordCoachObservationRef=useRef(null);
   const btcDiscordDelivery=useDiscordCalls({entries:taraCallLog,hourly:_hourlyEngine.rec,
-    webhook:discordWebhook,username:discordUsername,avatar:discordAvatar,enabled:isMounted});
+    webhook:discordWebhook,username:discordUsername,avatar:discordAvatar,enabled:isMounted,version:TARA_VERSION_DISPLAY,
+    readAdvisories:()=>({asset:currentAsset,ready:startupReadiness.ready,spot:currentPrice,spotAt:_startupSpotAt,
+      coach:discordCoachObservationRef.current,quote:_kalshiQuote,flow:showWhaleAlerts?flowSignal:null,
+      ticks:ticksRef.current,spotTicks:tickHistoryRef.current})});
   const _hourlyOnLeft=(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch{return false;}})();
 
   const handleManualSync=(dir,opts)=>{
@@ -51033,7 +51017,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.12</small>
+              <small>DECISION ENGINE · V14.7.13</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -52019,6 +52003,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             autoOrderState={autoOrderState}
             killSwitchEngaged={killSwitchEngaged}
             onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
+            onUrgentCoachAlert={payload=>{discordCoachObservationRef.current={...payload,callKey:callKey(_activeCallSnapshot)};}}
             liveCoachReversalRef={liveCoachReversalRef}
             reversalRisk={lockedCallRef.current?.reversalRisk||null}
             lockedSnapshotDir={isDirection(_activeCallSnapshot?.call)?_activeCallSnapshot.call:null}
@@ -52570,7 +52555,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
                 <button onClick={()=>{setShowSettings(false);setDiscordStatusMsg('');}} className={'text-[#EDEDED]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
               </div>
 
-              <p className={'text-xs text-[#EDEDED]/60 mb-3 leading-relaxed'}>Only saved, confirmed BTC 15m and hourly Calls go to the existing tara-btc channel. Coach/whale notes stay on the dashboard. Official results and recent verified rates edit the original Call quietly. Trading stays paused.</p>
+              <p className={'text-xs text-[#EDEDED]/60 mb-3 leading-relaxed'}>Confirmed BTC 15m and hourly Calls lead the feed. Useful coach/whale context is limited to two notes per 15-minute window, at least five minutes apart, with stable duplicate suppression. Results and recent rates edit the original Call quietly. Trading stays paused.</p>
 
               {/* V7.0.1: Per-asset webhooks — strict, no fallback */}
               <div className="space-y-2 mb-4">
