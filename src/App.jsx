@@ -41,6 +41,9 @@ import {capturePaperMarketIdentity,isUnresolvedPaperFill,recoverExpiredPaperExec
 import {commitHourlyAdmission,supabaseHourlyTransport} from './hourlyAdmission.js';
 import {hourlyPublicPaths,readHourlyPublic} from './hourlyPublic.js';
 import {API_BASE} from './apiBase.js';
+import {useDiscordCalls} from './useDiscordCalls.js';
+import DiscordDeliveryPanel from './DiscordDeliveryPanel.jsx';
+import {discordDestination,verifyDiscordDestination} from './discordDelivery.js';
 import {ALLOW_CLOCK_FORCED_CALLS, CALL_POLICY_VERSION, assessCallCommit, callLockDeadline, deadlineSitout, directionalConfidence} from './callPolicy.js';
 import {forecastSecondsRemaining,cappedForecastBars,forecastAvailability,quietWindowEvidence} from './forecastTiming.js';
 import {callDecisionEvidence,advanceCallFormation,callFormationReady,canonicalRegimeFlags} from './decisionAuthority.js';
@@ -5680,8 +5683,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.17-v14.7.11-early-call-confirmation';
-const TARA_VERSION_DISPLAY='TARA 14.7.11';
+const TARA_BUILD_VERSION='2026.10.19-v14.7.12-btc-call-delivery';
+const TARA_VERSION_DISPLAY='TARA 14.7.12';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38421,8 +38424,6 @@ function TaraApp(){
   const[showAnalytics,setShowAnalytics]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
   const[selectedTradeId,setSelectedTradeId]=useState(null); // for editable trade log
-  const[discordEditingId,setDiscordEditingId]=useState(null); // for discord message edit
-  const[discordEditText,setDiscordEditText]=useState('');
   const[discordStatusMsg,setDiscordStatusMsg]=useState('');
   // V7.1: Per-asset calibration. Each asset uses ONLY its own trades to build the
   //   posterior calibration buckets, regime stats, signal accuracy, session/hourly
@@ -39455,658 +39456,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   through harmlessly.
   const updateScore=(type,wl,amt)=>{};
 
-  const[discordLog,setDiscordLog]=useState([]); // {id, type, label, ts, messageId, webhookId, webhookToken}
-
-  const broadcastToDiscord=async(type,data)=>{
-    // V7.0.1: Strict per-asset. The active asset's own webhook must be set.
-    //   No fallback to BTC. If a user wants ETH alerts, they set ETH's webhook.
-    //   If they don't want ETH alerts, they leave it empty and nothing fires.
-    // V7.0.7: 2.5s post-switch suppression. After setCurrentAsset stamps the switch
-    //   timestamp, we silently skip broadcasts for 2.5s so transitional state (stale
-    //   currentPrice, stale targetMargin, lingering snapshot, in-flight whale flow)
-    //   doesn't leak into the new asset's Discord channel. EXIT/CLOSE broadcasts
-    //   triggered by user actions (executeAction, handleManualSync) bypass this guard
-    //   since they're explicitly user-driven.
-    const _isUserAction=type==='EXIT'||type==='CLOSE';
-    if(!_isUserAction&&lastAssetSwitchAtRef.current&&Date.now()-lastAssetSwitchAtRef.current<2500){
-      try{console.info('[V7.0.7] Suppressing',type,'broadcast — within 2.5s of asset switch');}catch(_){}
-      return;
-    }
-    // V8.2: High-edge LOCK alert filter. When enabled, only fire LOCK broadcasts when
-    //   Tara's edge over Kalshi meets the configured threshold. Prevents alert fatigue
-    //   so user only gets pinged for the best setups.
-    if(type==='LOCK'&&tradingSettings?.highEdgeAlertOnly){
-      const _post=Number(data?.posterior)||0;
-      const _kalshi=Number(kalshiYesPrice);
-      if(Number.isFinite(_kalshi)&&_post>0){
-        const _dir=data?.dir;
-        const _taraDirConf=_dir==='UP'?_post:(100-_post);
-        const _kalshiDirConf=_dir==='UP'?_kalshi:(100-_kalshi);
-        const _edge=_taraDirConf-_kalshiDirConf;
-        if(_edge<Number(tradingSettings.highEdgeMinPp)){
-          try{console.info('[V8.2] Suppressing LOCK broadcast — edge',_edge.toFixed(1),'pp below threshold',tradingSettings.highEdgeMinPp);}catch(_){}
-          return;
-        }
-      }
-    }
-    const _activeAsset=currentAssetRef.current||'BTC';
-    const _hooks=discordWebhooksRef.current||{};
-    const _webhookForAsset=_hooks[_activeAsset]||'';
-    if(!_webhookForAsset||!_webhookForAsset.startsWith('http'))return;
-    try{
-      // V6.5.8: tag every Discord embed with the asset. So when ETH and BTC are both
-      //   firing on different chats, you can tell at a glance which asset's signal it is.
-      const _assetLabel=ASSET_CONFIG[currentAssetRef.current]?.label||'BTC';
-      const _assetIcon=ASSET_CONFIG[currentAssetRef.current]?.icon||'₿';
-      const _assetTag=`${_assetIcon} ${_assetLabel}`;
-      let embed={};
-
-      if(type==='SIGNAL')embed={
-        title:`TARA SIGNAL  ${data.dir}`,
-        color:data.dir==='UP'?3404125:16478549,
-        description:data.summary||`Signal forming. Awaiting lock confirmation.`,
-        fields:[
-          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
-          {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
-          {name:'Clock',value:data.clock,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
-          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'State',value:data.prediction||'—',inline:false},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  signal`},
-        timestamp:new Date().toISOString(),
-      };
-
-      else if(type==='STAND_DOWN')embed={
-        title:`⛔ TARA — STAND DOWN`,
-        color:14935562, // amber
-        description:data.summary||'Tara is sitting this one out.',
-        fields:[
-          {name:'State',value:data.prediction||'—',inline:false},
-          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
-          {name:'Clock',value:data.clock,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  stand-down`},
-        timestamp:new Date().toISOString(),
-      };
-
-      else if(type==='SEARCH')embed={
-        title:`TARA · ${_assetTag} — SEARCHING`,
-        color:6710886,
-        description:data.summary||'No clear edge yet.',
-        fields:[
-          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
-          {name:'Clock',value:data.clock,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  search`},
-        timestamp:new Date().toISOString(),
-      };
-
-      else if(type==='LOCK'){
-        // V9.9.0: Tint embed border by reversal risk. EXPECTED → rose tint regardless
-        //   of dir; WATCH → amber; NONE/absent → keep direction-based green/rose. The
-        //   reversalRisk.flag is added as an inline field with top signals so the user
-        //   reading on phone gets the same heads-up the dashboard chip shows.
-        const _rr=data.reversalRisk;
-        // V13.4.167: on-screen palette, so a DOWN lock is the same rose in Discord as
-        //   in the app and a WATCH is the same gold.
-        const _baseColor=data.dir==='UP'?_DC_UP:_DC_DOWN;
-        const _embedColor=_rr?.flag==='EXPECTED'?_DC_DOWN:_rr?.flag==='WATCH'?_DC_GOLD:_baseColor;
-        // V9.9.1: null-safe field values — previously `data.price.toFixed(2)` would
-        //   throw if data.price was undefined, killing the whole broadcast silently.
-        const _fields=[
-          {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
-          {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${(Number(data.gap)||0).toFixed(1)} bps`,inline:true},
-          {name:'Clock',value:data.clock||'—',inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Record',value:data.record||'—',inline:true},
-          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-        ];
-        if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
-          const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,3);
-          const _signalLines=_topSig.map(s=>`• ${s.reason||s.key}`).join('\n')||'—';
-          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score||0})`,value:_signalLines,inline:false});
-        }
-        embed={
-          title:`ENGINE  ${data.dir||'—'}  CONFIRMED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
-          color:_embedColor,
-          description:data.summary||`Engine confirmed ${data.dir||'—'}.`,
-          fields:_fields,
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      else if(type==='CLOSE'){
-        const gap=data.strike>0?((data.price-data.strike)/data.strike*10000):0;
-        embed={
-          title:`${data.won?'WIN':'LOSS'}  ${data.dir||'—'}  ${data.window||windowType}`,
-          color:data.won?3404125:16478549,
-          fields:[
-            {name:'Call',value:`${data.dir==='UP'?'UP — above strike':'DOWN — below strike'}`,inline:true},
-            {name:'Regime',value:data.regime||'—',inline:true},
-            {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
-            {name:'Close',value:`$${(data.price||0).toFixed(2)}`,inline:true},
-            {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
-            {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
-          ],
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  close`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      else if(type==='EXIT')embed={
-        title:(()=>{
-          // V112 fix: don't prepend CASHOUT/CUT if action already contains it (avoids "CUT CUT" or "CASHOUT CASHOUT")
-          const action=String(data.action||'').toUpperCase();
-          const prefix=data.result==='WIN'?'CASHOUT':'CUT';
-          if(action.includes('CASHOUT')||action.includes('CUT')||action.includes('EXIT'))return data.action||prefix;
-          return `${prefix}  ${data.action||''}`;
-        })(),
-        color:data.result==='WIN'?3404125:16478549,
-        fields:[
-          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
-          {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
-          {name:'Clock',value:data.clock,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  exit`},
-        timestamp:new Date().toISOString(),
-      };
-
-      // Whale pressure alert — clinical, accurate, no hype
-      // V3.2.4: Tara's Call broadcasts — auto-sent. The user's "general prediction" path
-      //   (SIGNAL/LOCK above) is now manual-only. These four are Tara talking, distinct from
-      //   the engine's general lock state.
-      else if(type==='TARA_SCAN')embed={
-        title:`TARA · ${_assetTag} · SCANNING`,
-        color:6710886,
-        description:data.summary||'No commitment yet — observing.',
-        fields:[
-          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
-          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4`,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Window',value:data.windowAmp||'—',inline:true},
-          {name:'Clock',value:data.clock||'—',inline:true},
-          {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  scanning`},
-        timestamp:new Date().toISOString(),
-      };
-
-      else if(type==='TARA_SIGNAL')embed={
-        title:`TARA · ${_assetTag} · ${data.dir} SIGNAL`,
-        color:data.dir==='UP'?3404125:16478549,
-        description:data.reason||`Forming ${data.dir}. Not yet locked.`,
-        fields:[
-          {name:'Direction',value:data.dir||'—',inline:true},
-          {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
-          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
-          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
-          {name:'Price',value:`$${(data.price||0).toFixed(2)}`,inline:true},
-          {name:'Clock',value:data.clock||'—',inline:true},
-          {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  signal`},
-        timestamp:new Date().toISOString(),
-      };
-
-      else if(type==='TARA_LOCK'){
-        // V10.7.57 — DISCORD LOCK EMBED REDESIGN
-        //   User feedback: prior embed was too long with 14 fields per alert. Phone notifications
-        //   were noisy. Override/no-trade tiers were confusingly broadcast as if real trades.
-        //   New design:
-        //     • Title carries direction, conviction, and OVERRIDE flag (no-trade vs real trade)
-        //     • Single description line with the call essentials
-        //     • Compact 6-field grid (down from 14)
-        //     • Today's streak surfaced ("4W in a row" or "2L streak")
-        //     • Tier-3/override calls explicitly labeled so user can skip on phone
-        const _rr=data.reversalRisk;
-        // V13.4.167: on-screen palette, so a DOWN lock is the same rose in Discord as
-        //   in the app and a WATCH is the same gold.
-        const _baseColor=data.dir==='UP'?_DC_UP:_DC_DOWN;
-        const _embedColor=_rr?.flag==='EXPECTED'?_DC_DOWN:_rr?.flag==='WATCH'?_DC_GOLD:_baseColor;
-        // V10.9.8: no-go-edge is now a NORMAL lock with an edge-caution note, not an
-        //   "OVERRIDE (no-trade)". The user wants these alerted like any directional
-        //   call — Tara has a real read, the market is just priced ahead. Only
-        //   no-go-data remains a true override (data failure, no reliable signal).
-        const _isEdgeCaution=data.tier==='no-go-edge'||data.tier==='no-go-coinflip-late';
-        const _isOverrideCall=(data.wasOverriddenNoTrade===true&&!_isEdgeCaution)||data.tier==='no-go-data';
-        const _isTier3=_isOverrideCall||_isEdgeCaution||data.tier==='single'||data.tier==='time-cap-commit'||data.tier==='timer-commit';
-        const _tierLabel=_isOverrideCall?'⚠ OVERRIDE':_isEdgeCaution?'⚠ EDGE-WATCH':_isTier3?'⚠ TIER-3':data.tier?.includes('confluence')||data.tier==='super-confluent'?'★ TIER-1':'TIER-2';
-        // V10.7.57: derive streak from data.recentResults if provided
-        let _streakLine='';
-        if(Array.isArray(data.recentResults)&&data.recentResults.length>0){
-          let _streak=0, _kind=null;
-          for(let i=data.recentResults.length-1;i>=0;i--){
-            const _r=data.recentResults[i];
-            if(_r!=='WIN'&&_r!=='LOSS')continue;
-            if(_kind===null){_kind=_r;_streak=1;}
-            else if(_r===_kind)_streak++;
-            else break;
-          }
-          if(_streak>=2)_streakLine=` · ${_streak}${_kind==='WIN'?'W':'L'} streak`;
-        }
-        const _arrow=data.dir==='UP'?'▲':data.dir==='DOWN'?'▼':'·';
-        // V10.9.17: SHORTER, SHARPER, PLAIN-LANGUAGE. Title states the call in one
-        //   glance; description translates the numbers into a human sentence (like
-        //   "BTC is $49 below the line with 9m left"); fields trimmed to what's
-        //   actually decision-useful. Strike now shows FULL precision (Kalshi
-        //   strikes carry cents, e.g. $66,830.51 — no rounding).
-        const _strikeNum=Number(data.strike)||0;
-        const _priceNum=Number(data.price)||0;
-        // Full-precision strike with thousands separators (keeps Kalshi's cents)
-        const _strikeFull=_strikeNum.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-        const _priceFull=_priceNum.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-        const _gapBps=Number(data.gap)||0;
-        const _dollarsFromLine=_priceNum-_strikeNum;
-        const _aboveBelow=_dollarsFromLine>=0?'above':'below';
-        // V12.2: show direction-adjusted cost, not raw YES price.
-        //   kalshiAtLock is ALWAYS the Kalshi YES (UP) price.
-        //   For UP calls: cost = kalshiAtLock (correct as-is).
-        //   For DOWN calls: cost = 100 - kalshiAtLock.
-        //   Old code showed '1¢' for a DOWN call when YES=1 (meaning DOWN actually costs 99¢).
-        //   New: shows the actual cost the user is paying for their side.
-        const _kalshiRaw=data.kalshiAtLock!=null?Number(data.kalshiAtLock):null;
-        const _kalshiCost=_kalshiRaw!=null?(data.dir==='UP'?_kalshiRaw:(100-_kalshiRaw)):null;
-        const _kalshiC=_kalshiCost!=null?`${Math.round(_kalshiCost)}¢`:null;
-        // V13.4.167: restyled to match the app. Title carries the call and nothing
-        //   else; the numbers move into a monospace block so BTC / LINE / ENTRY line
-        //   up in a column instead of running together in one long sentence. The
-        //   caveat that used to be a loose "⚠ Trade carefully" line is now a named
-        //   field, so the description is purely the numbers.
-        const _gapDir=_gapBps>0?'▲':_gapBps<0?'▼':'·';
-        const _pad=(s,n)=>String(s).padEnd(n);
-        const _title=_isOverrideCall
-          ?`·  ${data.dir} · SKIPPED`
-          :`${_arrow}  ${data.dir} · ${data.confidence||0}%${_isEdgeCaution?' · PRICED AHEAD':''}`;
-        const _lineArrow=_dollarsFromLine>=0?'▲':'▼';
-        // V13.4.171: surface the maker price in the alert too. 90.6% of real BTC fills
-        //   were taker and taker fees ran ~3.5x the gross edge, so "what do I actually
-        //   pay" is the most decision-relevant line here. _kalshiQuote is module-level
-        //   and already carries the live bid/ask (V13.4.142).
-        const _lq=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
-        const _lqFresh=!!(_lq&&_lq.at&&(Date.now()-_lq.at)<60000&&_lq.bid!=null&&_lq.ask!=null);
-        const _takeC=_lqFresh?(data.dir==='UP'?_lq.ask:(100-_lq.bid)):null;
-        const _restC=_lqFresh?(data.dir==='UP'?_lq.bid:(100-_lq.ask)):null;
-        const _block=[
-          _dcRow('BTC',_priceFull),
-          _dcRow('LINE',_strikeFull,`${_lineArrow} ${Math.abs(_dollarsFromLine).toFixed(2)}`),
-          _dcRow('ENTRY',_kalshiC||'—',_tierLabel.replace(/^[⚠★]\s*/,'')),
-          (_takeC!=null&&_restC!=null&&_takeC>_restC)
-            ?_dcRow('REST AT',`${_restC.toFixed(0)}c`,`vs ${_takeC.toFixed(0)}c taking · saves ${(_takeC-_restC).toFixed(0)}c + fee`)
-            :null,
-          _dcRow('GAP',`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,
-            `${(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-')} · Q${data.quality||0}`),
-        ].filter(Boolean).join('\n');
-        const _desc='```\n'+_block+'\n```'+(_streakLine?`\n${_streakLine.replace(/^\s*·\s*/,'')}`:'');
-        const _fields=[
-          // V13.4.166: was "All-time", which was never true -- the log is capped, so
-          //   this reported a windowed count under a lifetime label. Today stays as-is.
-          {name:'Record',value:`Today ${data.todayRecord||'—'}  ·  ${_TARA_RECORD_WINDOW_LABEL} ${data.taraRecord||'—'}`,inline:false},
-        ];
-        if(_isOverrideCall){
-          _fields.unshift({name:'Why skipped',value:data.caution||data.reason||'Kalshi already priced this move',inline:false});
-        }else if(_isEdgeCaution){
-          _fields.unshift({name:'Caution',value:'Market is priced ahead of the read — better when the odds swing back.',inline:false});
-        }
-        // Only add reversal risk row when EXPECTED or WATCH (worth the space)
-        if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
-          const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,2);
-          const _signalLines=_topSig.map(s=>`• ${s.reason||s.key}`).join('\n')||'—';
-          _fields.push({name:`Reversal: ${_rr.flag}`,value:_signalLines,inline:false});
-        }
-        embed={
-          title:_title,
-          color:_isOverrideCall?13421772:_embedColor, // gray for true override (no-go-data); directional for edge-watch locks
-          description:_desc,
-          fields:_fields,
-          footer:{text:`${TARA_VERSION_DISPLAY} · lock`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      // V9.10.3: TARA_SKIP — fires when Tier-1 Only Mode converts a non-Tier-1 lock
-      //   to SIT_OUT. Tells the user what was rejected so they know the toggle is
-      //   actively filtering trades. Visually distinct from TARA_LOCK (rose-tinted
-      //   warning color) and from TARA_SITOUT (which is disabled per V7.0.8).
-      else if(type==='TARA_SKIP'){
-        const _whb=data.wouldHaveBeen||'—';
-        embed={
-          title:`TARA · ${_assetTag} · ${_whb} SKIPPED  ✦ Tier-1 only`,
-          color:11371468, // muted indigo — neither alarm-red nor confident-green
-          description:`Would have locked ${_whb} (${data.wouldHaveBeenTier||'—'} tier). Tier-1 only mode active — skipped.`,
-          fields:[
-            {name:'Would-have-been',value:_whb,inline:true},
-            {name:'Tier',value:data.wouldHaveBeenTier||'—',inline:true},
-            {name:'Engine Confidence',value:`${data.confidence||0}%`,inline:true},
-            {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
-            {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
-            {name:'Regime',value:data.regime||'—',inline:true},
-            {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-            {name:'FGT',value:`${(Number(data.fgtAbs)||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
-            {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
-          ],
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  tier-1 skip`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      else if(type==='TARA_SITOUT')embed={
-        title:`TARA · ${_assetTag} · SITTING OUT`,
-        color:14935562, // amber
-        description:data.reason||'Conditions don\'t support a confident call.',
-        fields:[
-          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
-          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4`,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Window',value:data.windowAmp||'—',inline:true},
-          {name:'Clock',value:data.clock||'—',inline:true},
-          {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  sit-out`},
-        timestamp:new Date().toISOString(),
-      };
-
-      // V3.2.4: Tara's Call result — fires when window resolves
-      else if(type==='TARA_RESULT'){
-        const isWin=data.result==='WIN';
-        const isSitout=data.result==='SITOUT';
-        embed={
-          title:`TARA · ${_assetTag} · ${isSitout?'SAT OUT':isWin?'WIN':'LOSS'} · ${data.window||windowType}`,
-          color:isSitout?6710886:isWin?3404125:16478549,
-          description:isSitout
-            ? `Tara passed on this round.${data.outcomeDir?` Actual outcome: ${data.outcomeDir}.`:''}`
-            : `Tara called ${data.calledDir}. Actual: ${data.outcomeDir}. ${isWin?'Correct.':'Wrong.'}`,
-          fields:[
-            {name:'Tara\'s Call',value:isSitout?'SIT OUT':data.calledDir||'—',inline:true},
-            {name:'Outcome',value:data.outcomeDir||'—',inline:true},
-            {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
-            {name:'Close',value:`$${(data.price||0).toFixed(2)}`,inline:true},
-            {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
-            {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
-          ],
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  result`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      // V10.9.9: TARA_DAILY — on-demand daily summary (triggered via /daily chat
-      //   command). Gives a standing scoreboard: today's W/L/WR, avg ¢/trade EV
-      //   (not dollar P&L — per user request, EV in cents-per-trade is the more
-      //   honest measure since bet sizing varies), and a per-tier breakdown so
-      //   you can see at a glance which tiers carried the day.
-      else if(type==='TARA_DAILY'){
-        const _wr=data.wr!=null?`${data.wr}%`:'—';
-        const _avgStr=data.avgEvCents!=null?`${data.avgEvCents>=0?'+':''}${data.avgEvCents.toFixed(1)}¢/trade`:'—';
-        const _totalStr=data.totalEvCents!=null?`${data.totalEvCents>=0?'+':''}${Math.round(data.totalEvCents)}¢ total`:'';
-        const _color=(data.avgEvCents||0)>0?3404125:(data.avgEvCents||0)<0?16478549:9807270;
-        const _tierLines=(data.tierBreakdown||[])
-          .map(t=>`${t.tier}: ${t.wins}W-${t.losses}L (${t.wr}%)${t.avgEv!=null?` · ${t.avgEv>=0?'+':''}${t.avgEv.toFixed(1)}¢`:''}`)
-          .join('\n')||'—';
-        embed={
-          title:`TARA · ${_assetTag} · DAILY — ${data.dateLabel||''}`,
-          color:_color,
-          description:`${data.wins||0}W-${data.losses||0}L${data.sitouts?` · ${data.sitouts} sat out`:''} · WR ${_wr} · ${_avgStr}${_totalStr?` (${_totalStr})`:''}`,
-          fields:[
-            {name:'Streak',value:data.streakStr||'—',inline:true},
-            {name:'Best tier',value:data.bestTier||'—',inline:true},
-            {name:'Worst tier',value:data.worstTier||'—',inline:true},
-            {name:'By tier',value:_tierLines,inline:false},
-          ],
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  daily summary`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      // V9.8.16: COACH_ALERT — bridges in-trade dashboard coach alerts to Discord. The
-      //   dashboard's LiveTradeCoach (V9.8.13 made it live + position-aware) already
-      //   detects TARA REVERSED, CONDITIONS ERODING, STRUCTURE BROKE, PRICE SPIKING
-      //   AGAINST YOU, drawdown-from-peak, late-window contrary whale, etc. Pre-V9.8.16
-      //   none of these reached Discord — phone/away users had no warning when a locked
-      //   trade started going wrong. Now: when an urgent coach card key changes (same
-      //   dedup as the sound beep) AND throttle (90s) has elapsed for that key, fire a
-      //   broadcast. Body of the card lands as the description so the user gets full
-      //   context, not just a label.
-      else if(type==='COACH_ALERT'){
-        // V12.1: Phone-first layout. Title = the call. Description = full context in plain
-        //   English (the improved coach body). No fields — just the key context line up top.
-        //   Before: 6-field grid + raw reason string = hard to scan on phone in < 2 sec.
-        //   After: two lines. First line = position + gap + clock. Second = what to do and why.
-        // V13.4.169: brought in line with the LOCK/WHALE embeds restyled in V13.4.167 --
-        //   this one was missed, so a coach alert still ran its context together as one
-        //   prose line while the others used aligned monospace columns.
-        const _color12=data.tone==='urgent'?_DC_DOWN:data.tone==='watch'?_DC_GOLD:_DC_DIM;
-        const _posArrow=data.position==='UP'?'▲':data.position==='DOWN'?'▼':'·';
-        const _gapNum=data.gap!=null?Number(data.gap):null;
-        const _block=[
-          data.position?_dcRow('POSITION',`${_posArrow} ${data.position}`):null,
-          data.price!=null?_dcRow('BTC',Number(data.price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})):null,
-          data.strike!=null?_dcRow('STRIKE',Number(data.strike).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
-            _gapNum!=null?`${_gapNum>=0?'▲':'▼'} ${Math.abs(_gapNum).toFixed(1)}bps`:undefined):null,
-          data.clock?_dcRow('LEFT',data.clock):null,
-        ].filter(Boolean).join('\n');
-        embed={
-          title:`${data.tone==='urgent'?'⚠':'·'}  ${data.title||'COACH ALERT'}`,
-          color:_color12,
-          description:(_block?'```\n'+_block+'\n```':'')+(data.body||''),
-          fields:[],
-          footer:{text:`${TARA_VERSION_DISPLAY} · coach`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      // V9.8.16: WHALE_RETRACTION — fires ~75s after a WHALE broadcast that claimed a
-      //   whale flow "aligns" with the user's position, IF subsequent price action
-      //   contradicts the alignment. Example from real screenshot 2026-05-08: 2:17 PM
-      //   "WHALE SELL $1013K — aligns with your DOWN position", then price rallied
-      //   ~+9 bps within minutes. The original alignment claim was misleading; this
-      //   retraction fires so the user isn't anchored to a stale read.
-      else if(type==='WHALE_RETRACTION'){
-        const _direction=data.moveBps>0?'rallied':'dropped';
-        const _sign=data.moveBps>0?'+':'';
-        embed={
-          title:`TARA · ${_assetTag} — WHALE READ INVALIDATED`,
-          color:15974710, // amber — heads-up, not full panic
-          description:[
-            `Earlier $${(data.whaleUsd/1000).toFixed(0)}K ${data.whaleSide} whale at $${data.whalePrice.toFixed(0)} appeared to align with your ${data.position} position.`,
-            `Since then price has ${_direction} to $${data.nowPrice.toFixed(0)} (${_sign}${data.moveBps.toFixed(0)} bps from whale price).`,
-            `Tape signal looks absorbed or contradicted — reassess. The "alignment" read no longer holds.`,
-          ].join('\n'),
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  futures tape retraction`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      // V13.4.170: hourly ladder lock. These never reached Discord at all -- the panel
-      //   had no broadcast call -- so a lock only existed as a card on an open tab.
-      //   Same monospace/palette treatment as TARA_LOCK so both read identically.
-      else if(type==='HOURLY_LOCK'){
-        const _isYes=data.side==='YES';
-        const _strike=Number(data.strike)||0;
-        const _block=[
-          _dcRow('SIDE',`${_isYes?'▲':'▼'} ${data.side}`,`strike ${_strike.toLocaleString('en-US')}`),
-          _dcRow('ENTRY',`${Math.round(Number(data.cost)||0)}c`,
-            (Number(data.cost)||0)<50?'under 50c':undefined),
-          data.spot!=null?_dcRow('BTC',Number(data.spot).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})):null,
-          data.minsAtLock!=null?_dcRow('LEFT',`${Math.round(Number(data.minsAtLock))}m`,data.band?`model ${data.band} here`:undefined):null,
-        ].filter(Boolean).join('\n');
-        const _stats=[
-          Number(data.conf)>0?`Tara ${Math.round(Number(data.conf))}%`:null,
-          data.mktPct!=null?`mkt ${Math.round(Number(data.mktPct))}%`:null,
-          data.model!=null?`model ${Math.round(Number(data.model))}%`:null,
-        ].filter(Boolean).join('  ·  ');
-        const _r=data.record||{};
-        const _rTot=(Number(_r.w)||0)+(Number(_r.l)||0);
-        embed={
-          title:`${_isYes?'▲':'▼'}  HOURLY ${data.side} · ${Math.round(Number(data.cost)||0)}c`,
-          color:_isYes?_DC_UP:_DC_DOWN,
-          description:'```\n'+_block+'\n```'+(_stats?_stats:''),
-          fields:[
-            {name:'Hourly record',
-             value:_rTot>0
-               ?`${_r.w||0}W-${_r.l||0}L (${Math.round(100*(Number(_r.w)||0)/_rTot)}%)${_r.open?` · ${_r.open} open`:''}`
-               :'no settled hourly locks yet',
-             inline:false},
-          ],
-          footer:{text:`${TARA_VERSION_DISPLAY} · hourly`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      else if(type==='WHALE'){
-        // V13.4.167: restyled to the app's own visual language -- monospace block,
-        //   the same ▲/▼/· arrows and gold/emerald/rose palette used on screen.
-        //   The old version stated the same figure three different ways ("$1022K in
-        //   whale selling" / "Net flow -$2435K" / "Bybit sold $2435K"), which read as
-        //   three conflicting numbers. Now: NET is the headline, per-venue is the
-        //   breakdown, and the 60s gross only appears if it differs from net.
-        const isBuy=data.netFlow>0;
-        const netAbs=Math.abs(data.netFlow);
-        const _exCount=data.exchangeCount||1;
-        const _plur=(n,w)=>`${n} ${w}${Number(n)===1?'':'s'}`;
-        const _priceFull=(Number(data.price)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-        const _pad=(s,n)=>String(s).padEnd(n);
-        const _venue=Object.entries(data.exchanges||{})
-          .sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]))
-          .map(([ex,v])=>_dcRow(ex.toUpperCase(),_signedMoney(v),_plur(data.exchangeCounts?.[ex]||0,'print')))
-          .join('\n');
-        const _gross=Math.abs(Number(data.totalVol)||0);
-        const _showGross=_gross>0&&Math.abs(_gross-netAbs)/Math.max(netAbs,1)>0.05;
-        const _block=[
-          _dcRow('NET',_signedMoney(data.netFlow),`${isBuy?'buyers':'sellers'} in control`),
-          _showGross?_dcRow('60s VOL',_compactMoney(_gross),_plur(data.tradeCount||0,'trade')):null,
-          ``,
-          _venue||'—',
-          ``,
-          _dcRow('BTC',_priceFull),
-          _dcRow('WINDOW',data.clock||'—'),
-        ].filter(v=>v!==null).join('\n');
-        const _conf=data.spotAligned
-          ?'Spot and futures agree — higher confidence.'
-          :_exCount===1
-          ?`Single venue only — unconfirmed, may be noise.`
-          :'Futures only — could be hedging, not direction.';
-        let _advisory=null;
-        if(data.whaleAdvisory){
-          const a=data.whaleAdvisory;
-          const _mark=a.action==='HOLD'?'▲ HOLD':a.action==='CASH OUT'?'▼ CASH OUT':'· WATCH';
-          _advisory={name:`${_mark} · your ${data.userPosition} position`,value:a.reason||'—',inline:false};
-        }
-        embed={
-          title:`${isBuy?'▲':'▼'}  WHALE ${isBuy?'BUYING':'SELLING'} · ${_compactMoney(netAbs)}`,
-          color:isBuy?_DC_UP:_DC_DOWN,
-          description:'```\n'+_block+'\n```',
-          fields:[
-            {name:'Read',value:_conf,inline:false},
-            ...(_advisory?[_advisory]:[]),
-          ],
-          footer:{text:`${TARA_VERSION_DISPLAY} · whale`},
-          timestamp:new Date().toISOString(),
-        };
-      }
-
-      // V9.9.1: validity guard — if embed is null or empty (type didn't match any
-      //   branch in the cascade), skip the POST. Logged as error so devtools shows it
-      //   only when something genuinely went wrong (zero noise on success path).
-      if(!embed||typeof embed!=='object'||Object.keys(embed).length===0){
-        try{console.error('[discord-broadcast]',type,'skipped — embed was empty');}catch(_){}
-        return;
-      }
-      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara',avatar_url:discordAvatar||undefined,embeds:[embed]})});
-      // V9.9.1: HTTP failure surfaced. 401 = bad token, 404 = bad webhook URL,
-      //   429 = rate-limited, 400 = malformed embed. Silent on the success path.
-      if(!res.ok){
-        try{
-          const _bodyText=await res.text();
-          console.error('[discord-broadcast]',type,'HTTP',res.status,res.statusText,'body:',_bodyText.slice(0,500));
-        }catch(_){console.error('[discord-broadcast]',type,'HTTP',res.status);}
-      }
-      if(res.ok){
-        const msg=await res.json();
-        const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
-        const entry={id:Date.now(),type,label:embed.title||type,ts:_fmtTimeTz(new Date(),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed,asset:_activeAsset};
-        setDiscordLog(prev=>[entry,...prev].slice(0,50));
-        // V9.8.16: schedule a WHALE_RETRACTION check 75s after a WHALE alert that
-        //   claimed alignment with the user's position. If price has meaningfully
-        //   moved AGAINST the user since the whale fired, the original alignment
-        //   read was wrong and we send a retraction so the user isn't anchored.
-        if(type==='WHALE'&&data?.whaleAdvisory?.action==='HOLD'&&data?.userPosition&&data?.price){
-          const _whaleSnapshot={
-            price:Number(data.price),
-            side:data.netFlow>0?'BUY':'SELL',
-            position:data.userPosition,
-            whaleUsd:Math.abs(Number(data.netFlow)||0),
-            at:Date.now(),
-          };
-          setTimeout(()=>{
-            try{
-              const _nowPrice=Number(currentPriceRef.current);
-              if(!_nowPrice||!_whaleSnapshot.price)return;
-              const _moveBps=((_nowPrice-_whaleSnapshot.price)/_whaleSnapshot.price)*10000;
-              // Contradiction = user position is DOWN and price moved up >=8bps,
-              //   or user position is UP and price moved down <=-8bps. The 8-bps
-              //   threshold filters noise — small wobble after a whale isn't a
-              //   retraction-worthy event.
-              const _contradicted=(_whaleSnapshot.position==='DOWN'&&_moveBps>=8)||(_whaleSnapshot.position==='UP'&&_moveBps<=-8);
-              if(_contradicted){
-                broadcastToDiscord('WHALE_RETRACTION',{
-                  whaleUsd:_whaleSnapshot.whaleUsd,
-                  whaleSide:_whaleSnapshot.side,
-                  whalePrice:_whaleSnapshot.price,
-                  nowPrice:_nowPrice,
-                  moveBps:_moveBps,
-                  position:_whaleSnapshot.position,
-                });
-              }
-            }catch(_){}
-          },75000);
-        }
-      }
-    }catch(e){
-      // V9.9.1: was previously a silent swallow. If embed construction or fetch threw,
-      //   the user had no way to know. Now log to devtools so future regressions show up.
-      try{console.error('[discord-broadcast]',type,'threw:',e&&e.message?e.message:e);}catch(_){}
-    }
-  };
-
-  const editDiscordMessage=async(entry,noteText)=>{
-    if(!entry.webhookId||!entry.webhookToken||!entry.messageId)return false;
-    try{
-      const url=`https://discord.com/api/webhooks/${entry.webhookId}/${entry.webhookToken}/messages/${entry.messageId}`;
-      // Build updated embed — keep original structure, append edit note to description
-      const originalEmbed=entry.embed||{title:entry.label,color:9807270};
-      const updatedEmbed={
-        ...originalEmbed,
-        description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara · edited ${_fmtTimeTz(new Date(),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true})}`},
-      };
-      const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
-      return res.ok;
-    }catch(e){return false;}
-  };
-
-  const deleteDiscordMessage=async(entry)=>{
-    if(!entry.webhookId||!entry.webhookToken||!entry.messageId)return false;
-    try{
-      const url=`https://discord.com/api/webhooks/${entry.webhookId}/${entry.webhookToken}/messages/${entry.messageId}`;
-      const res=await fetch(url,{method:'DELETE'});
-      if(res.ok)setDiscordLog(prev=>prev.filter(m=>m.id!==entry.id));
-      return res.ok;
-    }catch(e){return false;}
-  };
+  // v14.7.12: only the durable saved-Call feed may send to Discord.
 
 
 
@@ -50304,231 +49654,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     lastFormingBroadcastRef.current=formingKey;
   },[analysis?.prediction]);
 
-  // ── V3.2.4: TARA'S CALL AUTO-BROADCASTS ───────────────────────────────────
-  // Tara's Call has its own broadcast lifecycle, distinct from the user-facing manual sends.
-  // She auto-sends one of: SCAN (window opens, observing), SIGNAL (forming UP/DOWN), LOCK
-  // (committed call), or SITOUT (explicit pass). Each fires at most once per window.
-  const taraBroadcastRef=useRef({key:null,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false});
+  // Desktop notifications remain local. Discord reads only saved original Calls.
+  const taraBrowserNoticeRef=useRef(null);
   useEffect(()=>{
-    // V7.0.1: strict per-asset — only proceed if THIS asset's webhook is set
-    const _activeAssetGate=currentAssetRef.current||'BTC';
-    const _hookForGate=discordWebhooks[_activeAssetGate]||'';
-    if(!analysis||!_hookForGate||!_hookForGate.startsWith('http'))return;
-    const winKey=timeState.startWindow||timeState.nextWindow;
-    if(!winKey)return;
-    // Reset broadcast flags on window change
-    if(taraBroadcastRef.current.key!==winKey){
-      taraBroadcastRef.current={key:winKey,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false};
-    }
-    const sec=timeState.minsRemaining*60+timeState.secsRemaining;
-    const totalSec=windowType==='15m'?900:300;
-    const elapsed=totalSec-sec;
-    const tc=taraCall;
-    const tw=taraScorecards[windowType]||{wins:0,losses:0,sitouts:0};
-    const taraRecord=`${tw.wins}W · ${tw.losses}L · ${tw.sitouts} sat out  (${tw.wins+tw.losses>0?((tw.wins/(tw.wins+tw.losses))*100).toFixed(1):'—'}%)`;
-    // V10.9.9: today's record (resets daily, all window types) — alongside the
-    //   all-time per-window-type record. Compact "today" line on every lock.
-    const _todayResolved=(todayData?.wins||0)+(todayData?.losses||0);
-    const todayRecord=_todayResolved>0
-      ? `${todayData.wins}W-${todayData.losses}L (${todayData.wr}%)`
-      : `0W-0L —`;
-    // V10.9.13: rolling 7-day record (all window types, current asset) for the
-    //   lock embed. Counts resolved WIN/LOSS in the last 7×24h from taraCallLog.
-    const last7Record=(()=>{
-      try{
-        const _cut=Date.now()-7*24*60*60*1000;
-        const _src=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.asset||'BTC')===currentAsset&&(e.id||0)>=_cut);
-        if(!_src.length)return '0W-0L —';
-        const _w=_src.filter(e=>e.result==='WIN').length;
-        const _l=_src.length-_w;
-        return `${_w}W-${_l}L (${Math.round(_w/_src.length*100)}%)`;
-      }catch(_){return '0W-0L —';}
-    })();
-    const fgtAbs=Math.abs(analysis.mtfAlignment||0);
-    const fgtDir=(analysis.mtfAlignment||0)>0.05?'UP':(analysis.mtfAlignment||0)<-0.05?'DOWN':'';
-    const baseData={
-      posterior:analysis.rawProbAbove,
-      quality:qualityGate?.score||0,
-      fgtAbs,fgtDir,
-      regime:analysis.regime,
-      windowAmp:analysis.windowAmplitude?.label,
-      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
-      taraRecord,
-      todayRecord,
-      last7Record,
-      strike:targetMargin,
-      price:currentPrice,
-    };
-    // V6.5.5: SCAN broadcasts disabled entirely. Per user request — no scanning messages
-    //   to Discord. Only meaningful events (SIGNAL, LOCK, SITOUT, RESULT, EXIT) broadcast.
-    //   Flag still set to short-circuit any code that might check it later.
-    if(!taraBroadcastRef.current.sentScan&&elapsed>=30){
-      taraBroadcastRef.current.sentScan=true;
-    }
-    // SIGNAL: V7.0.8 — DISABLED per user request. Keep Discord clean: LOCK + EXIT/CLOSE
-    //   alerts only. Pre-lock signals were creating noise (one per window per direction)
-    //   that didn't actionably differ from the LOCK that follows. Flag still set so the
-    //   ref state stays consistent and we don't accidentally re-fire if logic changes.
-    if(!taraBroadcastRef.current.sentSignal&&!taraCallSnapshotRef.current&&(tc.call==='UP'||tc.call==='DOWN')&&elapsed>=20){
-      taraBroadcastRef.current.sentSignal=true;
-      // broadcastToDiscord('TARA_SIGNAL',...) — disabled V7.0.8
-    }
-    // LOCK: broadcast once per window after Tara's Call is snapshotted at endgame
-    // V6.5.7: Use the SNAPSHOT for posterior/quality/fgt/regime — not current engine state.
-    //   Previously baseData read fresh values, so a DOWN-locked window could broadcast
-    //   "DOWN · Posterior 89%" when 89% meant 89% UP (current engine view post-lock).
-    if(!taraBroadcastRef.current.sentLock&&taraCallSnapshotRef.current&&taraCallSnapshotRef.current.call!=='SIT_OUT'){
-      // V10.7.82b: Stability check — wait 2s after commit before broadcasting.
-      //   Prevents "locked then immediately overridden" false Discord messages.
-      //   When deadzone guard or coherence override fires after initial lock,
-      //   the snapshot changes within 1-2 renders. Wait 2s to ensure it's stable.
-      const _commitAge=taraCallSnapshotRef.current?._committedAt
-        ?Date.now()-taraCallSnapshotRef.current._committedAt:9999;
-      if(_commitAge<2000)return; // too fresh — might still be overridden, check next render
-      // V10.7.73b / V10.9.8: Discord broadcast gating for no-go tiers.
-      //   ORIGINAL (V10.7.73b): blocked no-go-data, no-go-edge, AND
-      //   no-go-coinflip-late from Discord — treated all as "system overrides".
-      //   V10.9.8 CHANGE (user request): no-go-edge means Tara HAS a directional
-      //   read, the market is just priced unfavorably (e.g. Tara leans UP 55%,
-      //   Kalshi has it at 62%). The user wants these treated as normal locks and
-      //   sent to Discord like any other directional call — with the edge concern
-      //   surfaced as a caution note ("priced too high/low — trade carefully when
-      //   odds come back in favor"). Same for no-go-coinflip-late (a real but
-      //   late/marginal read). ONLY no-go-data stays suppressed, because that's a
-      //   genuine data-integrity failure (stale price feed / missing Kalshi data)
-      //   where there is no reliable signal to act on.
-      const _snapTier=taraCallSnapshotRef.current?.tier||'';
-      if(_snapTier==='no-go-data'){
-        taraBroadcastRef.current.sentLock=true; // mark as sent so we don't retry
-        // skip — don't broadcast data-integrity failures to Discord
-      } else {
-      // V10.7.62: windowId guard — snapshot must belong to THIS window, not a previous one.
-      //   V10.7.61 deferred snapshot clear (now reverted) caused the old window's snapshot
-      //   to still be set when the new window's broadcast effect fired → duplicate Discord lock.
-      //   This guard is a safety net: even if snapshot somehow stays set across rollover,
-      //   we won't fire Discord for a lock that belongs to a different window.
-      const _snapWindowId=taraCallSnapshotRef.current?.windowId||'';
-      const _currentWindowId=timeState.startWindow||timeState.nextWindow||'';
-      if(_snapWindowId&&_currentWindowId&&!_currentWindowId.includes(_snapWindowId.replace(/^15m-|^5m-/,'').slice(0,16))){
-        // Snapshot belongs to a different window — skip broadcast
-      } else {
-      taraBroadcastRef.current.sentLock=true;
-      const snap=taraCallSnapshotRef.current;
-      const _lockBaseData={
-        ...baseData,
-        // Override fields with snapshot values (lock-time state, not current)
-        posterior:snap.atPosterior!=null?snap.atPosterior:baseData.posterior,
-        quality:snap.qScore!=null?snap.qScore:baseData.quality,
-        fgtAbs:snap.fgt!=null?Math.abs(snap.fgt):baseData.fgtAbs,
-        fgtDir:snap.fgt>0.05?'UP':snap.fgt<-0.05?'DOWN':'',
-        regime:snap.regime||baseData.regime,
-        strike:snap.strike||baseData.strike,
-        price:snap.lockPrice||baseData.price,
-        // V9.9.5: tier from the snapshot so the Discord lock embed can show
-        //   confidence tier (single, structural-led, super-confluence, etc).
-        tier:snap.tier||baseData.tier||null,
-      };
-      // V9.10.3: Discord broadcast philosophy reworked. User explicit request:
-      //   "I want every lock to fire as it shows on the screen. if tier 1 is enabled
-      //    and its a sitout, it can send that. but as long as tara is locking up or
-      //    down it should be sent to discord."
-      //
-      //   New rules:
-      //   • snap.call === 'UP' or 'DOWN' → ALWAYS broadcast TARA_LOCK, regardless of
-      //     override flags. Even NO_TRADE / SIT_OUT overrides that promote a direction
-      //     get broadcast (with caution text surfaced in the embed). Screen and Discord
-      //     stay in sync.
-      //   • snap.call === 'SIT_OUT' + wasOverriddenSitOut + wouldHaveBeen filled
-      //     (Tier-1 Only Mode skip) → broadcast TARA_SKIP showing what was rejected.
-      //   • snap.call === 'SIT_OUT' otherwise (engine sit-out, edge-too-low, etc.)
-      //     → stay silent per V7.0.8 (non-actionable noise).
-      //
-      //   Pre-V9.10.3: any override commit suppressed Discord. Result: when Tier-1
-      //   Only Mode + screen showed "LOCKED DOWN 77% NO-GO-DATA", Discord was silent
-      //   for hours. User missed entries they thought they were getting notified about.
-      const _wouldHaveBeen=snap?.wouldHaveBeen;
-      const _isTier1Skip=snap?.call==='SIT_OUT'&&snap?.wasOverriddenSitOut===true&&(_wouldHaveBeen==='UP'||_wouldHaveBeen==='DOWN');
-      if(snap?.call==='UP'||snap?.call==='DOWN'){
-        // Always broadcast directional locks. Override cautions surface in the embed.
-        // V10.7.57: compute recent results array for streak detection in embed
-        const _recentResults=(()=>{
-          try{
-            const _log=taraCallLogRef.current||[];
-            return _log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')).slice(-10).map(e=>e.result);
-          }catch(_){return[];}
-        })();
-        broadcastToDiscord('TARA_LOCK',{
-          ..._lockBaseData,
-          dir:snap.call,
-          confidence:snap.confidence,
-          reason:snap.reason,
-          // V13.4.175 FIX: every other field here (price, strike, quality, regime) is
-          //   already overridden to the frozen lock-time snapshot in _lockBaseData
-          //   above, specifically per the V6.5.7 comment on that block, to avoid this
-          //   exact class of bug. gap alone still read live currentPrice/targetMargin --
-          //   which can have moved by the time this fires (broadcastToDiscord is
-          //   deliberately delayed 2s+ post-lock) -- so the embed could show a BTC/LINE
-          //   pair from the lock next to a GAP computed from a different price/strike.
-          //   Use the same resolved values _lockBaseData already carries.
-          gap:_lockBaseData.strike>0?((_lockBaseData.price-_lockBaseData.strike)/_lockBaseData.strike)*10000:0,
-          reversalRisk:lockedCallRef.current?.reversalRisk||null,
-          // V10.7.57: pass override + caution + streak so embed can render the truth
-          wasOverriddenNoTrade:snap?.wasOverriddenNoTrade===true,
-          wasOverriddenSitOut:snap?.wasOverriddenSitOut===true,
-          caution:snap?.caution||null,
-          recentResults:_recentResults,
-          kalshiAtLock:snap?.kalshiAtLock,
-        });
-        // V10.7.60: Cross-tab system notification for lock alerts.
-        //   AudioContext is suspended when tab is hidden — beeps don't fire.
-        //   Notification API works even when tab is backgrounded or minimized.
-        //   This is the fix for "sound alerts don't work on other tabs."
-        try{
-          if(typeof Notification!=='undefined'&&Notification.permission==='granted'&&snap?.call&&snap.call!=='SIT_OUT'){
-            const _isEdgeCautionN=snap?.tier==='no-go-edge'||snap?.tier==='no-go-coinflip-late';
-            const _isOverride=snap?.tier==='no-go-data'||(snap?.wasOverriddenNoTrade===true&&!_isEdgeCautionN);
-            const _dir=snap.call==='UP'?'▲ UP':'▼ DOWN';
-            const _conf=Math.round(Number(snap.confidence)||0);
-            const _gap=targetMargin>0?(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(1):'—';
-            const _tag=`tara-lock-${snap.windowId||Date.now()}`;
-            const n=new Notification(
-              _isOverride?`⚠ Tara ${_dir} (override)`:_isEdgeCautionN?`🔒 Tara ${_dir} · ${_conf}% · ⚠ edge`:`🔒 Tara ${_dir} · ${_conf}%`,
-              {
-                body:`Gap ${_gap}bps · ${snap.regime||'—'} · ${snap.tier||'—'}`,
-                tag:_tag,
-                renotify:true,
-                silent:false,
-                icon:'/favicon.ico',
-              }
-            );
-            setTimeout(()=>{try{n.close();}catch(_){}},8000);
-          }
-        }catch(_){}
-      }else if(_isTier1Skip){
-        // Tier-1 Only Mode skipped this lock — tell Discord what was rejected.
-        broadcastToDiscord('TARA_SKIP',{
-          ..._lockBaseData,
-          wouldHaveBeen:_wouldHaveBeen,
-          wouldHaveBeenTier:snap?.wouldHaveBeenTier||snap?.tier||'unknown',
-          reason:snap.reason||'Tier-1 only mode active',
-          confidence:snap.confidence||0,
-        });
-        taraBroadcastRef.current.sentLock=true;
-      }else{
-        // Engine sit-out — stay silent. Just mark broadcast as sent so we don't retry.
-        taraBroadcastRef.current.sentLock=true;
-      }
-      } // V10.7.62: close windowId guard
-      } // V10.7.73b: close no-go tier guard
-    }
-    // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
-    //   which is non-actionable noise in Discord. User wants lock + exit alerts only.
-    //   Flag still set for state consistency.
-    if(!taraBroadcastRef.current.sentSitout&&!taraBroadcastRef.current.sentSignal&&analysis.isSystemLocked&&tc.call==='SIT_OUT'){
-      taraBroadcastRef.current.sentSitout=true;
-      // broadcastToDiscord('TARA_SITOUT',...) — disabled V7.0.8
-    }
-  },[analysis?.rawProbAbove,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhooks,currentAsset,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
+    const snap=taraCallSnapshotRef.current;
+    if(!snap?.originalDecision||snap.originalDecision.commitPolicy?.action!=='allow'||
+      !isDirection(snap.call)||snap.windowId!==computeWindowId(windowType)||
+      Date.now()-snap._committedAt<2000)return;
+    const key=callKey(snap);if(taraBrowserNoticeRef.current===key)return;
+    taraBrowserNoticeRef.current=key;
+    try{if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+      const n=new Notification(`Tara ${snap.call} · captured Call`,{
+        body:`${snap.confidence}/100 signal score · ${snap.regime||'—'} · paper Call, not a fill`,
+        tag:`tara-lock-${key}`,icon:'/favicon.ico'});
+      setTimeout(()=>{try{n.close();}catch(_){}},8000);
+    }}catch(_){}
+  },[timeState.minsRemaining,timeState.secsRemaining,windowType,taraCall.call]);
 
   // ── WHALE AUTO-BROADCAST ─────────────────────────────────────────────────
   // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
@@ -50742,80 +49883,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     };
   },[showWhaleLog,setShowWhaleLog]);
 
-  useEffect(()=>{
-    if(!showWhaleAlerts||!discordWebhook)return;
-    const fs=flowSignal;
-    // Strict thresholds to prevent spam and noise
-    if(fs.streakCount<4)return;              // need 4+ consecutive prints
-    if(Math.abs(fs.netDelta90s)<500000)return; // need $500K+ net delta
-    const now=Date.now();
-    const cooldown=5*60*1000; // 5 minutes between whale broadcasts
-    if(now-lastWhaleBroadcastRef.current.time<cooldown)return;
-    if(lastWhaleBroadcastRef.current.dir===fs.streakDir&&now-lastWhaleBroadcastRef.current.time<cooldown*2)return;
-    lastWhaleBroadcastRef.current={time:now,dir:fs.streakDir};
-
-    // Spot alignment check: is Coinbase spot flowing same way as futures?
-    const tape=tapeRef.current;
-    const spotNet=tape.coinbase.buys-tape.coinbase.sells;
-    const futuresNet=(tape.binanceFutures.buys-tape.binanceFutures.sells)+(tape.bybit.buys-tape.bybit.sells);
-    const spotAligned=spotNet!==0&&Math.sign(spotNet)===Math.sign(futuresNet);
-
-    // Exchange breakdown (only exchanges with >$100K activity)
-    const exchanges={};
-    const exchangeCounts={};
-    const bnNet=tape.binanceFutures.buys-tape.binanceFutures.sells;
-    const byNet=tape.bybit.buys-tape.bybit.sells;
-    const cbNet=tape.coinbase.buys-tape.coinbase.sells;
-    if(Math.abs(bnNet)>100000){exchanges['Binance']=bnNet;exchangeCounts['Binance']=Math.max(1,Math.round(Math.abs(bnNet)/200000));}
-    if(Math.abs(byNet)>100000){exchanges['Bybit']=byNet;exchangeCounts['Bybit']=Math.max(1,Math.round(Math.abs(byNet)/200000));}
-    if(Math.abs(cbNet)>100000){exchanges['Coinbase']=cbNet;exchangeCounts['Coinbase']=Math.max(1,Math.round(Math.abs(cbNet)/200000));}
-    const exCount=Object.keys(exchanges).length||1;
-
-    const recentPrints=whaleLog.slice(0,fs.streakCount);
-    const totalBuy=recentPrints.filter(w=>w.side==='BUY').reduce((a,w)=>a+w.usd,0);
-    const totalSell=recentPrints.filter(w=>w.side==='SELL').reduce((a,w)=>a+w.usd,0);
-    const biggest=Math.max(...recentPrints.map(w=>w.usd),0);
-
-    // V3.2.4: Whale advisory — if user has a position open, evaluate whether this whale
-    //   flow helps or hurts them. Buy-side whale flow is bullish (good for UP positions,
-    //   adverse for DOWN). Sell-side whale flow is bearish (good for DOWN, adverse for UP).
-    //   The advisory is informational — user decides whether to act.
-    let whaleAdvisory=null;
-    if(userPosition&&fs.netDelta90s){
-      const whaleDir=fs.netDelta90s>0?'UP':'DOWN';
-      const aligned=whaleDir===userPosition;
-      const heavySize=Math.abs(fs.netDelta90s)>=750000; // $750K+ in 90s
-      const veryHeavy=Math.abs(fs.netDelta90s)>=1500000;
-      if(aligned){
-        whaleAdvisory={
-          action:'HOLD',
-          tone:'favorable',
-          reason:`Whale flow ${whaleDir} ($${(Math.abs(fs.netDelta90s)/1000).toFixed(0)}K) aligns with your ${userPosition} position. ${veryHeavy?'Very heavy size — consider scaling up if room remains.':heavySize?'Heavy size — conviction increasing.':'Modest support.'}`
-        };
-      } else {
-        whaleAdvisory={
-          action:veryHeavy?'CASH OUT':heavySize?'CASH OUT':'WATCH',
-          tone:'adverse',
-          reason:`Whale flow ${whaleDir} ($${(Math.abs(fs.netDelta90s)/1000).toFixed(0)}K) opposes your ${userPosition} position. ${veryHeavy?'Very heavy adverse size — consider closing.':heavySize?'Heavy adverse size — exit risk rising.':'Watch for confirmation before acting.'}`
-        };
-      }
-    }
-
-    broadcastToDiscord('WHALE',{
-      netFlow:fs.netDelta90s,
-      totalVol:fs.streakUSD,
-      tradeCount:fs.streakCount,
-      exchangeCount:exCount,
-      exchanges,exchangeCounts,
-      totalBuy,totalSell,biggest,
-      spotAligned,
-      price:currentPrice,
-      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
-      // V3.2.4: position-aware advisory
-      userPosition,
-      whaleAdvisory,
-    });
-  },[flowSignal.streakCount,flowSignal.streakDir]);
+  // Whale analysis remains on the dashboard. It never posts to the BTC Call feed.
 
   // ── ADVISOR SOUND ALERTS — fires when advisor label changes to something critical ──
   const lastAdvisorLabelRef=useRef('');
@@ -51299,7 +50367,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   missed. Same three channels the 15m lock already uses.
   const _onHourlyLock=React.useCallback((lk)=>{
     if(!lk||!lk.side)return;
-    try{broadcastToDiscord('HOURLY_LOCK',lk);}catch(_e){}
     try{
       if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
         new Notification(`Tara hourly · ${lk.side} @ ${Number(lk.strike).toLocaleString('en-US')}`,{
@@ -51323,6 +50390,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   },[]);
 
   const _hourlyEngine=useHourlyEngine({..._hourlyObservation,taraCall,onHourlyLock:_onHourlyLock});
+  const btcDiscordDelivery=useDiscordCalls({entries:taraCallLog,hourly:_hourlyEngine.rec,
+    webhook:discordWebhook,username:discordUsername,avatar:discordAvatar,enabled:isMounted});
   const _hourlyOnLeft=(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch{return false;}})();
 
   const handleManualSync=(dir,opts)=>{
@@ -51596,35 +50665,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }
   };
 
-  const broadcastSignalManual=()=>{
-    if(!analysis)return;
-    const lock=analysis.lockInfo;
-    const isSearching=analysis.prediction?.includes('SEARCHING');
-    const isStandDown=['BLACKOUT','OBSERVE','LOW QUALITY','SITTING OUT','BREAKING NEWS'].some(s=>analysis.prediction?.includes(s));
-    // V134: Allow broadcasting any state with directional info OR stand-down state
-    let dir=analysis.prediction?.includes('UP')?'UP':analysis.prediction?.includes('DOWN')?'DOWN':null;
-    if(isSearching)dir='SEARCH';
-    if(isStandDown)dir='STAND_DOWN';
-    if(!dir)return;
-    const winsW=scorecards[windowType]?.wins||0,lossesW=scorecards[windowType]?.losses||0;
-    const record=`${winsW}W-${lossesW}L-${windowType}`;
-    const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin*10000):0;
-    const clock=`${timeState.minsRemaining}m ${timeState.secsRemaining}s`;
-    const wKey=timeState.startWindow||timeState.nextWindow||0;
-    const type=lock?'LOCK':isStandDown?'STAND_DOWN':isSearching?'SEARCH':'SIGNAL';
-    const key=`${type}:${dir}:${wKey}:${analysis.prediction}`;
-    if(lastManualBroadcastRef.current.key===key)return;
-    lastManualBroadcastRef.current={key,type};
-    // V134: include plain-English summary
-    const plainEnglish=buildPlainEnglish(analysis,qualityGate,analysis?.advisor);
-    broadcastToDiscord(type,{
-      dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock,
-      regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0,record,
-      summary:plainEnglish,
-      prediction:analysis.prediction,
-      quality:Math.round(qualityGate?.score||0)
-    });
-  };
+  const broadcastSignalManual=null; // saved, confirmed Calls send automatically
 
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/daily')){
       // V10.9.9: /daily — on-demand daily summary to Discord.
@@ -51671,11 +50712,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _byEv=tierBreakdown.filter(t=>t.avgEv!=null&&t.total>=2);
       const bestTier=_byEv.length?(()=>{const t=_byEv.reduce((a,b)=>b.avgEv>a.avgEv?b:a);return`${t.tier} (${t.avgEv>=0?'+':''}${t.avgEv.toFixed(1)}¢)`;})():'—';
       const worstTier=_byEv.length?(()=>{const t=_byEv.reduce((a,b)=>b.avgEv<a.avgEv?b:a);return`${t.tier} (${t.avgEv>=0?'+':''}${t.avgEv.toFixed(1)}¢)`;})():'—';
-      broadcastToDiscord('TARA_DAILY',{
-        dateLabel:_todayKey,wins,losses,sitouts,wr,avgEvCents,totalEvCents,streakStr,bestTier,worstTier,tierBreakdown,
-      });
-      r=`Daily summary sent: ${wins}W-${losses}L (${wr??'—'}%), avg ${avgEvCents!=null?(avgEvCents>=0?'+':'')+avgEvCents.toFixed(1):'—'}¢/trade.`;
-    }else if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast | /daily`;setChatLog([...log,{role:'tara',text:r}]);},400);};
+      r=`Dashboard summary only: ${wins}W-${losses}L (${wr??'—'}%). Discord records update on the original confirmed Call; no summary blast.`;
+    }else if(u.includes('/broadcast')){r='Only saved, confirmed BTC Calls send automatically. No manual signal posted.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast | /daily`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
   const handleWindowToggle=(t)=>{if(t!=='15m')return;/* v13.3.0: 5m removed */if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};_rolloverGraceRef.current=Date.now();setForceRender(p=>p+1);};
   // V6.5.8: Asset switch handler. Same state-reset pattern as window toggle, plus
@@ -51995,7 +51033,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.11</small>
+              <small>DECISION ENGINE · V14.7.12</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
@@ -52570,6 +51608,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
           Automatic Calls close at 7:00 remaining.
           {!_activeCallSnapshot&&callCommitHoldRef.current?.windowId===computeWindowId(windowType)&&<> {callCommitHoldRef.current.reason}</>}
         </p>}
+        {['overview','logs','schedule'].includes(workspaceFocus)&&<DiscordDeliveryPanel delivery={btcDiscordDelivery}/>}
         {workspaceFocus==='overview'&&!expandedOverview&&<><TaraOverviewMarket
           compactRead asset={currentAsset} priceSource={priceSource} resolution={resolution} setResolution={setResolution}
           currentPrice={currentPrice} targetMargin={targetMargin} strikeSource={strikeSource}
@@ -52980,7 +52019,6 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             autoOrderState={autoOrderState}
             killSwitchEngaged={killSwitchEngaged}
             onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
-            onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
             liveCoachReversalRef={liveCoachReversalRef}
             reversalRisk={lockedCallRef.current?.reversalRisk||null}
             lockedSnapshotDir={isDirection(_activeCallSnapshot?.call)?_activeCallSnapshot.call:null}
@@ -53529,14 +52567,14 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
-                <button onClick={()=>{setShowSettings(false);setDiscordEditingId(null);setDiscordEditText('');setDiscordStatusMsg('');}} className={'text-[#EDEDED]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
+                <button onClick={()=>{setShowSettings(false);setDiscordStatusMsg('');}} className={'text-[#EDEDED]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
               </div>
 
-              <p className={'text-xs text-[#EDEDED]/60 mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to Discord. <strong className="text-[#EDEDED]/80">V7.0:</strong> set a separate webhook per asset to keep channels clean. Leave a slot empty and that asset broadcasts nothing &mdash; each asset is fully independent.</p>
+              <p className={'text-xs text-[#EDEDED]/60 mb-3 leading-relaxed'}>Only saved, confirmed BTC 15m and hourly Calls go to the existing tara-btc channel. Coach/whale notes stay on the dashboard. Official results and recent verified rates edit the original Call quietly. Trading stays paused.</p>
 
               {/* V7.0.1: Per-asset webhooks — strict, no fallback */}
               <div className="space-y-2 mb-4">
-                {ASSET_KEYS.map(k=>{
+                {['BTC'].map(k=>{
                   const _c=ASSET_CONFIG[k];
                   const _val=discordWebhooks[k]||'';
                   return(
@@ -53581,10 +52619,12 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
               <div className="flex gap-2 mb-5">
                 <button onClick={()=>setShowSettings(false)} className="flex-1 bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-2 rounded-lg text-xs uppercase tracking-wide transition-colors">Save</button>
                 <button onClick={async()=>{
-                  await broadcastToDiscord('SIGNAL',{dir:'UP',price:currentPrice||75000,strike:targetMargin||75000,gap:0,clock:'TEST'});
-                  setDiscordStatusMsg('Test sent ✓');
+                  const destination=discordDestination(discordWebhook);
+                  if(!destination){setDiscordStatusMsg('BTC webhook missing or invalid — no message sent.');return;}
+                  try{await verifyDiscordDestination(destination);setDiscordStatusMsg('Existing tara-btc connection verified — no test message sent.');}
+                  catch{setDiscordStatusMsg('Connection not verified — check the existing tara-btc webhook. No message sent.');}
                   setTimeout(()=>setDiscordStatusMsg(''),3000);
-                }} className={'px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-[#8C98A8]/10 transition-colors'}>Test</button>
+                }} className={'px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-[#8C98A8]/10 transition-colors'}>Check connection</button>
               </div>
 
               {/* V111: Sync to baseline training data */}
@@ -53603,57 +52643,7 @@ const _active=currentAsset===k&&!showSports&&!showWeather&&!showBrain&&!analytic
 
               {discordStatusMsg&&<div className={'mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2'}>{discordStatusMsg}</div>}
 
-              <div className={'border-t border-[#24242E] pt-4'}>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className={'text-xs font-bold uppercase tracking-wide text-[#EDEDED]/60'}>Sent Messages ({discordLog.length})</h3>
-                  <p className={'text-[10px] text-[#EDEDED]/30'}>Edit or delete within 15 min</p>
-                </div>
-
-                {discordLog.length===0?(
-                  <div className={'text-xs text-[#EDEDED]/30 italic text-center py-6'}>No messages sent yet this session</div>
-                ):(
-                  <div className="space-y-2">
-                    {discordLog.map(entry=>(
-                      <div key={entry.id} className={'bg-[#050508] rounded-lg border border-[#24242E] overflow-hidden'}>
-                        <div className="flex items-center gap-2 p-2.5">
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.type==='LOCK'?'bg-indigo-400':entry.type==='CLOSE'?'bg-emerald-400':'bg-amber-400'}`}/>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs text-white truncate">{entry.label}</div>
-                            <div className={'text-[10px] text-[#EDEDED]/30'}>{entry.ts}{entry.edited&&' · edited'}</div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button onClick={()=>{setDiscordEditingId(discordEditingId===entry.id?null:entry.id);setDiscordEditText(entry.label);}}
-                              className={'px-2 py-1 text-[10px] font-bold rounded-lg border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/15 transition-colors'}>Edit</button>
-                            <button onClick={async()=>{
-                              const ok=await deleteDiscordMessage(entry);
-                              setDiscordStatusMsg(ok?'Deleted ✓':'Failed — may be >15 min old');
-                              setTimeout(()=>setDiscordStatusMsg(''),3000);
-                            }} className={'px-2 py-1 text-[10px] font-bold rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/15 transition-colors'}>Del</button>
-                          </div>
-                        </div>
-                        {discordEditingId===entry.id&&(
-                          <div className={'border-t border-[#24242E] p-2.5'}>
-                            <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
-                              className={'w-full bg-[#101014] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
-                              placeholder="Add a note to this message (e.g. 'Closed early, took profits at $75,200')"/>
-                            <div className="flex gap-2">
-                              <button onClick={async()=>{
-                                const ok=await editDiscordMessage(entry,discordEditText);
-                                setDiscordStatusMsg(ok?'Note added ✓':'Edit failed — may be >15 min old or webhook mismatch');
-                                if(ok){setDiscordLog(prev=>prev.map(m=>m.id===entry.id?{...m,label:m.label,edited:true}:m));setDiscordEditingId(null);setDiscordEditText('');}
-                                setTimeout(()=>setDiscordStatusMsg(''),3000);
-                              }} className={'flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors'}>Add Note</button>
-                              <button onClick={()=>{setDiscordEditingId(null);setDiscordEditText('');}}
-                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#24242E] text-[#EDEDED]/40 hover:text-white transition-colors'}>Cancel</button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className={'text-[10px] text-[#EDEDED]/20 mt-3 text-center leading-relaxed'}>Log resets on page refresh. Discord allows edits or deletes within 15 minutes of sending.</p>
-              </div>
+              <DiscordDeliveryPanel delivery={btcDiscordDelivery} details/>
             </div>
           </div>
         </div>
