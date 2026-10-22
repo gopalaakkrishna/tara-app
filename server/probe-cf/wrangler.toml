@@ -1,0 +1,34 @@
+# Tara feed probe on Cloudflare's FREE plan. Step 1 of the always-on engine plan.
+# Personal Cloudflare account only (the same one that hosts taracalls.pages.dev
+# and tara-sports-refresh). Never deploy this to the Evolve Pictures account.
+name = "tara-feed-probe"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+account_id = "5bd757dd1285beb06bf95ef9e2962c6b"
+workers_dev = true
+
+# Watchdog: once a minute, re-arm both objects' alarms if one ever gave up.
+# Free accounts get 5 cron triggers; tara-sports-refresh uses 1.
+[triggers]
+crons = ["* * * * *"]
+
+[[durable_objects.bindings]]
+name = "PROBE"
+class_name = "FeedProbe"
+
+[[durable_objects.bindings]]
+name = "CPU"
+class_name = "CpuTest"
+
+# Free plan Durable Objects must use the SQLite storage backend.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FeedProbe", "CpuTest"]
+
+# Public values: the same URL and anon key ship in tara-app's src/App.jsx.
+[vars]
+SUPABASE_URL = "https://vhbbkqmyyzddhezdgszm.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM"
+
+[observability]
+enabled = true
