@@ -28,6 +28,13 @@ export const REST = [
   ['binance-futures-rest', 'info', 60000, 'https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT', (d) => isNum(d?.price)],
   ['kalshi-15m-events', 'decision', 10000, () => `https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=KXBTC15M&with_nested_markets=true&status=open&limit=50&min_close_ts=${nowSec()}`, (d) => Array.isArray(d?.events)],
   ['kalshi-15m-events-external', 'decision', 10000, () => `https://external-api.kalshi.com/trade-api/v2/events?series_ticker=KXBTC15M&with_nested_markets=true&status=open&limit=50&min_close_ts=${nowSec()}`, (d) => Array.isArray(d?.events)],
+  // First deploy (Oct 22) showed Kalshi answering 429 to every request from
+  // Cloudflare's shared egress, and OKX partly. These measure the free Render
+  // proxy (tara-kalshi-proxy, keeps itself awake on this traffic) and the
+  // existing Railway proxy as the route around it.
+  ['kalshi-15m-via-render', 'decision', 10000, () => `https://tara-kalshi-proxy.onrender.com/kalshi-public/events?series_ticker=KXBTC15M&with_nested_markets=true&status=open&limit=50&min_close_ts=${nowSec()}`, (d) => Array.isArray(d?.events)],
+  ['kalshi-15m-via-railway', 'decision', 10000, () => `https://tara-kalshi.up.railway.app/kalshi/events?series_ticker=KXBTC15M&with_nested_markets=true&status=open&limit=50&min_close_ts=${nowSec()}`, (d) => Array.isArray(d?.events)],
+  ['okx-ticker-via-render', 'decision', 5000, 'https://tara-kalshi-proxy.onrender.com/okx/market/ticker?instId=BTC-USDT', okxFirst],
   ['kalshi-hourly-events', 'context', 60000, () => `https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=KXBTCD&with_nested_markets=true&status=open&limit=20&min_close_ts=${nowSec()}`, (d) => Array.isArray(d?.events)],
   ['deribit-options', 'context', 180000, 'https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=option', (d) => Array.isArray(d?.result)],
   ['tara-economic-calendar', 'context', 300000, 'https://taracalls.pages.dev/api/economic-calendar', (d) => !!d && typeof d === 'object'],
