@@ -1,0 +1,13 @@
+{
+  "name": "tara-feed-probe",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Step 1 of the Tara always-on engine plan: checks which market-data feeds a cloud server can reach. Read-only.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node probe.mjs"
+  }
+}
