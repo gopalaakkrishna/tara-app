@@ -1,13 +1,14 @@
 {
   "name": "tara-engine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Tara's always-on BTC Call engine on Cloudflare's free plan. Step 2 of the plan; shadow mode until cutover.",
   "scripts": {
-    "build": "node scripts/build-core.mjs",
+    "build": "node scripts/build-core.mjs && node scripts/build-app.mjs",
     "deploy": "wrangler deploy",
-    "check": "wrangler deploy --dry-run --outdir dist"
+    "check": "wrangler deploy --dry-run --outdir dist",
+    "run-local": "node scripts/run-local.mjs"
   },
   "devDependencies": {
     "@babel/parser": "7.29.7",

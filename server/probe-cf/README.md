@@ -1,4 +1,10 @@
-# Tara feed probe (Cloudflare, free plan)
+# Tara feed probe (Cloudflare, free plan): RETIRED
+
+**Retired 2026-10-26.** Step 1 passed (4 days of data). The verdict stays in
+`tara_state` at `research/feedProbe_cloudflare_v1`. The Worker now runs
+`retired.js` only: migration v2 deletes the FeedProbe and CpuTest objects and
+the cron is gone, so the engine (`server/engine`) gets the free Durable Object
+time. The code in `src/` is kept as the record of what was tested.
 
 Step 1 of the always-on engine plan. Before any engine work, it answers three
 questions on Cloudflare's free plan:

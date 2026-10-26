@@ -39,5 +39,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Extract the decision path from App.jsx
         run: node server/engine/scripts/build-core.mjs
-      - name: Generated code makes the same Calls as the website
+      - name: Generate the engine's TaraApp slice (fails if App.jsx moved under it)
+        run: node server/engine/scripts/build-app.mjs
+      - name: Generated code makes the same Calls as the website; runtime guard holds
         run: node --test "server/engine/test/*.test.mjs"
