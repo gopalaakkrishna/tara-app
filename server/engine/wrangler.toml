@@ -1,0 +1,21 @@
+# Tara always-on Call engine on Cloudflare's FREE plan (step 2 of the plan).
+# Personal Cloudflare account only (same as taracalls.pages.dev,
+# tara-sports-refresh and tara-feed-probe). Never the Evolve Pictures account.
+name = "tara-engine"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+account_id = "5bd757dd1285beb06bf95ef9e2962c6b"
+workers_dev = true
+preview_urls = false
+
+[[durable_objects.bindings]]
+name = "ENGINE"
+class_name = "TaraEngine"
+
+# Free plan Durable Objects must use the SQLite storage backend.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TaraEngine"]
+
+[observability]
+enabled = true
