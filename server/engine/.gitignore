@@ -2,3 +2,5 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+# Rebuilt from src/App.jsx on every Cloudflare build (npm run build).
+src/generated/

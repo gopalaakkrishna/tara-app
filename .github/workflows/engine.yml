@@ -1,0 +1,43 @@
+name: Tara engine - decision parity
+
+# The always-on engine (server/engine) runs Tara's decision code extracted
+# from src/App.jsx at build time. This checks, on every change to the app or
+# the engine, that the extraction still works and the generated code still
+# makes the same Calls as the website's own decision-path scenarios.
+#
+# Kept separate from the Cloudflare Pages build on purpose: an engine problem
+# must never block a website deploy. A failure here only means the engine
+# needs attention before its next deploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "server/engine/**"
+      - "tests/helpers/**"
+      - ".github/workflows/engine.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tara-engine-parity
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install
+        run: npm ci --ignore-scripts
+      - name: Extract the decision path from App.jsx
+        run: node server/engine/scripts/build-core.mjs
+      - name: Generated code makes the same Calls as the website
+        run: node --test "server/engine/test/*.test.mjs"

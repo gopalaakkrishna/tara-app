@@ -1,16 +1,22 @@
-// Tara always-on Call engine, step 2 scaffold.
+// Tara always-on Call engine, step 2.
 //
-// This first version only proves the deploy path: the Worker and its Durable
-// Object exist on the personal Cloudflare account and redeploy from GitHub on
-// every push. It runs no loop, opens no connections and writes nothing, so it
-// costs no free-plan allowance while the engine is built.
+// src/generated/core.js is Tara's real decision path (analysis, Call candidate,
+// commit/seal and the Call lifecycle) pulled out of src/App.jsx at build time
+// by scripts/build-core.mjs, so the cloud engine runs exactly the code the
+// website runs. This version only loads it and reports its fingerprint: no
+// loop, no connections, no writes, so it uses no free-plan allowance yet.
 import {DurableObject} from 'cloudflare:workers';
+import * as core from './generated/core.js';
+import manifest from './generated/manifest.json';
 
-const VERSION = 'tara-engine-scaffold-1';
+const VERSION = 'tara-engine-core-loaded-2';
 
 export class TaraEngine extends DurableObject {
   async fetch() {
-    return Response.json({version: VERSION, state: 'scaffold', note: 'No loop yet. Calls are still made by the website.'});
+    const functions = Object.fromEntries(Object.entries(manifest.functions).map(([name, f]) => [name, {loaded: typeof core[name] === 'function', scopeKeys: f.scopeKeys.length}]));
+    return Response.json({version: VERSION, state: 'core-loaded', appJsxSha256: manifest.sha256.slice(0, 16),
+      topLevelHelpers: manifest.topLevel.length, vendoredModules: manifest.vendor.length, functions,
+      note: 'Decision code loads on Cloudflare. No loop yet: Calls are still made by the website.'});
   }
 }
 
