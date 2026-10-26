@@ -6,15 +6,17 @@
 // commit/seal and the lifecycle. scripts/build-app.mjs pulls it out at build
 // time and src/runtime/ supplies a tiny React and server stand-ins for the
 // browser. Shadow mode: no orders, no Discord, no writes to the site's docs.
-// The engine publishes only its own Calls, to shadow/engineCalls_v1, so they
-// can be compared with the website's.
+// The engine publishes only its own Calls and the shadow-week comparison with
+// the website's (src/compare.js), to shadow/engineCalls_v1. /report shows it.
 //
-// Durable Objects restart every few hours. localStorage and the Call list are
-// saved to the object's SQLite storage, so a restart resumes like a reload.
+// Durable Objects restart every few hours. localStorage, the IndexedDB ledger
+// and the comparison are saved to the object's SQLite storage, so a restart
+// resumes like a reload.
 import {DurableObject} from 'cloudflare:workers';
 import {EngineCore, SHADOW_DOC} from './engine.js';
+import {renderReport} from './report.js';
 
-const VERSION = 'tara-engine-shadow-1';
+const VERSION = 'tara-engine-shadow-2';
 const ALARM_MS = 10_000; // keeps the object awake; the app's own timers drive the loop
 const CHUNK = 500_000; // characters per SQLite row (rows max out at 2 MB)
 
@@ -27,20 +29,21 @@ function sqlStorage(sql) {
   };
   return {
     async load() {
-      const out = {localStorage: {}, idb: {}, calls: ''};
+      const out = {localStorage: {}, idb: {}, compare: ''};
       for (const row of sql.exec('SELECT k, part, v FROM kv ORDER BY k, part')) {
-        if (row.k === '__calls') out.calls += row.v;
+        if (row.k === '__compare') out.compare += row.v;
         else if (row.k.startsWith('ls:')) { const k = row.k.slice(3); out.localStorage[k] = (out.localStorage[k] || '') + row.v; }
         else if (row.k.startsWith('idb:')) { const k = row.k.slice(4); out.idb[k] = (out.idb[k] || '') + row.v; }
       }
-      try { out.calls = out.calls ? JSON.parse(out.calls) : []; } catch (_) { out.calls = []; }
+      try { out.compare = out.compare ? JSON.parse(out.compare) : null; } catch (_) { out.compare = null; }
+      sql.exec('DELETE FROM kv WHERE k = ?', '__calls'); // pre-comparison Call list (first hours of step 2)
       return out;
     },
-    async save({localStorage, idb, calls}) {
+    async save({localStorage, idb, compare}) {
       for (const [prefix, changes] of [['ls:', localStorage], ['idb:', idb]]) {
         for (const [k, v] of Object.entries(changes)) { if (v === null) sql.exec('DELETE FROM kv WHERE k = ?', prefix + k); else put(prefix + k, v); }
       }
-      put('__calls', JSON.stringify(calls));
+      put('__compare', JSON.stringify(compare));
     },
   };
 }
@@ -73,6 +76,7 @@ export class TaraEngine extends DurableObject {
     if (this.env.ENGINE_MODE !== 'shadow') throw new Error(`ENGINE_MODE must be "shadow" (got ${this.env.ENGINE_MODE}); live mode is not built yet`);
     if (!this.starting) {
       this.core = new EngineCore({storage: sqlStorage(this.ctx.storage.sql), mode: 'shadow', saveMs: 120_000,
+        supabase: {url: this.env.SUPABASE_URL, key: this.env.SUPABASE_ANON_KEY},
         publish: (doc) => publishShadow(this.env, {...doc, engine: VERSION, bootAt: this.bootAt}),
         log: (e, d) => this.log(e, d)});
       this.starting = this.core.start().catch((err) => { this.starting = null; throw err; });
@@ -97,7 +101,9 @@ export class TaraEngine extends DurableObject {
       await this.ensureRunning();
       if (path === '/ensure') return new Response('ok');
       if (path === '/health') return Response.json({version: VERSION, bootAt: this.bootAt, ...this.core.health(), log: this.logTail.slice(-15)});
-      if (path === '/calls') return Response.json({version: VERSION, calls: this.core.calls});
+      if (path === '/compare') return Response.json({version: VERSION, comparison: this.core.compare.summary(), windows: this.core.rows()});
+      if (path === '/report') return new Response(renderReport({summary: this.core.compare.summary(), rows: this.core.rows(), health: this.core.health({brief: true})}),
+        {headers: {'Content-Type': 'text/html; charset=utf-8'}});
       return new Response('not found', {status: 404});
     } catch (err) {
       return Response.json({version: VERSION, error: String(err?.stack || err).slice(0, 1200)}, {status: 500});
@@ -115,9 +121,9 @@ export default {
   // Read-only status. Starts the engine if it is not running; changes nothing else.
   async fetch(request, env) {
     const url = new URL(request.url);
-    const route = url.pathname === '/' ? '/health' : url.pathname;
-    if (request.method !== 'GET' || !['/health', '/calls'].includes(route)) return new Response('Not found', {status: 404});
+    const route = url.pathname === '/' ? '/report' : url.pathname === '/calls' ? '/compare' : url.pathname;
+    if (request.method !== 'GET' || !['/health', '/compare', '/report'].includes(route)) return new Response('Not found', {status: 404});
     const res = await engine(env).fetch(`https://do${route}`);
-    return new Response(res.body, {status: res.status, headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}});
+    return new Response(res.body, {status: res.status, headers: {'Content-Type': res.headers.get('Content-Type') || 'application/json', 'Cache-Control': 'no-store'}});
   },
 };

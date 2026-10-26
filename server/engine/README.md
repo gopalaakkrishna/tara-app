@@ -5,15 +5,29 @@ Calls in the cloud, every window, without a browser tab open.
 
 ## Status
 
-- Running in **shadow mode** since 2026-10-26:
-  `https://tara-engine.gopalaakkrishna.workers.dev/health` (status) and
-  `/calls` (the engine's Calls).
+- Running in **shadow mode** since 2026-10-26. Shadow week report:
+  `https://tara-engine.gopalaakkrishna.workers.dev/report`. Also `/health`
+  (status) and `/compare` (the comparison as JSON).
 - Shadow mode means the engine makes its own Calls but cannot touch anything:
   no orders, no Discord, no writes to the site's docs. It publishes only its
-  own Calls to `shadow/engineCalls_v1` in `tara_state`, so they can be
-  compared with the website's.
-- The website still makes the real Calls. Next: a shadow week comparing the
-  two, then cutover (browsers display, the engine writes).
+  own Calls and the comparison to `shadow/engineCalls_v1` in `tara_state`.
+- The website still makes the real Calls. After the shadow week: cutover
+  (browsers display, the engine writes).
+
+## Shadow-week comparison
+
+`src/compare.js` keeps one row per 15-minute window:
+
+- **Engine side**: what the engine committed.
+- **Website side**: the shared lock the website published
+  (`state/currentLock_BTC_15m`), read 25 s after the 420 s cutoff and again
+  just after close. It exists only for windows where someone had Tara open.
+- **Outcome**: Kalshi's official settlement, read by market ticker through
+  the proxy (the site's own `readCapturedCallSettlement`).
+
+Both sides are graded the same way: a Call costs the ask on its side at lock
+(NO costs 100 minus the YES bid), wins 100c and pays Kalshi's taker fee. The
+summary counts windows the engine missed (restarts) against its coverage.
 
 ## How it works
 
@@ -62,6 +76,8 @@ that the decision tests use.
 - `test/decision.test.mjs` reruns the website's decision scenarios (UP, DOWN,
   the 65 threshold, the 420 s cutoff, bad quotes, formation, cooldown)
   through the generated functions.
+- `test/compare.test.mjs` covers the comparison: grading, read timing,
+  settlement and the summary.
 - `test/runtime.test.mjs` covers the shadow guard, URL routing, the
   IndexedDB stand-in and the mini React.
 - `.github/workflows/engine.yml` runs both generators and all tests whenever
