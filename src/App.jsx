@@ -912,8 +912,12 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
     _sbWritePendingRMW.set(path,{getLocalData,mergeFn,dueAt:Math.min(dueAt,_sbWritePendingRMW.get(path)?.dueAt??dueAt)});
     return;
   }
+  // A queued call-log retry after a failed write is not pulled forward by new
+  // evidence: the next attempt carries it anyway, and an early resend of the
+  // multi-MB doc only repeats the failure. That is how a new Call every few
+  // minutes beat the backoff. The small hourly doc keeps its urgent 1.5s path.
   if(_sbWriteQueueRMW.has(path)&&['memory/taraCallLog','memory/hourlyRecord'].includes(path)&&
-    (_sbWritePendingRMW.get(path)?.dueAt??dueAt)<=dueAt){
+    ((_sbWritePendingRMW.get(path)?.dueAt??dueAt)<=dueAt||(path==='memory/taraCallLog'&&(_sbWriteFailuresRMW.get(path)||0)>0))){
     _sbWritePendingRMW.set(path,{getLocalData,mergeFn,dueAt:_sbWritePendingRMW.get(path)?.dueAt??dueAt});
     return;
   }
@@ -1077,10 +1081,13 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
 const _cloudSupabaseFlushAllRMW=()=>{
   // Snapshot pending work, including a latest payload queued behind an active
   // write. Clear timers before rescheduling; the per-path owner remains intact.
-  const pending=[..._sbWritePendingRMW.entries()];
-  for(const tid of _sbWriteQueueRMW.values())clearTimeout(tid);
-  _sbWriteQueueRMW.clear();
-  _sbWritePendingRMW.clear();
+  // A call log that is backing off keeps its timer: this runs on every tab hide,
+  // and must not turn the backoff into an immediate full-document resend. Its
+  // evidence is already in IndexedDB if the tab really is closing.
+  const held=new Set([..._sbWriteQueueRMW.keys()].filter(path=>path==='memory/taraCallLog'&&(_sbWriteFailuresRMW.get(path)||0)>0));
+  const pending=[..._sbWritePendingRMW.entries()].filter(([path])=>!held.has(path));
+  for(const[path,tid]of _sbWriteQueueRMW.entries())if(!held.has(path)){clearTimeout(tid);_sbWriteQueueRMW.delete(path);}
+  for(const[path]of pending)_sbWritePendingRMW.delete(path);
   let flushed=0;
   for(const[path,entry]of pending){
     try{
@@ -5684,8 +5691,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.19-v14.7.13-limited-btc-context';
-const TARA_VERSION_DISPLAY='TARA 14.7.13';
+const TARA_BUILD_VERSION='2026.10.26-v14.7.14-slim-call-log-sync';
+const TARA_VERSION_DISPLAY='TARA 14.7.14';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5860,11 +5867,20 @@ const getEntryMaxCost=()=>{if(NO_ENTRY_GATES)return 100;try{const v=parseFloat(l
 //   signalScoresAtLock ENTIRELY, so one Force Push would wipe the signal history
 //   v180 was added to preserve, for every entry in the doc at once.
 //   One function, used by all of them, so the next write path cannot silently differ.
+// V14.7.14: the per-window decision trace (~8.7KB) was stored twice per entry, at the
+//   top level and inside originalDecision. That was 4.5 of the cloud doc's 9.5MB and
+//   pushed every save past Supabase's 3s statement timeout. Nothing reads the trace
+//   back from the cloud; each device keeps its own full copy in IndexedDB, and
+//   normalizeCallLedger keeps a local originalDecision over a slimmer incoming one.
 const _stripEntryForCloud=(e)=>{
   if(!e)return e;
-  const{signalScoresAtLock:_sig,reasoning:__,...rest}=e;
+  const{signalScoresAtLock:_sig,reasoning:__,decisionTrace:___,...rest}=e;
   const _slim=_slimSigsForCloud(_sig);
   if(_slim)rest.signalScoresAtLock=_slim;
+  if(rest.originalDecision&&rest.originalDecision.decisionTrace!==undefined){
+    const{decisionTrace:____,...od}=rest.originalDecision;
+    rest.originalDecision=od;
+  }
   return rest;
 };
 const _slimSigsForCloud=(s)=>{
@@ -51017,7 +51033,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.13</small>
+              <small>DECISION ENGINE · V14.7.14</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
