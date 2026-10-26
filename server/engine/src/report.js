@@ -48,7 +48,7 @@ ul{margin:6px 0 0;padding-left:18px}.notes{color:var(--muted);font-size:13px;mar
 <h1>Tara shadow week</h1>
 <p class="lede">The cloud engine's Calls next to the website's, window by window. Since ${esc(et(s.startedAt, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} ET · ${s.windowsElapsed} windows closed · updated ${esc(et(now, {hour: 'numeric', minute: '2-digit'}))} ET</p>
 <div class="grid">
-<section class="card"><h2>Engine ran</h2><div class="big">${s.engineCoverage.windows} of ${s.engineCoverage.of}</div><div class="sub">windows decided · ${s.boots} restart${s.boots === 1 ? '' : 's'} · ${health.errors} errors</div></section>
+<section class="card"><h2>Engine ran</h2><div class="big">${s.engineCoverage.windows} of ${s.engineCoverage.of}</div><div class="sub">windows decided · ${Math.max(0, s.boots - 1)} restart${s.boots === 2 ? '' : 's'} (deploys included) · ${health.errors} errors</div></section>
 <section class="card"><h2>Same decision</h2><div class="big">${s.both.windows ? `${s.both.agree} of ${s.both.windows}` : 'n/a'}</div><div class="sub">${s.both.windows ? `${pct(s.both.agreeRate)} of windows where both decided` : 'needs a window with the site open'}${s.both.medianLockGapSeconds !== null ? ` · lock time gap ${s.both.medianLockGapSeconds}s` : ''}</div></section>
 ${record('Engine record', s.engine, `${s.settled} windows settled`)}
 ${record('Website record', s.site, `site open ${s.siteCoverage.windows} of ${s.siteCoverage.of} windows`)}
