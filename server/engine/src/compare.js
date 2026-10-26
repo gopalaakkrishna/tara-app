@@ -35,11 +35,16 @@ export function netCents(side, outcome) {
   return (side.call === outcome ? 100 - cost : -cost) - feeCents(cost);
 }
 
+// A sit-out forced because that side was still starting up (page reload, engine
+// restart) is not a decision. src/startupReadiness.js reasons and codes.
+const NOT_READY = /Warming up live observations|Loading candle history|Waiting for a fresh spot-price observation|Waiting for the signal engine to finish computing|Startup hold set on this device|cold-start-warming-up/;
+export const notReady = (snap) => snap?.call === 'SIT_OUT' && (/^startup-/.test(String(snap.blockedDecision?.code || '')) || NOT_READY.test(String(snap.reason || '')));
+
 // The fields kept from a committed snapshot (engine or site).
 export function sideFromSnapshot(snap, extra = {}) {
   const o = snap?.originalDecision || {};
   return {
-    call: snap.call, intended: snap._intendedDir || null, tier: snap.tier || null, score: num(snap.confidence),
+    call: snap.call, notReady: notReady(snap), intended: snap._intendedDir || null, tier: snap.tier || null, score: num(snap.confidence),
     reason: String(snap.reason || '').slice(0, 240), lockedAt: num(snap._committedAt) ?? num(o.lockedAt),
     secondsLeft: num(o.secondsLeft ?? snap.atSecondsLeft), strike: num(snap.strikeAtLock ?? o.strike),
     yesPrice: num(snap.kalshiAtLock ?? o.yesPrice), yesBid: num(snap.kalshiBidAtLock ?? o.yesBid), yesAsk: num(snap.kalshiAskAtLock ?? o.yesAsk),
@@ -61,7 +66,11 @@ export class ShadowCompare {
   restore(saved, now = Date.now()) {
     this.startedAt = num(saved?.startedAt) ?? now;
     this.boots = (num(saved?.boots) ?? 0) + 1;
-    for (const r of saved?.rows || []) if (r?.windowId) this.rows.set(r.windowId, r);
+    for (const r of saved?.rows || []) {
+      if (!r?.windowId) continue;
+      for (const side of [r.engine, r.site]) if (side && side.notReady === undefined) side.notReady = notReady(side); // rows saved before the flag existed
+      this.rows.set(r.windowId, r);
+    }
   }
 
   snapshot() {
@@ -153,7 +162,9 @@ export class ShadowCompare {
         winRate: graded.length ? wins / graded.length : null, netCentsPerCall: graded.length ? total / graded.length : null, netCentsTotal: total,
         sitOuts: rows.filter((r) => pick(r)?.call === 'SIT_OUT').length};
     };
-    const both = rows.filter((r) => r.engine && r.site);
+    // Agreement counts only windows where both sides were up and deciding.
+    const decided = (side) => side && !side.notReady;
+    const both = rows.filter((r) => decided(r.engine) && decided(r.site));
     const agree = both.filter((r) => r.engine.call === r.site.call);
     const kinds = {};
     for (const r of both) if (r.engine.call !== r.site.call) { const k = `engine ${r.engine.call} / site ${r.site.call}`; kinds[k] = (kinds[k] || 0) + 1; }
@@ -162,8 +173,8 @@ export class ShadowCompare {
     const h2h = (pick) => sameWindows.reduce((a, r) => a + (netCents(pick(r), r.outcome) ?? 0), 0);
     return {
       startedAt: this.startedAt, boots: this.boots, windowsElapsed: elapsed,
-      engineCoverage: {windows: rows.filter((r) => r.engine).length, of: elapsed},
-      siteCoverage: {windows: rows.filter((r) => r.site).length, of: elapsed},
+      engineCoverage: {windows: rows.filter((r) => decided(r.engine)).length, of: elapsed, notReady: rows.filter((r) => r.engine?.notReady).length},
+      siteCoverage: {windows: rows.filter((r) => decided(r.site)).length, of: elapsed, notReady: rows.filter((r) => r.site?.notReady).length},
       settled: rows.filter((r) => r.outcome).length,
       both: {windows: both.length, agree: agree.length, agreeRate: both.length ? agree.length / both.length : null, disagreements: kinds,
         medianLockGapSeconds: gaps.length ? Math.round(gaps[Math.floor(gaps.length / 2)] / 100) / 10 : null,

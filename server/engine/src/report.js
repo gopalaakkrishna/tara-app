@@ -9,6 +9,7 @@ const cents = (x) => (x === null || x === undefined ? '' : `${x > 0 ? '+' : ''}$
 
 function sideCell(side) {
   if (!side) return '<td class="muted">no record</td>';
+  if (side.notReady) return '<td><span class="muted">starting up</span><div class="sub">sat out, not ready yet</div></td>';
   const cls = side.call === 'UP' ? 'up' : side.call === 'DOWN' ? 'down' : 'muted';
   const cost = costCents(side);
   const detail = side.call === 'SIT_OUT' ? (side.tier || '') : `${cost === null ? '' : `${cost}c`}${side.score !== null ? ` · score ${Math.round(side.score)}` : ''}`;
@@ -27,7 +28,7 @@ export function renderReport({summary: s, rows, health, now = Date.now()}) {
   const closed = rows.filter((r) => windowClose(r.windowId) <= now).reverse().slice(0, 192);
   const dis = Object.entries(s.both.disagreements);
   const trs = closed.map((r) => {
-    const both = r.engine && r.site;
+    const both = r.engine && r.site && !r.engine.notReady && !r.site.notReady;
     const agree = both ? (r.engine.call === r.site.call ? '<span class="ok">same</span>' : '<span class="bad">differs</span>') : '<span class="muted">n/a</span>';
     const out = r.outcome ? `<span class="${r.outcome === 'UP' ? 'up' : 'down'}">${r.outcome}</span>` : `<span class="muted">${r.ticker ? 'pending' : 'no ticker'}</span>`;
     const en = netCents(r.engine, r.outcome), sn = netCents(r.site, r.outcome);
@@ -48,10 +49,10 @@ ul{margin:6px 0 0;padding-left:18px}.notes{color:var(--muted);font-size:13px;mar
 <h1>Tara shadow week</h1>
 <p class="lede">The cloud engine's Calls next to the website's, window by window. Since ${esc(et(s.startedAt, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} ET · ${s.windowsElapsed} windows closed · updated ${esc(et(now, {hour: 'numeric', minute: '2-digit'}))} ET</p>
 <div class="grid">
-<section class="card"><h2>Engine ran</h2><div class="big">${s.engineCoverage.windows} of ${s.engineCoverage.of}</div><div class="sub">windows decided · ${Math.max(0, s.boots - 1)} restart${s.boots === 2 ? '' : 's'} (deploys included) · ${health.errors} errors</div></section>
+<section class="card"><h2>Engine ran</h2><div class="big">${s.engineCoverage.windows} of ${s.engineCoverage.of}</div><div class="sub">windows decided${s.engineCoverage.notReady ? ` (+${s.engineCoverage.notReady} starting up)` : ''} · ${Math.max(0, s.boots - 1)} restart${s.boots === 2 ? '' : 's'} (deploys included) · ${health.errors} errors</div></section>
 <section class="card"><h2>Same decision</h2><div class="big">${s.both.windows ? `${s.both.agree} of ${s.both.windows}` : 'n/a'}</div><div class="sub">${s.both.windows ? `${pct(s.both.agreeRate)} of windows where both decided` : 'needs a window with the site open'}${s.both.medianLockGapSeconds !== null ? ` · lock time gap ${s.both.medianLockGapSeconds}s` : ''}</div></section>
 ${record('Engine record', s.engine, `${s.settled} windows settled`)}
-${record('Website record', s.site, `site open ${s.siteCoverage.windows} of ${s.siteCoverage.of} windows`)}
+${record('Website record', s.site, `site deciding ${s.siteCoverage.windows} of ${s.siteCoverage.of} windows${s.siteCoverage.notReady ? `, starting up in ${s.siteCoverage.notReady}` : ''}`)}
 </div>
 ${dis.length ? `<section class="card" style="margin-bottom:20px"><h2>Where they differed</h2><ul>${dis.map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join('')}</ul><div class="sub">On windows where both decided: engine ${cents(s.both.engineNetCents)}, website ${cents(s.both.siteNetCents)} in total.</div></section>` : ''}
 <div class="wrap"><table><thead><tr><th>Window (ET)</th><th>Engine</th><th>Website</th><th>Match</th><th>Result</th><th>Engine net</th><th>Website net</th></tr></thead><tbody>${trs || '<tr><td colspan="7" class="muted">No closed windows yet.</td></tr>'}</tbody></table></div>

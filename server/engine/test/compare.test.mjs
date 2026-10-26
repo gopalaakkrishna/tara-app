@@ -52,7 +52,7 @@ test('reads the site lock after the cutoff and after close, settles, and summari
   assert.equal(c.rows.get(W2).outcome, 'DOWN');
   const s = c.summary(windowClose(W2) + 130_000);
   assert.equal(s.windowsElapsed, 2);
-  assert.deepEqual(s.engineCoverage, {windows: 2, of: 2});
+  assert.deepEqual(s.engineCoverage, {windows: 2, of: 2, notReady: 0});
   assert.equal(s.both.windows, 2);
   assert.equal(s.both.agree, 1);
   assert.deepEqual(s.both.disagreements, {'engine UP / site SIT_OUT': 1});
@@ -70,11 +70,31 @@ test('reads the site lock after the cutoff and after close, settles, and summari
   assert.match(html, /differs/);
 });
 
+test('a sit-out forced by startup is not a decision', async () => {
+  const warming = snap(W1, 'SIT_OUT', {tier: 'decision-deadline', reason: 'No qualifying Call before the 7-minute cutoff. Sitting out this window. Blocked: Warming up live observations: 29/50 samples'});
+  const c = new ShadowCompare({readDoc: async () => ({windowId: W1, taraSnapshot: warming}), settle: async () => ({ok: true, patch: {outcomeDir: 'UP'}})});
+  c.restore(null, T0 - 1000);
+  c.recordEngine(snap(W1, 'DOWN'));
+  await c.tick(windowClose(W1) - 390_000);
+  await c.tick(windowClose(W1) + 70_000);
+  const s = c.summary(windowClose(W1) + 80_000);
+  assert.equal(c.rows.get(W1).site.notReady, true);
+  assert.equal(s.both.windows, 0, 'not counted as a disagreement');
+  assert.deepEqual(s.siteCoverage, {windows: 0, of: 1, notReady: 1});
+  assert.equal(s.engine.losses, 1, 'the engine Call is still graded');
+  // Rows saved before the flag existed get it on restore.
+  const old = JSON.parse(JSON.stringify(c.snapshot()));
+  delete old.rows[0].site.notReady;
+  const c2 = new ShadowCompare({readDoc: async () => null, settle: async () => ({ok: false})});
+  c2.restore(old);
+  assert.equal(c2.rows.get(W1).site.notReady, true);
+});
+
 test('a window the engine missed still counts against its coverage', async () => {
   const c = new ShadowCompare({readDoc: async () => ({windowId: W1, taraSnapshot: snap(W1, 'UP')}), settle: async () => ({ok: false, reason: 'not-settled'})});
   c.restore(null, T0 - 1000);
   await c.tick(windowClose(W1) - 390_000);
   const s = c.summary(windowClose(W1) + 1000);
-  assert.deepEqual(s.engineCoverage, {windows: 0, of: 1});
-  assert.deepEqual(s.siteCoverage, {windows: 1, of: 1});
+  assert.deepEqual(s.engineCoverage, {windows: 0, of: 1, notReady: 0});
+  assert.deepEqual(s.siteCoverage, {windows: 1, of: 1, notReady: 0});
 });
