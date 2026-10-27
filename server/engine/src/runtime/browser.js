@@ -13,7 +13,7 @@ const PAGES_ROUTES = new Set(['/api/economic-calendar', '/api/learning']);
 const nativeFetch = (...args) => globalThis.fetch(...args);
 
 const cfg = {mode: 'shadow', log: () => {}};
-export const browserStats = {requests: {}, paths: {}, failures: {}, blocked: [], wsOpened: {}, wsFailed: {}};
+export const browserStats = {requests: {}, paths: {}, failures: {}, blocked: [], wsOpened: {}, wsFailed: {}, candleFallbacks: {}};
 export function configureBrowser(options = {}) { Object.assign(cfg, options); }
 
 const bump = (map, key) => { map[key] = (map[key] || 0) + 1; };
@@ -54,6 +54,53 @@ export function routeUrl(input) {
   return raw;
 }
 
+// Coinbase rate-limits Cloudflare's shared egress IPs. On Oct 26 about half
+// the engine's candle reads came back 429, and the site's candle hook swaps its
+// history for an empty list on any failed poll, so the engine kept dropping
+// back to "Loading candle history". A browser on a home IP almost never sees
+// this. A failed candle read is retried once; if that fails too, the last good
+// response for the same product and granularity is served while it is recent
+// enough for the readiness check to accept it. Past that, the failure goes
+// through and the engine waits, as the site would.
+const CANDLE_PATH = /^\/products\/[^/]+\/candles$/;
+const lastCandles = new Map(); // `${pathname}|${granularity}` -> {body, at}
+export const candleFallbackMaxAgeMs = (granularity) => Math.min(granularity + 30, 120) * 1000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchCandles(url, init, route) {
+  const u = new URL(url);
+  const granularity = Number(u.searchParams.get('granularity')) || 0;
+  const key = `${u.pathname}|${granularity}`;
+  let resp = null, error = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await pause(300 + Math.random() * 700);
+    try {
+      resp = await nativeFetch(url, init);
+      error = null;
+      if (resp.ok) {
+        const body = await resp.text();
+        if (body.trimStart().startsWith('[')) lastCandles.set(key, {body, at: Date.now()});
+        return new Response(body, {status: resp.status, headers: {'content-type': resp.headers.get('content-type') || 'application/json'}});
+      }
+      bump(browserStats.failures, `${route} HTTP ${resp.status}`);
+      if (resp.status !== 429 && resp.status < 500) return resp;
+      if (!attempt) await resp.body?.cancel();
+    } catch (err) {
+      error = err;
+      bump(browserStats.failures, `${route} ${String(err?.message || err).slice(0, 80)}`);
+    }
+  }
+  const last = lastCandles.get(key);
+  if (last && Date.now() - last.at <= candleFallbackMaxAgeMs(granularity)) {
+    await resp?.body?.cancel();
+    bump(browserStats.candleFallbacks, `${granularity}s served last good`);
+    return new Response(last.body, {status: 200, headers: {'content-type': 'application/json', 'x-tara-engine': 'last-good-candles'}});
+  }
+  bump(browserStats.candleFallbacks, `${granularity}s none recent`);
+  if (error) throw error;
+  return resp;
+}
+
 const headerList = (h) => { if (!h) return []; if (typeof h.forEach === 'function' && !Array.isArray(h)) { const out = []; h.forEach((v, k) => out.push(k)); return out; } return Array.isArray(h) ? h.map(([k]) => k) : Object.keys(h); };
 
 export async function fetch(input, init = {}) {
@@ -79,6 +126,7 @@ export async function fetch(input, init = {}) {
   const headers = new Headers(rest.headers || (typeof input === 'object' && input?.headers) || undefined);
   if (!headers.has('user-agent')) headers.set('User-Agent', 'Mozilla/5.0 (compatible; tara-engine/1)');
   rest.headers = headers;
+  if (host === 'api.exchange.coinbase.com' && CANDLE_PATH.test(new URL(url).pathname)) return fetchCandles(url, rest, route);
   try {
     const resp = await nativeFetch(url, rest);
     if (!resp.ok) bump(browserStats.failures, `${route} HTTP ${resp.status}`);

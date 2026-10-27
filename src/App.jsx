@@ -5691,8 +5691,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.26-v14.7.14-slim-call-log-sync';
-const TARA_VERSION_DISPLAY='TARA 14.7.14';
+const TARA_BUILD_VERSION='2026.10.27-v14.7.15-ledger-read-backoff';
+const TARA_VERSION_DISPLAY='TARA 14.7.15';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -43957,7 +43957,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const _execSettlementLedgerRef=useRef(restoreExecutionLedger(localStorage));
   const _paperExpiryHealthRef=useRef({at:0,settled:0,failures:[]});
   useEffect(()=>{
-    let stopped=false,busy=false,nextRead=0,cloudCalls=null,cloudCallsAt=0;
+    let stopped=false,busy=false,nextRead=0,cloudCalls=null,cloudCallsAt=0,cloudCallsFailedAt=0;
     const tick=async()=>{
       if(stopped||busy||Date.now()<nextRead)return;
       busy=true;
@@ -43967,10 +43967,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           withLock:typeof navigator!=='undefined'&&navigator.locks?(name,fn)=>navigator.locks.request('tara-execution:'+name,fn):null,
           readOriginalCalls:async()=>{
             const local=taraCallLogRef.current||[];
-            if(cloudCalls===null||Date.now()-cloudCallsAt>30*60000){
-              try{const d=await cloudSupabaseRead('memory/taraCallLog',{throwOnError:true});cloudCalls=Array.isArray(d)?d:d?.entries||[];cloudCallsAt=Date.now();}
-              catch{if(local.length)return local;throw Error('Original Call record unavailable');}
+            // A failed read of the multi-MB ledger waits 10 minutes. Retrying it
+            // every tick kept the database pinned on Oct 26 after it slowed down.
+            if((cloudCalls===null||Date.now()-cloudCallsAt>30*60000)&&Date.now()-cloudCallsFailedAt>10*60000){
+              try{const d=await cloudSupabaseRead('memory/taraCallLog',{throwOnError:true});cloudCalls=Array.isArray(d)?d:d?.entries||[];cloudCallsAt=Date.now();cloudCallsFailedAt=0;}
+              catch{cloudCallsFailedAt=Date.now();}
             }
+            if(cloudCalls===null){if(local.length)return local;throw Error('Original Call record unavailable');}
             return [...local,...cloudCalls];
           },
           readMarket:async ticker=>{
@@ -51033,7 +51036,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.14</small>
+              <small>DECISION ENGINE · V14.7.15</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
