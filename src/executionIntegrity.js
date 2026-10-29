@@ -1,12 +1,12 @@
 // AutoTrade is a separate execution layer. A Tara Call result is never proof of
-// an exchange fill or of account profit. Keep live entry closed until the
-// account-wide risk limits can be enforced against complete exchange data.
-export const LIVE_ENTRY_PAUSE_REASON = 'live-execution-paused-until-account-risk-is-verified';
-
+// an exchange fill or of account profit. Live entry was paused from Sept 27
+// until account-wide risk limits existed; since v14.7.6 every live entry is
+// checked against a fresh, complete read of the Kalshi account, and v14.7.16
+// reopened it on the owner's decision. Live still trades only Tara's Call.
 export function checkEntryMode({dryRun, signalSource}) {
   if (dryRun !== false) return {ok:true, mode:'simulation'};
   if (signalSource !== 'snapshot') return {ok:false, reason:'live-entry-requires-tara-call'};
-  return {ok:false, reason:LIVE_ENTRY_PAUSE_REASON};
+  return {ok:true, mode:'live'};
 }
 
 const finite = value => value == null || value === '' ? null : Number.isFinite(Number(value)) ? Number(value) : null;

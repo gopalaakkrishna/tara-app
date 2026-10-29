@@ -47,7 +47,7 @@ test('actual paper entry -> rollover -> official expiry -> reload is durable and
     const persisted=h.values.get('taraExecutionJournal_v1');await timers[0]();assert.equal(h.values.get('taraExecutionJournal_v1'),persisted);assert.equal(reads.length,1);
     assert.equal(journal.restoreExecutionLedger(h.storage)['BTC|'+wid].realizedPnLDollars,.38);
     s.autoOrderState=null;s._entryFiredForRef.current=null;h.setClock(close-500000);s._kalshiQuote.at=close-500000;assert.equal((await actual('_runEntry',s)()).reason,'intent-already-recorded');
-    s.autoExecSettings={...settings,dryRun:false};assert.equal((await actual('_runEntry',s)()).reason,'live-execution-paused-until-account-risk-is-verified');
+    s.autoExecSettings={...settings,dryRun:false};assert.equal((await actual('_runEntry',s)()).reason,'no-credentials');
     s.autoExecSettings={...settings};h.setClock(close-420000);assert.equal((await actual('_runEntry',s)()).reason,'execution-cutoff');
     assert.ok(h.writes.every(k=>['taraExecutionJournal_v1','taraExecutionState_v1'].includes(k)));assert.equal(h.network,0);cleanup();
   }

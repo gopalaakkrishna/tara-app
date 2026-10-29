@@ -127,14 +127,30 @@ test('actual dry-run order builder through ladder and exit controller preserves 
   assert.equal(exited.ok,true);assert.equal(state.status,'exited');assert.equal(state.filledCount,4);
   assert.equal(state.pnlCentsPerContract,10-(entry.normalized.feeCents+safe.executionFeeCents(70,4))/4);
 });
-test('actual entry remains paused for real money and cutoff/kill checks precede all new submission',async()=>{
+test('actual live entry needs credentials and a fresh verified account read within the caps; cutoff/kill checks precede all new submission',async()=>{
   const at=Date.parse('2026-10-15T06:01:00Z');const FakeDate=class extends Date{static now(){return at;}};
   const s={...settings,enabled:true,dryRun:false,signalSource:'snapshot'},storage=store();
   const scope={...safe,...journal,Date:FakeDate,useCallback:f=>f,autoExecSettings:s,autoExecCooldownUntil:0,exchangeAudit:{},killSwitchEngaged:false,kalshiCreds:{},autoOrderState:null,lockedCallRef:{current:null},taraCallSnapshotRef:{current:{_committedAt:at,originalDecision:{marketTicker:'KXBTC15M-26OCT150215-15'}}},windowType:'15m',_resolveStakeDollars:()=>1,
     _entryBusyRef:{current:false},_entryFiredForRef:{current:null},_lossCooldownRef:{current:{windowsRemaining:0}},_execSettlementLedgerRef:{current:{}},_executionControlRef:{current:{enabled:true,kill:false,windowId:'15m-2026-10-15T06:00:00.000Z'}},
     computeWindowId:()=> '15m-2026-10-15T06:00:00.000Z',_autoExecLogPushBlockOnce:()=>{},_autoExecLogPush:()=>{},checkEntryMode,localStorage:storage,windowCloseMs,callLockDeadline,readLockState:()=>({dir:'UP',tradeable:true}),_execCostCents:()=>60,_quoteUsable:()=>true,inspectDecisionQuote,currentAssetRef:{current:'BTC'},_execFairCents:()=>60,_kalshiQuote:{ticker:'KXBTC15M-26OCT150215-15',at,bid:59,ask:60,closeTime:'2026-10-15T06:15:00Z'},navigator:{locks:{request:async(_n,fn)=>fn()}},setAutoOrderState:()=>{}};
   let calls=0;scope.kalshiRunEntryLadder=async args=>{calls++;scope._executionControlRef.current.kill=true;assert.equal(args.shouldAbort(),true);return {ok:false,reason:'aborted',confirmedNoFill:true};};
-  assert.equal((await actual('_runEntry',scope)()).reason,'live-execution-paused-until-account-risk-is-verified');assert.equal(calls,0);
+  assert.equal((await actual('_runEntry',scope)()).reason,'no-credentials');assert.equal(calls,0);
+  let audits=0;scope.kalshiCreds={apiKeyId:'k',privateKeyPem:'p'};scope._liveRiskReadRef={current:{at:0,promise:null}};
+  scope.refreshExchangeAudit=async()=>{audits++;return {risk:{verified:false,at,dayTrades:0,tradesByTicker:{},lossAndExposureDollars:0}};};
+  assert.equal((await actual('_runEntry',scope)()).reason,'account-risk-unverified');assert.equal(audits,1);assert.equal(calls,0);
+  // A tick within 15s shares the read instead of fetching the account again.
+  assert.equal((await actual('_runEntry',scope)()).reason,'account-risk-unverified');assert.equal(audits,1);
+  scope._liveRiskReadRef.current={at:0,promise:null};
+  scope.refreshExchangeAudit=async()=>{audits++;return null;};
+  assert.equal((await actual('_runEntry',scope)()).reason,'account-risk-unverified');assert.equal(audits,2);assert.equal(calls,0);
+  scope._liveRiskReadRef.current={at:0,promise:null};
+  scope.refreshExchangeAudit=async()=>{audits++;return {risk:{verified:true,at,dayTrades:0,tradesByTicker:{},lossAndExposureDollars:5.5}};};
+  assert.equal((await actual('_runEntry',scope)()).reason,'daily-loss-and-exposure-cap');assert.equal(audits,3);assert.equal(calls,0);
+  // A cap refusal stands for this lock: the next tick stops before any account read.
+  scope._liveRiskReadRef.current={at:0,promise:null};
+  assert.equal((await actual('_runEntry',scope)()).reason,'already-fired');assert.equal(audits,3);assert.equal(calls,0);
+  scope._entryFiredForRef.current=null;
+  scope.kalshiCreds={};scope.refreshExchangeAudit=async()=>{throw Error('dry run must not read the account');};
   scope.autoExecSettings={...s,dryRun:true};await actual('_runEntry',scope)();assert.equal(calls,1);
   scope.Date=class extends Date{static now(){return Date.parse('2026-10-15T06:08:00Z');}};
   assert.equal((await actual('_runEntry',scope)()).reason,'execution-cutoff');assert.equal(calls,1);

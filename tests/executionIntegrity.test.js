@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {buildExchangeAudit,callWindowCoverage,checkEntryMode,LIVE_ENTRY_PAUSE_REASON} from '../src/executionIntegrity.js';
+import {buildExchangeAudit,callWindowCoverage,checkEntryMode} from '../src/executionIntegrity.js';
 
-test('live entry is closed even if stored settings say armed; dry run remains usable',()=>{
-  assert.equal(checkEntryMode({dryRun:true,signalSource:'snapshot'}).ok,true);
-  assert.equal(checkEntryMode({dryRun:false,signalSource:'snapshot'}).reason,LIVE_ENTRY_PAUSE_REASON);
+test('dry run simulates; live is open only on Tara\'s Call, with the account checks after it',()=>{
+  assert.deepEqual(checkEntryMode({dryRun:true,signalSource:'snapshot'}),{ok:true,mode:'simulation'});
+  assert.deepEqual(checkEntryMode({dryRun:undefined,signalSource:'lock'}),{ok:true,mode:'simulation'});
+  assert.deepEqual(checkEntryMode({dryRun:false,signalSource:'snapshot'}),{ok:true,mode:'live'});
   assert.equal(checkEntryMode({dryRun:false,signalSource:'lock'}).reason,'live-entry-requires-tara-call');
 });
 test('the live-mode check runs before the only order-entry ladder call',()=>{

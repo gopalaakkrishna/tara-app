@@ -5691,8 +5691,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 const BASELINE_VERSION='2026.09.11-v13.4.349-real-gates-in-runentry';
 // Production build marker — bump this on every shipped code change. This is the
 // version shown in the UI, crash reports, peer-build checks, and new trade rows.
-const TARA_BUILD_VERSION='2026.10.27-v14.7.15-ledger-read-backoff';
-const TARA_VERSION_DISPLAY='TARA 14.7.15';
+const TARA_BUILD_VERSION='2026.10.29-v14.7.16-live-entry-on';
+const TARA_VERSION_DISPLAY='TARA 14.7.16';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10311,12 +10311,12 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
       <div><label>Last exchange check</label><strong>{checkLabel}</strong></div>
     </div>
     {otherPositions.length>0&&<p className="tara-exec-glance__warning">{otherPositions.length} other Kalshi position{otherPositions.length===1?'':'s'} in the last snapshot · verify before another order.</p>}
-    {autoExecSettings?.enabled&&autoExecSettings?.dryRun===false&&<p className="tara-exec-glance__warning">New live entries paused pending verified account-wide risk limits. Existing position checks and exits remain available.</p>}
+    {autoExecSettings?.enabled&&autoExecSettings?.dryRun===false&&<p className="tara-exec-glance__warning">Live: real orders are sent to Kalshi. Each entry first reads your account and is refused if the daily loss, trade or window limits would be passed.</p>}
     {['reconcile','unknown','stale-open'].includes(truth.state)&&<p className="tara-exec-glance__warning">Unknown is not a no-fill. Verify Kalshi before retrying or exiting.</p>}
     </details><div className="tara-exec-glance__actions"><button onClick={onDetails}>Inspect execution ↗</button><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'Verify position':'Execution settings'}</button></div>
   </section>;
   return <section className={'tara-exec-overview '+stateTone} aria-label="AutoTrade execution and exchange position">
-    <p className="tara-v145-reason"><b>New live entries remain paused.</b> Existing position reconciliation and exit controls remain available. Execution never revises Tara’s captured Call.</p>
+    <p className="tara-v145-reason"><b>Live entry is on when armed with dry run off.</b> Each real order first reads your Kalshi account and checks your limits. Execution never revises Tara’s captured Call.</p>
     {autoOrderState?.dryRun===true&&autoOrderState.paperSettlementPending&&<p className="tara-v145-reason">Paper fill awaiting its original market’s official settlement. This is not a live position or a new order.</p>}
     <EvidenceMetrics items={[
       ['Input Call',lock.tradeable?`${lock.dir} · locked`:lock.satOut?'Sit out':'No lock','Original Call record',lock.dir==='UP'?'is-up':lock.dir==='DOWN'?'is-down':''],
@@ -10328,7 +10328,7 @@ const TaraExecutionOverview=({snapshot,autoExecSettings,autoOrderState,userPosit
       <div className="tara-exec-overview__flow"><div className="tara-rail-kicker">ORDER LIFECYCLE · LIVE STATE</div><div className="tara-exec-overview__steps">{steps.map((s,i)=><span key={s} className={i===stepIndex?'is-current':i<stepIndex&&stepIndex!==7?'is-past':''}>{s}</span>)}</div></div>
       <div className="tara-v145-execution-rows"><p><span>Recorded Call</span><b>{lock.tradeable?`${lock.dir} · ${lock.confidence}/100`:lock.satOut?'SIT OUT':'Not committed'}</b></p><p><span>Active ticker</span><b>{activeTicker||'Unavailable'}</b></p><p><span>Entry attempt</span><b>{order.status?order.status.replaceAll('_',' ').replaceAll('-',' '):'No order attempted'}</b></p><p><span>Last exchange check</span><b>{checkLabel}</b></p><p><span>Exchange truth</span><b>{truth.summary}</b></p></div>
       <div className="tara-exec-overview__actions"><button onClick={canReconcile?onReconcile:onOpenSettings}>{canReconcile?'↻ RECONCILE NOW':'CONNECT KALSHI TO VERIFY'}</button></div>
-    </section><section className="tara-v145-execution-panel"><div className="tara-v145-panel-head"><h3>Account &amp; controls</h3><span>{confirmedOpen?'KALSHI CONFIRMED':truth.label}</span></div><div className="tara-v145-execution-rows"><p><span>Trading mode</span><b>{autoExecSettings?.enabled?(autoExecSettings?.dryRun?'Dry run':'Live entries paused'):'Calling only'}</b></p><p><span>Local position marker</span><b>{userPosition?`${userPosition} · advisory only`:'None'}</b></p><p><span>Reported auto fill</span><b>{filledAt} · {order.placed?`${order.count} contract${order.count===1?'':'s'}`:'No confirmed local fill'}</b></p><p><span>Local exit estimate</span><b>{realized||'Not realized / verified'}</b></p><p><span>Retry safety</span><b>Unknown is not a no-fill</b></p><small>Local markers and estimates are not exchange proof. Size, cooldowns, exits, reconciliation and the kill switch stay available in Execution settings.</small></div><div className="tara-exec-overview__actions"><button onClick={onOpenSettings}>EXECUTION SETTINGS</button></div>
+    </section><section className="tara-v145-execution-panel"><div className="tara-v145-panel-head"><h3>Account &amp; controls</h3><span>{confirmedOpen?'KALSHI CONFIRMED':truth.label}</span></div><div className="tara-v145-execution-rows"><p><span>Trading mode</span><b>{autoExecSettings?.enabled?(autoExecSettings?.dryRun?'Dry run':'Live'):'Calling only'}</b></p><p><span>Local position marker</span><b>{userPosition?`${userPosition} · advisory only`:'None'}</b></p><p><span>Reported auto fill</span><b>{filledAt} · {order.placed?`${order.count} contract${order.count===1?'':'s'}`:'No confirmed local fill'}</b></p><p><span>Local exit estimate</span><b>{realized||'Not realized / verified'}</b></p><p><span>Retry safety</span><b>Unknown is not a no-fill</b></p><small>Local markers and estimates are not exchange proof. Size, cooldowns, exits, reconciliation and the kill switch stay available in Execution settings.</small></div><div className="tara-exec-overview__actions"><button onClick={onOpenSettings}>EXECUTION SETTINGS</button></div>
     <details className="tara-v145-disclosure"><summary>Fill &amp; estimate evidence</summary><div>{order.dryRun&&<p>Local order is simulated only.</p>}<p>{realized?'Local gross exit estimate excludes fees; verify on Kalshi.':'No realized, verified exit profit.'}</p><p>{confirmedOpen?'Exchange position verified; local order mode may differ.':truth.state==='flat'&&fresh?'Exchange-checked flat state.':'Local state is not exchange proof.'}</p></div>
     </details>
     </section></div>
@@ -10472,7 +10472,7 @@ const TaraWorkspaceHeading=({view,analysis,qualityGate,newsSentiment,pendingKals
 };
 
 const TaraApprovedRail=({autoExecSettings,mission,killSwitchEngaged,setShowTradingSettings,movementRisk,userPosition,positionReconciliation,autoOrderState,manualKalshiEntry,activeTicker,taraScorecards,windowType,compact=false})=>{
-  const _auto=killSwitchEngaged?'KILLED · NEW ORDERS BLOCKED':autoExecSettings?.enabled?(autoExecSettings?.dryRun?'ARMED · DRY RUN':'LIVE ENTRY PAUSED'):'DISARMED · SAFE';
+  const _auto=killSwitchEngaged?'KILLED · NEW ORDERS BLOCKED':autoExecSettings?.enabled?(autoExecSettings?.dryRun?'ARMED · DRY RUN':'ARMED · LIVE'):'DISARMED · SAFE';
   const _autoTone=killSwitchEngaged||autoExecSettings?.enabled&&autoExecSettings?.dryRun===false?'bad':autoExecSettings?.enabled?'ok':'muted';
   const _bank=Number(mission?.currentBankroll||mission?.startBankroll||0);
   const _risk=Number(autoExecSettings?.maxBetUsd||autoExecSettings?.betAmount||0);
@@ -19827,7 +19827,7 @@ function computeAutoExecReadout(autoExecSettings,killSwitchEngaged){
   const dry=autoExecSettings?.dryRun!==false;
   const killed=!!killSwitchEngaged;
   const tone=killed||armed&&!dry?'#E8455E':'#D4A03A';
-  const word=killed?'Killed':!armed?'Calling only':dry?'Armed · dry':'Live entry paused';
+  const word=killed?'Killed':!armed?'Calling only':dry?'Armed · dry':'Armed · live';
   return{armed,dry,killed,tone,word};
 }
 
@@ -20530,7 +20530,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         const _line=_killed?"Stopped. The kill switch is on and nothing will be placed."
           :!_armed?"Calling only. Tara picks a side; you place the order."
           :_dry?"Armed, but practising. Orders are simulated, not sent to Kalshi."
-          :"Live entry paused. No new real orders will be sent; existing position exits remain available.";
+          :"Armed and live. Real orders are sent to Kalshi, within your daily limits.";
         const _chip=(text,tone)=>React.createElement("span",{
           key:text,
           className:"text-[11px] px-2.5 py-1 rounded-md border",
@@ -20538,10 +20538,10 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         },text);
         const _chips=[];
         _chips.push(_chip(_killed?"Killed":_armed?"Armed":"Disarmed",_killed?"#E8455E":_armed?"#23B981":"#D4A03A"));
-        if(_armed)_chips.push(_chip(_dry?"Practice":"Live entry paused",_dry?"#D4A03A":"#E8455E"));
+        if(_armed)_chips.push(_chip(_dry?"Practice":"Live",_dry?"#D4A03A":"#E8455E"));
         if(typeof NO_ENTRY_GATES!=="undefined"&&NO_ENTRY_GATES)_chips.push(_chip("No entry filter","#D4A03A"));
         if(typeof NO_SITOUT_MODE!=="undefined"&&NO_SITOUT_MODE)_chips.push(_chip("Never sits out","#D4A03A"));
-        _chips.push(_chip("No verified daily cap","#D4A03A"));
+        _chips.push(_chip("Daily cap checked against Kalshi","#D4A03A"));
         // one line on how it gets out, since that is the other half of behaviour
         // V13.4.292: this used to say "sells at 8c off its high..." whenever ANY
         //   fixed rule was set, even one that makes the trailing stop unreachable
@@ -20729,7 +20729,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           React.createElement('div',null,
             React.createElement('div',{className:'flex items-baseline gap-2'},
               React.createElement('div',{className:'text-[12px] font-bold tracking-[0.02em]',style:{color:T2_GOLD,textTransform:'none'}},'Kalshi Auto-Execution'),
-              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-lg',style:{color:T2_GOLD,border:`1px solid ${T2_GOLD}55`,background:`${T2_GOLD}14`}},'new live entries paused'),
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-lg',style:{color:T2_GOLD,border:`1px solid ${T2_GOLD}55`,background:`${T2_GOLD}14`}},'live when dry run is off'),
             ),
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 mt-0.5'},'localStorage only · never synced'),
           ),
@@ -20738,7 +20738,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             const _killed=!!killSwitchEngaged;
             const _on=!!autoExecSettings?.enabled&&!_killed;
             const _dry=!!autoExecSettings?.dryRun;
-            const _label=_killed?'KILLED':_on?(_dry?'ARMED · DRY-RUN':'LIVE ENTRY PAUSED'):'OFF';
+            const _label=_killed?'KILLED':_on?(_dry?'ARMED · DRY-RUN':'ARMED · LIVE'):'OFF';
             const _color=_killed||_on&&!_dry?'#E8455E':_on?'#D4A03A':'rgba(237,237,237,0.45)';
             return React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-lg',style:{color:_color,border:`1px solid ${_color}`,background:`${_color}15`}},_label);
           })(),
@@ -20747,7 +20747,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
         //   this with Tara's Advisor (scalper) below.
         React.createElement('p',{className:'text-[11px] text-[#EDEDED]/70 leading-relaxed mb-3'},
           React.createElement('strong',{style:{color:T2_GOLD}},'AutoTrade execution layer. '),
-          'When Tara locks UP or DOWN, the engine currently simulates the order. New live entries are paused until account risk and fills can be verified. Existing live positions still need monitoring and may be exited.',
+          'When Tara locks UP or DOWN, the engine places the order: simulated in dry run, real on Kalshi when dry run is off. Each real entry first reads your Kalshi account and is refused if your limits would be passed.',
         ),
         // ── V9.6.0: HOW-TO GUIDE ──────────────────────────────────────────
         // Collapsible step-by-step walkthrough. Closed by default to keep modal
@@ -20855,9 +20855,9 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
           return React.createElement('div',{className:'mb-3 p-3 rounded-lg',
             style:{background:'rgba(232,69,94,0.08)',border:'1px solid rgba(232,69,94,0.30)'}},
             React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:'#E8455E'}},
-              'LIVE ENTRY PAUSED · safety release'),
+              'LIVE · real orders on'),
             React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(255,255,255,0.66)'}},
-              'New real orders cannot be submitted. Existing positions may still be reconciled or exited. Daily loss and trades-per-day settings are not enforced against a verified account ledger yet; do not treat them as protection. Keep dry-run on while the read-only audit and shadow timing study collect evidence.'));
+              'Real orders are sent to Kalshi. Before each entry Tara reads your whole account, and refuses the order if that read is incomplete or your daily loss, trades-per-day or per-window limits would be passed. Turn dry run back on any time to go back to simulated orders.'));
         })(),
         // V13.4.227: READINESS. A professional does not arm an algo without
         //   knowing its measured edge and its error bars, so the number goes
@@ -20873,7 +20873,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             style:{background:r.verdict==='proven'?'rgba(35,185,129,0.06)':r.verdict==='losing'?'rgba(232,69,94,0.07)':'rgba(212,160,58,0.07)',
                    border:`1px solid ${r.verdict==='proven'?'rgba(35,185,129,0.28)':r.verdict==='losing'?'rgba(232,69,94,0.30)':'rgba(212,160,58,0.28)'}`}},
             React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold mb-1.5',style:{color:col}},
-              r.verdict==='proven'?'historical Call estimate positive · live still paused'
+              r.verdict==='proven'?'historical Call estimate positive · executable edge unverified'
               :r.verdict==='losing'?'measured edge is negative · do not arm'
               :'edge not established · arm in dry-run only'),
             React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(255,255,255,0.62)'}},
@@ -20886,7 +20886,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
               r.verdict==='unproven'
                 ? ` The range still spans zero, so nothing here proves an edge either way. Automating it does not make it profitable — it only makes it faster. Leave dry-run ON until the range clears zero.`
                 : r.verdict==='losing'
-                ? ` The whole Call-model range sits below zero. Keep this in simulation; live entries are paused.`
+                ? ` The whole Call-model range sits below zero. Keep this in simulation.`
                 : ` The Call-model range clears zero in this sample, but actual executable edge is not verified.`),
             r.needed>0&&React.createElement('div',{className:'text-[10px] mt-1.5',style:{color:'rgba(255,255,255,0.40)'}},
               `At the current spread of results it takes roughly ${r.needed} settled calls for the range to clear zero, if the average holds.`),
@@ -21275,7 +21275,7 @@ function TradingSettingsModal({taraCallLog,open,onClose,settings,setSettings,kal
             'Short-horizon kalshi cents advisor that reads tape + flow + book pressure for 30-90s entries. When conditions align, suggestions appear in the left column. You execute manually on Kalshi.',
           ),
           React.createElement('p',{className:'text-[10px] text-[#EDEDED]/45 leading-relaxed mt-2 italic'},
-            'Distinct from ',React.createElement('span',{style:{color:T2_GOLD}},'Kalshi Auto-Execution'),' above — that is the order engine, though new live entries are currently paused. Scalper is a separate advisory engine.',
+            'Distinct from ',React.createElement('span',{style:{color:T2_GOLD}},'Kalshi Auto-Execution'),' above — that is the order engine. Scalper is a separate advisory engine.',
           ),
         ),
         // MASTER ENABLE — prominent toggle
@@ -35127,7 +35127,7 @@ function TaraApp(){
     const creds=kalshiCreds||{};
     if(!creds.apiKeyId||!creds.privateKeyPem){
       setExchangeAudit({status:'unavailable',at:Date.now(),audit:null,errors:['Connect Kalshi to read account activity.']});
-      return;
+      return null;
     }
     setExchangeAudit(prev=>({...prev,status:'loading',errors:[]}));
     // Read-only, on demand, never synced to the public Call store. A cursor
@@ -35153,9 +35153,11 @@ function TaraApp(){
         complete:{orders:orders.ok,historicalOrders:historicalOrders.ok,fills:fills.ok,historicalFills:historicalFills.ok,settlements:settlements.ok,positions:positions.ok,balance:balance.ok}});
       const errors=[orders,fills,historicalFills,settlements,historicalOrders,positions,balance].filter(r=>!r.ok).map(r=>r.error||r.reason||'Account endpoint unavailable');
       setExchangeAudit({status:errors.length?'partial':'ready',at:Date.now(),audit,errors});
+      return audit;
     }catch(error){
       setExchangeAudit({status:'unavailable',at:Date.now(),audit:null,
         errors:[String(error?.message||error)]});
+      return null;
     }
   },[kalshiCreds]);
   // V10.2.10 — POSITION RECONCILIATION (Phase 2). Polls /portfolio/positions
@@ -43944,6 +43946,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // The walk aborts if the lock disappears, flips direction, or the kill
   // switch engages mid-rest, so a reversal cancels rather than fills into it.
   const _entryFiredForRef=useRef(null);
+  const _liveRiskReadRef=useRef({at:0,promise:null});
   const _entryBusyRef=useRef(false);
   // V13.4.309: bankroll-settlement ledger. Keyed by 'BTC|'+windowId. Written
   //   by _runEntry (fill) and _runExit (early exit) below; read by the
@@ -44152,11 +44155,28 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let intentId;
     try{intentId=await executionIntentId({account:dryRun?'simulation':creds.apiKeyId,asset:'BTC',windowId:_entryWindow});}
     catch{return blocked('execution-journal-unavailable',{dir,ticker});}
+    // V14.7.16: a live entry reads the Kalshi account right here. The budget
+    //   check refuses account risk older than 15s, and the audit used to refresh
+    //   only from the panel button, so live entries could never pass it. The
+    //   2s entry timer must not turn a refusal into a 7-endpoint read every
+    //   tick, so ticks share one read per 15s (Kalshi's limit also covers exits).
+    let _riskAudit=exchangeAudit.audit;
+    if(!dryRun){
+      const _read=_liveRiskReadRef.current;
+      if(!_read.promise||Date.now()-_read.at>=15000){_read.at=Date.now();_read.promise=refreshExchangeAudit();}
+      _riskAudit=await _read.promise;
+    }
+    if(!dryRun&&(_entryClose-Date.now())/1000<=callLockDeadline(windowType))return blocked('execution-cutoff',{dir,ticker});
     const reservation=await reserveExecutionIntent({storage:localStorage,id:intentId,windowId:_entryWindow,stake,dryRun,
       now:Date.now(),settings:{...s,cooldownUntil:autoExecCooldownUntil},
       withLock:typeof navigator!=='undefined'&&navigator.locks?(name,fn)=>navigator.locks.request('tara-execution:'+name,fn):null,
-      accountRisk:exchangeAudit.audit?.risk?{...exchangeAudit.audit.risk,windowTrades:exchangeAudit.audit.risk.tradesByTicker?.[ticker]||0}:null});
-    if(!reservation.ok)return blocked(reservation.reason,{dir,ticker});
+      accountRisk:_riskAudit?.risk?{..._riskAudit.risk,windowTrades:_riskAudit.risk.tradesByTicker?.[ticker]||0}:null});
+    if(!reservation.ok){
+      // A cap or cooldown refusal stands for the rest of this lock; retrying
+      //   it every tick would only re-read the account.
+      if(!dryRun&&['daily-trade-cap','window-trade-cap','daily-loss-and-exposure-cap','execution-cooldown','intent-already-recorded'].includes(reservation.reason))_entryFiredForRef.current=lockKey;
+      return blocked(reservation.reason,{dir,ticker});
+    }
 
     _entryFiredForRef.current=lockKey;
     _entryBusyRef.current=true;
@@ -44383,7 +44403,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }finally{
       _entryBusyRef.current=false;
     }
-  },[autoExecSettings,autoExecCooldownUntil,exchangeAudit,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,taraCallSnapshotRef,windowType,_resolveStakeDollars]);
+  },[autoExecSettings,autoExecCooldownUntil,exchangeAudit,refreshExchangeAudit,killSwitchEngaged,kalshiCreds,autoOrderState,lockedCallRef,taraCallSnapshotRef,windowType,_resolveStakeDollars]);
 
   // V9.17.18: MANUAL PLACE-ORDER on Tara's call. Tara's snapshot paths commit
   //   without writing lockedCallRef, so the automatic path can sit out; this
@@ -51036,7 +51056,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <span className="tara-brandmark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M16 1.5 18.8 13.2 30.5 16 18.8 18.8 16 30.5 13.2 18.8 1.5 16 13.2 13.2Z"/></svg></span>
             <div className="tara-brand-copy">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">TARA</h1>
-              <small>DECISION ENGINE · V14.7.15</small>
+              <small>DECISION ENGINE · V14.7.16</small>
             </div>
             {/* V13.4.299: was a green-filled, green-bordered chip with a pulsing
                 green dot. The build number is not an outcome, so under the
