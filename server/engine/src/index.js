@@ -90,12 +90,21 @@ export class TaraEngine extends DurableObject {
   }
 
   async alarm() {
+    if (this.env.ENGINE_MODE === 'paused') { await this.ctx.storage.deleteAlarm(); return; }
     await this.ctx.storage.setAlarm(Date.now() + ALARM_MS);
     await this.ensureRunning();
   }
 
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    // Paused (2026-11-16): the engine was crash-looping every ~30s on a 26 MB
+    // saved state and burning the free plan's daily Durable Object limit. No
+    // start, no storage reads, no alarm; the saved state stays for a restart.
+    if (this.env.ENGINE_MODE === 'paused') {
+      await this.ctx.storage.deleteAlarm();
+      return Response.json({version: VERSION, mode: 'paused',
+        reason: 'Paused 2026-11-16: restart loop on a 26 MB saved state used up the free daily Durable Object limit. Saved state is kept.'});
+    }
     try {
       await this.armAlarm();
       await this.ensureRunning();
@@ -116,6 +125,7 @@ const engine = (env) => env.ENGINE.get(env.ENGINE.idFromName('btc-15m'), {locati
 export default {
   // Watchdog: once a minute, make sure the engine is awake and its alarm is set.
   async scheduled(event, env, ctx) {
+    if (env.ENGINE_MODE === 'paused') return;
     ctx.waitUntil(engine(env).fetch('https://do/ensure'));
   },
   // Read-only status. Starts the engine if it is not running; changes nothing else.

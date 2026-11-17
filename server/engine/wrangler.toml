@@ -11,7 +11,9 @@ preview_urls = false
 # Watchdog: once a minute, wake the engine and re-arm its alarm if needed.
 # Free accounts get 5 cron triggers; tara-sports-refresh uses 1.
 [triggers]
-crons = ["* * * * *"]
+# Paused 2026-11-16: a restart loop used up the free daily Durable Object limit.
+# To resume: restore crons = ["* * * * *"] and set ENGINE_MODE = "shadow".
+crons = []
 
 [[durable_objects.bindings]]
 name = "ENGINE"
@@ -23,11 +25,12 @@ tag = "v1"
 new_sqlite_classes = ["TaraEngine"]
 
 # Public values: the same URL and anon key ship in tara-app's src/App.jsx.
-# ENGINE_MODE must stay "shadow": the engine refuses to start otherwise.
+# ENGINE_MODE is "shadow" (running) or "paused" (no start, no alarm, state kept).
+# Live mode is not built; any other value refuses to start.
 [vars]
 SUPABASE_URL = "https://vhbbkqmyyzddhezdgszm.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM"
-ENGINE_MODE = "shadow"
+ENGINE_MODE = "paused"
 
 [observability]
 enabled = true
