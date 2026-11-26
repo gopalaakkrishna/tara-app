@@ -14,7 +14,7 @@
     "src/hourlyDecision.js": "1a5f239841ec228dca65801d2bebcefa680b5d2fc5d845473154c416c5cda11f",
     "src/hourlyAdmission.js": "7c23f073773c27b11508dddf5ddb825043595d42ecbdc7571d2e1e186365d79a",
     "src/hourlyPublic.js": "322b99ba7e9b9f4e58c9e666b00fa4164d5d1ca56751ee89ebd198d446c4d06d",
-    "src/apiBase.js": "94d260bd781c8d2e711aa6b65d0d5a7d981c77ebf3201b7d8b48d9be522eb740",
+    "src/apiBase.js": "ffad304a203238e2fae98d675f86542525d1c665a91c84ee7ac98fc01e68edf3",
     "src/callLogSync.js": "8523d40d3520937034d77d2caa0a3cf0edf946be204a43ffd9526bdafdb98a95",
     "src/cloudWriteRecovery.js": "8416da047d06e779966dfad5eeeeebd420010b0b96433f8f20ec4a95015335bb",
     "src/cloudSyncHealth.js": "a822101a6da98310d35581f5cdd614234ea6e99a380b7ec089595d3dfe95d46e",

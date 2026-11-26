@@ -14,8 +14,16 @@
 //
 // Configuration, first match wins:
 //   1. localStorage 'taraApiBase'   runtime override, handy for testing a host
-//   2. VITE_API_BASE at build time  set as a GitHub Actions repository variable
-//   3. nothing                      shim stays off; relative paths are untouched
+//   2. nothing                      shim stays off; relative paths are untouched
+//
+// The build-time VITE_API_BASE is no longer read here. Tara is served from
+// Cloudflare Pages, whose own Functions answer /api/kalshi, /api/kalshi-public,
+// /api/okx, /api/bybit, /api/news, /api/liq and /api/deribit. The Cloudflare
+// build still had VITE_API_BASE set to the Render proxy from the GitHub Pages
+// days, so every /api call went to Render. When that service was suspended
+// (seen 2026-11-26), every Kalshi read failed and the site lost its strike
+// from at least 2026-11-17. Signed Kalshi calls are routed separately
+// (kalshiAuthedFetch: Railway first).
 //
 // Only same-origin URLs whose path starts with /api/ are rewritten. Absolute
 // URLs, WebSockets and everything else pass through unchanged.
@@ -28,9 +36,7 @@ const readStorage = () => {
   }
 };
 
-const fromBuild = (import.meta.env.VITE_API_BASE || '').trim();
-
-export const API_BASE = (readStorage() || fromBuild).replace(/\/+$/, '');
+export const API_BASE = readStorage().replace(/\/+$/, '');
 
 const shouldRewrite = (url) =>
   url.origin === window.location.origin && url.pathname.startsWith('/api/') &&
